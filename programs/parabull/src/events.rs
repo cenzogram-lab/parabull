@@ -193,6 +193,15 @@ pub struct RewardEpochPublished {
     pub total_lamports: u64,
     pub num_leaves: u32,
     pub snapshot_slot: u64,
+    pub expires_at: i64,
+}
+
+#[event]
+pub struct EpochExpired {
+    pub epoch_index: u64,
+    /// Unclaimed lamports released back to the vault's available balance.
+    pub reclaimed_lamports: u64,
+    pub expired_by: Pubkey,
 }
 
 #[event]

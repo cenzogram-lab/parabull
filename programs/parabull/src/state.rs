@@ -73,7 +73,9 @@ pub struct Global {
     /// Raydium CPMM WSOL/$PARABULL pool used by `buyback_and_burn`
     /// (`Pubkey::default()` until the pool exists).
     pub parabull_pool: Pubkey,
-    pub _reserved: [u8; 32],
+    /// Claim window copied into each reward epoch at publish time.
+    pub reward_claim_window_seconds: i64,
+    pub _reserved: [u8; 24],
 }
 
 /// Admin-settable parameters, validated as a unit.
@@ -103,6 +105,7 @@ pub struct GlobalParams {
     pub migration_reserve_lamports: u64,
     /// May be default at initialize; required only by `buyback_and_burn`.
     pub parabull_pool: Pubkey,
+    pub reward_claim_window_seconds: i64,
 }
 
 impl GlobalParams {
@@ -132,6 +135,7 @@ impl GlobalParams {
         require!(self.ticket_ttl_seconds > 0, ParabullError::InvalidDuration);
         require!(self.registry_lock_seconds >= 0, ParabullError::InvalidDuration);
         require!(self.migration_reserve_lamports > 0, ParabullError::InvalidMigrationParams);
+        require!(self.reward_claim_window_seconds >= MIN_REWARD_CLAIM_WINDOW_SECONDS, ParabullError::InvalidDuration);
         require!(
             self.initial_virtual_sol_reserves > 0
                 && self.initial_real_token_reserves > 0
@@ -158,6 +162,7 @@ pub struct GlobalUpdate {
     pub lp_lock_authority: Option<Pubkey>,
     pub parabull_mint: Option<Pubkey>,
     pub parabull_pool: Option<Pubkey>,
+    pub reward_claim_window_seconds: Option<i64>,
 }
 
 impl Global {
@@ -186,6 +191,7 @@ impl Global {
             lp_lock_authority: self.lp_lock_authority,
             migration_reserve_lamports: self.migration_reserve_lamports,
             parabull_pool: self.parabull_pool,
+            reward_claim_window_seconds: self.reward_claim_window_seconds,
         }
     }
 
@@ -203,6 +209,7 @@ impl Global {
         if let Some(v) = u.lp_lock_authority { p.lp_lock_authority = v; }
         if let Some(v) = u.parabull_mint { p.parabull_mint = v; }
         if let Some(v) = u.parabull_pool { p.parabull_pool = v; }
+        if let Some(v) = u.reward_claim_window_seconds { p.reward_claim_window_seconds = v; }
         let target_updated_at = if u.dex_target_lamports.is_some() { now } else { self.dex_target_updated_at };
         self.apply_params(&p, now)?;
         self.dex_target_updated_at = target_updated_at;
@@ -235,6 +242,7 @@ impl Global {
         self.lp_lock_authority = p.lp_lock_authority;
         self.migration_reserve_lamports = p.migration_reserve_lamports;
         self.parabull_pool = p.parabull_pool;
+        self.reward_claim_window_seconds = p.reward_claim_window_seconds;
         Ok(())
     }
 }
@@ -598,7 +606,9 @@ pub struct HolderRewardVault {
     pub total_claimed_lamports: u64,
     /// Next epoch index to publish.
     pub next_epoch: u64,
-    pub _reserved: [u8; 64],
+    /// Unclaimed lamports released by `expire_reward_epoch`.
+    pub total_expired_lamports: u64,
+    pub _reserved: [u8; 56],
 }
 
 impl HolderRewardVault {
@@ -625,12 +635,16 @@ pub struct RewardEpoch {
     pub num_leaves: u32,
     pub claimed_count: u32,
     pub published_at: i64,
+    /// `published_at + Global.reward_claim_window_seconds` at publish time.
+    pub expires_at: i64,
+    /// Set by `expire_reward_epoch`; no claims afterwards.
+    pub expired: bool,
     /// Bit `i` set once leaf `i` has been paid.
     pub claimed_bitmap: Vec<u8>,
 }
 
 impl RewardEpoch {
-    const FIXED: usize = 1 + 8 + 32 + 8 + 8 + 8 + 4 + 4 + 8;
+    const FIXED: usize = 1 + 8 + 32 + 8 + 8 + 8 + 4 + 4 + 8 + 8 + 1;
 
     pub fn bitmap_len(num_leaves: u32) -> usize {
         (num_leaves as usize).div_ceil(8)
@@ -647,6 +661,7 @@ impl RewardEpoch {
 
     /// Mark leaf `index` paid. Fails if out of range or already claimed.
     pub fn mark_claimed(&mut self, index: u32, amount: u64) -> Result<()> {
+        require!(!self.expired, ParabullError::RewardEpochExpired);
         require!(index < self.num_leaves, ParabullError::InvalidMerkleProof);
         require!(!self.is_claimed(index), ParabullError::RewardAlreadyClaimed);
         let claimed = self.claimed_lamports.checked_add(amount).ok_or(ParabullError::Overflow)?;
@@ -658,11 +673,25 @@ impl RewardEpoch {
     }
 }
 
+impl RewardEpoch {
+    /// Close the epoch once its claim window has passed (strictly after
+    /// `expires_at`). Returns the unclaimed lamports to release. Claims stay
+    /// possible until this runs, even past the deadline.
+    pub fn expire(&mut self, now: i64) -> Result<u64> {
+        require!(!self.expired, ParabullError::RewardEpochExpired);
+        require!(now > self.expires_at, ParabullError::RewardEpochNotExpired);
+        let unclaimed = self.total_lamports.checked_sub(self.claimed_lamports).ok_or(ParabullError::Overflow)?;
+        self.expired = true;
+        Ok(unclaimed)
+    }
+}
+
 impl HolderRewardVault {
-    /// Committed to published epochs but not yet claimed.
+    /// Committed to published epochs, not yet claimed, not expired.
     pub fn outstanding(&self) -> Result<u64> {
         self.total_committed_lamports
             .checked_sub(self.total_claimed_lamports)
+            .and_then(|v| v.checked_sub(self.total_expired_lamports))
             .ok_or_else(|| error!(ParabullError::Overflow))
     }
 }
@@ -717,7 +746,8 @@ pub(crate) mod fixtures {
             migration_reserve_lamports: DEFAULT_MIGRATION_RESERVE_LAMPORTS,
             pending_admin: Pubkey::default(),
             parabull_pool: Pubkey::default(),
-            _reserved: [0; 32],
+            reward_claim_window_seconds: DEFAULT_REWARD_CLAIM_WINDOW_SECONDS,
+            _reserved: [0; 24],
         }
     }
 
@@ -785,6 +815,7 @@ mod tests {
             lp_lock_authority: g.lp_lock_authority,
             migration_reserve_lamports: g.migration_reserve_lamports,
             parabull_pool: g.parabull_pool,
+            reward_claim_window_seconds: g.reward_claim_window_seconds,
         }
     }
 
@@ -940,6 +971,8 @@ mod tests {
             num_leaves,
             claimed_count: 0,
             published_at: 0,
+            expires_at: 1_000,
+            expired: false,
             claimed_bitmap: vec![0; RewardEpoch::bitmap_len(num_leaves)],
         }
     }
@@ -955,6 +988,42 @@ mod tests {
         assert!(e.mark_claimed(5, 701).is_err(), "over the epoch total");
         e.mark_claimed(5, 700).unwrap();
         assert_eq!((e.claimed_lamports, e.claimed_count), (1_000, 3));
+    }
+
+    #[test]
+    fn epoch_expiry_rules() {
+        let mut e = epoch(4, 1_000); // expires_at = 1_000
+        e.mark_claimed(0, 300).unwrap();
+        assert_eq!(e.expire(1_000).unwrap_err().to_string().contains("RewardEpochNotExpired"), true, "not at the deadline itself");
+        // Late claims are still honoured until someone actually expires it.
+        e.mark_claimed(1, 200).unwrap();
+        assert_eq!(e.expire(1_001).unwrap(), 500, "unclaimed = total - claimed");
+        assert!(e.expired);
+        assert!(e.expire(2_000).is_err(), "only once");
+        assert!(e.mark_claimed(2, 1).is_err(), "no claims after expiry");
+    }
+
+    #[test]
+    fn expired_lamports_leave_outstanding() {
+        let v = HolderRewardVault {
+            bump: 0,
+            total_deposited_lamports: 0,
+            total_committed_lamports: 1_000,
+            total_claimed_lamports: 300,
+            next_epoch: 1,
+            total_expired_lamports: 500,
+            _reserved: [0; 56],
+        };
+        assert_eq!(v.outstanding().unwrap(), 200);
+    }
+
+    #[test]
+    fn claim_window_has_a_floor() {
+        let mut p = params(&global());
+        p.reward_claim_window_seconds = MIN_REWARD_CLAIM_WINDOW_SECONDS - 1;
+        assert!(p.validate().is_err());
+        p.reward_claim_window_seconds = MIN_REWARD_CLAIM_WINDOW_SECONDS;
+        p.validate().unwrap();
     }
 
     #[test]
@@ -983,9 +1052,9 @@ mod tests {
         assert_eq!(8 + BuybackVault::INIT_SPACE, 113);
         assert_eq!(8 + HolderRewardVault::INIT_SPACE, 105);
         // Variable size: fixed header + Vec length prefix + 1 bit per leaf.
-        assert_eq!(RewardEpoch::space(1), 8 + 81 + 4 + 1);
-        assert_eq!(RewardEpoch::space(8), 8 + 81 + 4 + 1);
-        assert_eq!(RewardEpoch::space(9), 8 + 81 + 4 + 2);
+        assert_eq!(RewardEpoch::space(1), 8 + 90 + 4 + 1);
+        assert_eq!(RewardEpoch::space(8), 8 + 90 + 4 + 1);
+        assert_eq!(RewardEpoch::space(9), 8 + 90 + 4 + 2);
         assert!(RewardEpoch::space(MAX_REWARD_LEAVES) <= 10_240, "must be creatable by CPI");
     }
 }

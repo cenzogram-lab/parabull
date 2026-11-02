@@ -138,6 +138,12 @@ pub mod parabull {
         instructions::rewards::claim_handler(ctx, epoch, index, amount, proof)
     }
 
+    /// Crank or admin: after an epoch's claim window, stop its claims and
+    /// release its unclaimed reservation back to the holder vault.
+    pub fn expire_reward_epoch(ctx: Context<ExpireRewardEpoch>, epoch_index: u64) -> Result<()> {
+        instructions::rewards::expire_handler(ctx, epoch_index)
+    }
+
     /// Crank: harvest post-graduation LP fees via the fee-key NFT and route the
     /// SOL (escrow first, then buyback / holder vaults / treasury).
     pub fn collect_lp_fees(ctx: Context<CollectLpFees>, fee_lp_amount: u64) -> Result<()> {

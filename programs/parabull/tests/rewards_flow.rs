@@ -7,6 +7,7 @@ use common::*;
 use parabull::merkle::{leaf_hash, MerkleTree};
 use parabull::state::{HolderRewardVault, RewardEpoch};
 
+
 struct Snapshot {
     holders: Vec<(Keypair, u64)>,
     tree: MerkleTree,
@@ -140,4 +141,84 @@ async fn epochs_must_be_funded_and_vault_stays_rent_exempt() {
     let stranger = env.funded_user().await;
     let ix = env.publish_epoch_ix(&stranger.pubkey(), [9; 32], 1, 1).await;
     assert_custom(env.send(&[ix], &[&stranger]).await, ParabullError::Unauthorized);
+}
+
+#[tokio::test]
+async fn expiry_releases_unclaimed_rewards_for_future_epochs() {
+    let mut env = Env::new().await;
+    let rent = env.rent_exempt(8 + HolderRewardVault::INIT_SPACE).await;
+    env.fund_account(&vault(), SOL).await;
+    let crank = env.crank.insecure_clone();
+    let admin = env.admin.insecure_clone();
+
+    // Epoch 0 commits the whole spendable balance; one of three holders claims.
+    let snap = snapshot(&mut env, &[300_000_000, 300_000_000, 400_000_000]).await;
+    assert_eq!(snap.total(), SOL);
+    let ix = env.publish_epoch_ix(&crank.pubkey(), snap.tree.root(), snap.total(), 3).await;
+    env.send(&[ix], &[&crank]).await.unwrap();
+    let e: RewardEpoch = env.anchor(&Env::reward_epoch_pda(0)).await;
+    assert_eq!(e.expires_at, e.published_at + DEFAULT_REWARD_CLAIM_WINDOW_SECONDS);
+    let h0 = snap.holders[0].0.pubkey();
+    env.send(&[env.claim_ix(0, &h0, 0, 300_000_000, snap.proof(0))], &[]).await.unwrap();
+
+    // Nothing left to commit while epoch 0's reservation stands.
+    let next = snapshot(&mut env, &[100_000_000]).await;
+    let ix = env.publish_epoch_ix(&crank.pubkey(), next.tree.root(), next.total(), 1).await;
+    assert_custom(env.send(&[ix], &[&crank]).await, ParabullError::InsufficientRewardFunds);
+
+    // Too early: at the deadline exactly is still "not expired".
+    env.advance(DEFAULT_REWARD_CLAIM_WINDOW_SECONDS).await;
+    assert_custom(env.send(&[env.expire_epoch_ix(&crank.pubkey(), 0)], &[&crank]).await, ParabullError::RewardEpochNotExpired);
+
+    // Past the deadline, before anyone expires it, late claims are still honoured.
+    env.advance(1).await;
+    let h1 = snap.holders[1].0.pubkey();
+    env.send(&[env.claim_ix(0, &h1, 1, 300_000_000, snap.proof(1))], &[]).await.unwrap();
+
+    // Only crank or admin may expire.
+    let stranger = env.funded_user().await;
+    assert_custom(env.send(&[env.expire_epoch_ix(&stranger.pubkey(), 0)], &[&stranger]).await, ParabullError::Unauthorized);
+
+    let vault_lamports = env.lamports(&vault()).await;
+    env.send(&[env.expire_epoch_ix(&admin.pubkey(), 0)], &[&admin]).await.unwrap();
+    assert_eq!(env.lamports(&vault()).await, vault_lamports, "expiry moves no lamports, only the reservation");
+    let e: RewardEpoch = env.anchor(&Env::reward_epoch_pda(0)).await;
+    assert!(e.expired);
+    let v: HolderRewardVault = env.anchor(&vault()).await;
+    assert_eq!(v.total_expired_lamports, 400_000_000);
+    assert_eq!(v.outstanding().unwrap(), 0);
+
+    // Holder 2 missed the window.
+    let h2 = snap.holders[2].0.pubkey();
+    assert_custom(env.send(&[env.claim_ix(0, &h2, 2, 400_000_000, snap.proof(2))], &[]).await, ParabullError::RewardEpochExpired);
+    // Expiring twice is refused (crank this time).
+    assert_custom(env.send(&[env.expire_epoch_ix(&crank.pubkey(), 0)], &[&crank]).await, ParabullError::RewardEpochExpired);
+
+    // The released 0.4 SOL funds the next epoch, which pays out normally.
+    let next = snapshot(&mut env, &[400_000_000]).await;
+    let ix = env.publish_epoch_ix(&crank.pubkey(), next.tree.root(), next.total(), 1).await;
+    env.send(&[ix], &[&crank]).await.unwrap();
+    let n0 = next.holders[0].0.pubkey();
+    env.send(&[env.claim_ix(1, &n0, 0, 400_000_000, next.proof(0))], &[]).await.unwrap();
+    assert_eq!(env.lamports(&vault()).await, rent, "vault fully paid out, still rent-exempt");
+}
+
+#[tokio::test]
+async fn admin_can_lengthen_window_but_not_below_floor() {
+    let mut env = Env::new().await;
+    let admin = env.admin.insecure_clone();
+    let too_short = parabull::state::GlobalUpdate { reward_claim_window_seconds: Some(MIN_REWARD_CLAIM_WINDOW_SECONDS - 1), ..Default::default() };
+    let ix = env.update_params_ix(&admin.pubkey(), too_short);
+    assert_custom(env.send(&[ix], &[&admin]).await, ParabullError::InvalidDuration);
+
+    let longer = parabull::state::GlobalUpdate { reward_claim_window_seconds: Some(90 * 24 * 60 * 60), ..Default::default() };
+    let ix = env.update_params_ix(&admin.pubkey(), longer);
+    env.send(&[ix], &[&admin]).await.unwrap();
+    env.fund_account(&vault(), SOL).await;
+    let snap = snapshot(&mut env, &[SOL / 2]).await;
+    let crank = env.crank.insecure_clone();
+    let ix = env.publish_epoch_ix(&crank.pubkey(), snap.tree.root(), snap.total(), 1).await;
+    env.send(&[ix], &[&crank]).await.unwrap();
+    let e: RewardEpoch = env.anchor(&Env::reward_epoch_pda(0)).await;
+    assert_eq!(e.expires_at - e.published_at, 90 * 24 * 60 * 60);
 }

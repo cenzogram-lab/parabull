@@ -104,7 +104,8 @@ impl Env {
             migration_reserve_lamports: DEFAULT_MIGRATION_RESERVE_LAMPORTS,
             pending_admin: Pubkey::default(),
             parabull_pool: Pubkey::default(),
-            _reserved: [0; 32],
+            reward_claim_window_seconds: DEFAULT_REWARD_CLAIM_WINDOW_SECONDS,
+            _reserved: [0; 24],
         };
         let mut global = global;
         tweak(&mut global);
@@ -355,7 +356,7 @@ fn add_flywheel_vaults(pt: &mut ProgramTest) {
     let (bv, bv_bump) = Pubkey::find_program_address(&[SEED_BUYBACK_VAULT], &parabull::ID);
     let (hv, hv_bump) = Pubkey::find_program_address(&[SEED_HOLDER_VAULT], &parabull::ID);
     let b = BuybackVault { bump: bv_bump, total_deposited_lamports: 0, total_spent_lamports: 0, total_tokens_burned: 0, buyback_count: 0, last_buyback_at: 0, _reserved: [0; 64] };
-    let h = HolderRewardVault { bump: hv_bump, total_deposited_lamports: 0, total_committed_lamports: 0, total_claimed_lamports: 0, next_epoch: 0, _reserved: [0; 64] };
+    let h = HolderRewardVault { bump: hv_bump, total_deposited_lamports: 0, total_committed_lamports: 0, total_claimed_lamports: 0, next_epoch: 0, total_expired_lamports: 0, _reserved: [0; 56] };
     let rent = solana_sdk::rent::Rent::default();
     for (key, data) in [(bv, anchor_bytes(&b, 8 + BuybackVault::INIT_SPACE)), (hv, anchor_bytes(&h, 8 + HolderRewardVault::INIT_SPACE))] {
         pt.add_account(key, Account { lamports: rent.minimum_balance(data.len()), data, owner: parabull::ID, executable: false, rent_epoch: 0 });
@@ -836,5 +837,21 @@ impl Env {
     pub async fn mint_supply(&mut self, mint: &Pubkey) -> u64 {
         let acc = self.account(mint).await.unwrap();
         StateWithExtensions::<SplMint>::unpack(&acc.data).unwrap().base.supply
+    }
+}
+
+impl Env {
+    pub fn expire_epoch_ix(&self, authority: &Pubkey, epoch_index: u64) -> Instruction {
+        Instruction {
+            program_id: parabull::ID,
+            accounts: parabull::accounts::ExpireRewardEpoch {
+                authority: *authority,
+                global: global_pda(),
+                holder_vault: pda(&[SEED_HOLDER_VAULT]),
+                reward_epoch: Self::reward_epoch_pda(epoch_index),
+            }
+            .to_account_metas(None),
+            data: parabull::instruction::ExpireRewardEpoch { epoch_index }.data(),
+        }
     }
 }

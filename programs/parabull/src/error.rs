@@ -94,4 +94,8 @@ pub enum ParabullError {
     RewardAlreadyClaimed,
     #[msg("Claim exceeds the epoch's remaining total")]
     RewardEpochExhausted,
+    #[msg("Reward epoch has expired")]
+    RewardEpochExpired,
+    #[msg("Reward epoch claim window has not ended")]
+    RewardEpochNotExpired,
 }

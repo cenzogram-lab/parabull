@@ -38,6 +38,8 @@ pub const MAX_MIGRATION_PRICE_DISCOUNT_BPS: u64 = 500;
 /// Max leaves per holder-reward epoch: the claimed-bitmap must fit in a
 /// 10 KiB account created by CPI. Larger snapshots span several epochs.
 pub const MAX_REWARD_LEAVES: u32 = 80_000;
+/// Holders always get at least this long to claim before an epoch can expire.
+pub const MIN_REWARD_CLAIM_WINDOW_SECONDS: i64 = 7 * 24 * 60 * 60;
 
 // ---- Defaults (used by deploy scripts and tests) ---------------------------
 pub const DEFAULT_PLATFORM_FEE_BPS: u16 = 100;
@@ -55,3 +57,4 @@ pub const DEFAULT_TOKEN_TOTAL_SUPPLY: u64 = 1_000_000_000_000_000;
 /// fee (0.15 SOL on mainnet AmmConfig 0) plus rent for the pool and lock
 /// accounts. Unspent lamports go to the treasury after the LP is locked.
 pub const DEFAULT_MIGRATION_RESERVE_LAMPORTS: u64 = 250_000_000;
+pub const DEFAULT_REWARD_CLAIM_WINDOW_SECONDS: i64 = 30 * 24 * 60 * 60;
