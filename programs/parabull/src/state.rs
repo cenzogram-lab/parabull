@@ -58,7 +58,17 @@ pub struct Global {
     pub token_total_supply: u64,
 
     pub launch_count: u64,
-    pub _reserved: [u8; 128],
+
+    /// Raydium CPMM program (mainnet `CPMMoo8L…`), configurable per cluster.
+    pub cpmm_program: Pubkey,
+    /// CPMM `AmmConfig` (fee tier) new pools are created under.
+    pub cpmm_amm_config: Pubkey,
+    /// Raydium Burn & Earn LP-lock program and its authority.
+    pub lp_lock_program: Pubkey,
+    pub lp_lock_authority: Pubkey,
+    /// SOL held back from the pool to pay Raydium fees and rent.
+    pub migration_reserve_lamports: u64,
+    pub _reserved: [u8; 64],
 }
 
 /// Admin-settable parameters, validated as a unit.
@@ -81,11 +91,25 @@ pub struct GlobalParams {
     pub initial_virtual_sol_reserves: u64,
     pub initial_real_token_reserves: u64,
     pub token_total_supply: u64,
+    pub cpmm_program: Pubkey,
+    pub cpmm_amm_config: Pubkey,
+    pub lp_lock_program: Pubkey,
+    pub lp_lock_authority: Pubkey,
+    pub migration_reserve_lamports: u64,
 }
 
 impl GlobalParams {
     pub fn validate(&self) -> Result<()> {
-        for key in [&self.launch_authority, &self.crank_authority, &self.treasury, &self.parabull_mint] {
+        for key in [
+            &self.launch_authority,
+            &self.crank_authority,
+            &self.treasury,
+            &self.parabull_mint,
+            &self.cpmm_program,
+            &self.cpmm_amm_config,
+            &self.lp_lock_program,
+            &self.lp_lock_authority,
+        ] {
             require_keys_neq!(*key, Pubkey::default(), ParabullError::InvalidAuthority);
         }
         require!(self.platform_fee_bps <= MAX_PLATFORM_FEE_BPS, ParabullError::PlatformFeeTooHigh);
@@ -100,6 +124,7 @@ impl GlobalParams {
         require!(self.ticket_deposit_lamports >= min_deposit, ParabullError::TicketDepositTooLow);
         require!(self.ticket_ttl_seconds > 0, ParabullError::InvalidDuration);
         require!(self.registry_lock_seconds >= 0, ParabullError::InvalidDuration);
+        require!(self.migration_reserve_lamports > 0, ParabullError::InvalidMigrationParams);
         require!(
             self.initial_virtual_sol_reserves > 0
                 && self.initial_real_token_reserves > 0
@@ -132,6 +157,11 @@ impl Global {
         self.initial_virtual_sol_reserves = p.initial_virtual_sol_reserves;
         self.initial_real_token_reserves = p.initial_real_token_reserves;
         self.token_total_supply = p.token_total_supply;
+        self.cpmm_program = p.cpmm_program;
+        self.cpmm_amm_config = p.cpmm_amm_config;
+        self.lp_lock_program = p.lp_lock_program;
+        self.lp_lock_authority = p.lp_lock_authority;
+        self.migration_reserve_lamports = p.migration_reserve_lamports;
         Ok(())
     }
 }
@@ -176,10 +206,44 @@ pub struct BondingCurve {
     pub holder_accrued: u64,
     pub treasury_accrued: u64,
 
-    pub _reserved: [u8; 64],
+    /// `MigrationStage` as u8.
+    pub migration_stage: u8,
+    /// Amounts moved to the migration authority by `prepare_migration`.
+    pub migration_sol: u64,
+    pub migration_tokens: u64,
+    /// Raydium CPMM pool created by `migrate_raydium`.
+    pub raydium_pool: Pubkey,
+    /// Burn & Earn fee-key NFT mint created by `lock_migrated_lp`.
+    pub fee_nft_mint: Pubkey,
+
+    pub _reserved: [u8; 32],
+}
+
+/// Graduation progress. Each step is a separate instruction (CPMM init and the
+/// LP lock do not fit in one transaction).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum MigrationStage {
+    /// Trading on the curve (or complete, awaiting migration).
+    None = 0,
+    /// Tokens + SOL moved to the migration authority PDA.
+    Prepared = 1,
+    /// Raydium CPMM pool created; LP tokens held by the migration authority.
+    PoolCreated = 2,
+    /// LP locked in Burn & Earn; fee-key NFT held by the fee-key vault.
+    LpLocked = 3,
 }
 
 impl BondingCurve {
+    pub fn stage(&self) -> MigrationStage {
+        match self.migration_stage {
+            1 => MigrationStage::Prepared,
+            2 => MigrationStage::PoolCreated,
+            3 => MigrationStage::LpLocked,
+            _ => MigrationStage::None,
+        }
+    }
+
     pub fn reserves(&self) -> Reserves {
         Reserves {
             virtual_token: self.virtual_token_reserves,
@@ -216,6 +280,11 @@ impl BondingCurve {
         self.buyback_accrued = 0;
         self.holder_accrued = 0;
         self.treasury_accrued = 0;
+        self.migration_stage = MigrationStage::None as u8;
+        self.migration_sol = 0;
+        self.migration_tokens = 0;
+        self.raydium_pool = Pubkey::default();
+        self.fee_nft_mint = Pubkey::default();
         Ok(())
     }
 
@@ -506,7 +575,12 @@ pub(crate) mod fixtures {
             initial_real_token_reserves: DEFAULT_INITIAL_REAL_TOKEN_RESERVES,
             token_total_supply: DEFAULT_TOKEN_TOTAL_SUPPLY,
             launch_count: 0,
-            _reserved: [0; 128],
+            cpmm_program: crate::raydium::CPMM_PROGRAM_MAINNET,
+            cpmm_amm_config: Pubkey::new_unique(),
+            lp_lock_program: crate::raydium::LP_LOCK_PROGRAM_MAINNET,
+            lp_lock_authority: crate::raydium::LP_LOCK_AUTHORITY_MAINNET,
+            migration_reserve_lamports: DEFAULT_MIGRATION_RESERVE_LAMPORTS,
+            _reserved: [0; 64],
         }
     }
 
@@ -530,7 +604,12 @@ pub(crate) mod fixtures {
             buyback_accrued: 0,
             holder_accrued: 0,
             treasury_accrued: 0,
-            _reserved: [0; 64],
+            migration_stage: 0,
+            migration_sol: 0,
+            migration_tokens: 0,
+            raydium_pool: Pubkey::default(),
+            fee_nft_mint: Pubkey::default(),
+            _reserved: [0; 32],
         };
         c.init(254, Pubkey::new_unique(), Pubkey::new_unique(), g, 1_000, 1_700_000_000).unwrap();
         c
@@ -561,6 +640,11 @@ mod tests {
             initial_virtual_sol_reserves: g.initial_virtual_sol_reserves,
             initial_real_token_reserves: g.initial_real_token_reserves,
             token_total_supply: g.token_total_supply,
+            cpmm_program: g.cpmm_program,
+            cpmm_amm_config: g.cpmm_amm_config,
+            lp_lock_program: g.lp_lock_program,
+            lp_lock_authority: g.lp_lock_authority,
+            migration_reserve_lamports: g.migration_reserve_lamports,
         }
     }
 
@@ -676,8 +760,8 @@ mod tests {
     #[test]
     fn account_sizes_fit_and_are_stable() {
         // 8-byte discriminator + INIT_SPACE. Pinned so layout changes are deliberate.
-        assert_eq!(8 + Global::INIT_SPACE, 400);
-        assert_eq!(8 + BondingCurve::INIT_SPACE, 236);
+        assert_eq!(8 + Global::INIT_SPACE, 472);
+        assert_eq!(8 + BondingCurve::INIT_SPACE, 285);
         assert_eq!(8 + LaunchTicket::INIT_SPACE, 180);
         assert_eq!(8 + TickerRegistry::INIT_SPACE, 60);
         assert_eq!(8 + NameRegistry::INIT_SPACE, 81);

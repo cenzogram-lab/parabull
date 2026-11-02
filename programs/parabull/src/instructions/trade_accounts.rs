@@ -4,11 +4,10 @@ use anchor_spl::token_2022::Token2022;
 use anchor_spl::token_interface::{transfer_checked, Mint, TokenAccount, TransferChecked};
 
 use crate::constants::*;
-use crate::error::ParabullError;
 use crate::events::{GraduationReady, TradeEvent};
 use crate::math::FeeSplit;
 use crate::state::{BondingCurve, Global};
-use crate::trade::required_curve_lamports;
+use crate::trade::assert_curve_backed;
 
 /// Shared by `buy` and `sell`. The curve PDA is derived from `mint`, so a
 /// mismatched mint/curve pair cannot be passed.
@@ -93,13 +92,7 @@ impl<'info> Trade<'info> {
 
     /// Fail closed if the curve's lamports no longer back its reserves + buckets.
     pub fn assert_lamport_invariant(&self) -> Result<()> {
-        let info = self.bonding_curve.to_account_info();
-        let rent = Rent::get()?.minimum_balance(info.data_len());
-        require!(
-            info.lamports() >= required_curve_lamports(&self.bonding_curve, rent)?,
-            ParabullError::LamportInvariantViolated
-        );
-        Ok(())
+        assert_curve_backed(&self.bonding_curve)
     }
 
     pub fn emit_trade(&self, is_buy: bool, token_amount: u64, sol_amount: u64, fee: u64, split: FeeSplit, clock: &Clock) {

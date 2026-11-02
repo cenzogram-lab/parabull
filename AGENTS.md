@@ -45,13 +45,40 @@ reading only.
   3. $PARABULL holder rewards (`holder_bps`), paid out per epoch from a
      Merkle root (`RewardEpoch`).
   Whatever is left over goes to the treasury.
-  If a token graduates or goes inactive before its escrow reaches the
-  target, the unreleased `escrow_accrued` goes to `BuybackVault`, never to
-  the treasury.
+  **The escrow stays open after graduation.** Graduation never touches or
+  redirects `escrow_accrued`. Anyone can add to it with
+  `top_up_dex_escrow` (for example from collected Raydium LP fees), capped at
+  the target. Once it's funded, `release_dex_escrow` (permissionless) pays
+  `dex_target_lamports` to `Global.treasury` exactly once. If the target was
+  lowered after fees came in, the excess goes to the buyback bucket.
+  `sweep_fees` (permissionless) moves the buyback, holder and treasury
+  buckets to `BuybackVault`, `HolderRewardVault` and the treasury. It never
+  sweeps the escrow.
 - **Graduation.** When the curve's real token reserves reach zero, it migrates
   to a **Raydium CPMM** pool (not LaunchLab, not pump-amm). The LP tokens are
   locked with Raydium Burn & Earn rather than burned, so the protocol keeps
-  earning the pool's trading fees.
+  earning the pool's trading fees. Graduation is three crank-only
+  instructions:
+  1. `prepare_migration` moves the curve's remaining tokens and all real SOL
+     to the `["migration-authority", mint]` PDA. That PDA is system-owned and
+     holds no data, because CPMM's `creator` must be a system account that
+     pays rent and fees; the `BondingCurve` account can't be.
+     `Global.migration_reserve_lamports` is held back to pay the pool fee and
+     rent. The pool must open within 5% of the curve's final price.
+  2. `migrate_raydium` calls CPMM `initialize` with the PDA signing as
+     creator. Every Raydium address is re-derived and checked. The pool is
+     seeded with the PDA's actual token balances (at least the prepared
+     amounts), so tokens donated to those accounts can't block migration.
+  3. `lock_migrated_lp` (needs a new keypair for the fee-key NFT mint) calls
+     Burn & Earn `lock_cp_liquidity` for the full LP balance. The fee-key NFT
+     is owned by the `["fee-key-vault"]` PDA. Any unspent reserve goes to the
+     treasury.
+
+  Steps 1 and 2 fit in one transaction. Step 3 doesn't fit with step 2,
+  because Solana transactions are limited to 1,232 bytes. The CPMM and lock
+  program IDs, AmmConfig and lock authority are fields in `Global`. The
+  instruction layouts are written out by hand in `src/raydium.rs`, with the
+  sources it was checked against cited there.
 
 ## Layout
 
@@ -62,10 +89,14 @@ reading only.
 | `programs/parabull/src/instructions/` | One file per instruction |
 | `programs/parabull/src/launch.rs` | Pure launch-flow rules (metadata, expiry, refunds, settlement, registry claims) |
 | `programs/parabull/src/trade.rs` | Pure buy/sell state transitions (open-slot check, slippage, fee split, graduation) |
+| `programs/parabull/src/flywheel.rs` | Pure escrow top-up/release and fee-sweep rules |
+| `programs/parabull/src/raydium.rs` | Raydium CPMM / Burn & Earn IDs, seeds, PDA derivation, instruction builders |
 | `programs/parabull/tests/reference_parity.rs` | Differential tests against `reference/programs/pump` |
 | `programs/parabull/tests/common/mod.rs` | Shared solana-program-test harness (`Env`, instruction builders) |
 | `programs/parabull/tests/launch_flow.rs` | Runtime tests: request_launch / refund_ticket / create |
 | `programs/parabull/tests/trade_flow.rs` | Runtime tests: buy / sell (Token-2022 transfers, lamports, slot delay, graduation) |
+| `programs/parabull/tests/migration_flow.rs` | Runtime tests: migration, escrow, sweeps |
+| `programs/parabull/tests/common/raydium_mock.rs` | Native Raydium CPMM / lock mocks at the mainnet IDs; they re-derive and check every account |
 | `reference/` | Byte-matching pump.fun reconstructions. Read-only |
 
 ## Rules for changes
@@ -79,7 +110,13 @@ reading only.
   one, `reference_parity.rs` must still pass.
 - Account layout changes: add new fields before `_reserved` and shrink
   `_reserved` by the same number of bytes. Update the pinned sizes in
-  `state::tests::account_sizes_fit_and_are_stable`.
+  `state::tests::account_sizes_fit_and_are_stable`. (Accounts may still
+  grow before the first deploy. After that, only take space from
+  `_reserved`.)
+- Raydium CPIs: never trust addresses passed in for Raydium accounts.
+  Re-derive them with `raydium::cpmm_accounts` / `raydium::lock_accounts` and
+  compare. If Raydium changes its interface, update `src/raydium.rs` and the
+  mocks together.
 - Every arithmetic operation in on-chain code must be checked (`checked_*` or
   `ParabullError`).
 - Move lamports directly (`sub_lamports`/`add_lamports`) only after the

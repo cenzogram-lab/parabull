@@ -73,3 +73,60 @@ pub struct GraduationReady {
     pub slot: u64,
     pub timestamp: i64,
 }
+
+#[event]
+pub struct MigrationPrepared {
+    pub mint: Pubkey,
+    pub migration_authority: Pubkey,
+    pub sol_to_pool: u64,
+    pub sol_reserve: u64,
+    pub tokens_to_pool: u64,
+    pub slot: u64,
+}
+
+#[event]
+pub struct MigratedToRaydium {
+    pub mint: Pubkey,
+    pub pool: Pubkey,
+    pub lp_mint: Pubkey,
+    pub token_0: Pubkey,
+    pub token_1: Pubkey,
+    pub tokens_to_pool: u64,
+    pub sol_to_pool: u64,
+    pub slot: u64,
+}
+
+#[event]
+pub struct LiquidityLocked {
+    pub mint: Pubkey,
+    pub pool: Pubkey,
+    pub lp_amount: u64,
+    pub fee_nft_mint: Pubkey,
+    pub fee_nft_owner: Pubkey,
+    pub reserve_refunded_to_treasury: u64,
+}
+
+#[event]
+pub struct DexEscrowToppedUp {
+    pub mint: Pubkey,
+    pub payer: Pubkey,
+    pub accepted: u64,
+    pub escrow_accrued: u64,
+    pub target: u64,
+}
+
+#[event]
+pub struct DexEscrowReleased {
+    pub mint: Pubkey,
+    pub treasury: Pubkey,
+    pub amount: u64,
+    pub excess_to_buyback: u64,
+}
+
+#[event]
+pub struct FeesSwept {
+    pub mint: Pubkey,
+    pub to_buyback_vault: u64,
+    pub to_holder_vault: u64,
+    pub to_treasury: u64,
+}

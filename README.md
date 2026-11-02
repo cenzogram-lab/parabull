@@ -19,7 +19,9 @@ A Solana meme launchpad built on Anchor 0.31.1:
 | `initialize` | Done |
 | `request_launch`, `refund_ticket`, `create` (blind launch, registry locks) | Done |
 | `buy`, `sell` (open-slot delay, slippage, 1% fee buckets, graduation lock) | Done |
-| Raydium CPMM migration, escrow release, flywheel cranks | Not started |
+| Graduation: `prepare_migration`, `migrate_raydium` (CPMM), `lock_migrated_lp` (Burn & Earn) | Done (tested against Raydium mocks) |
+| DexScreener escrow `top_up_dex_escrow` / `release_dex_escrow`, `sweep_fees` | Done |
+| Admin parameter updates, LP-fee collection, $PARABULL buyback/burn and holder-reward epochs | Not started |
 
 ## Development
 

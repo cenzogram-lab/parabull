@@ -7,9 +7,11 @@ use anchor_lang::prelude::*;
 pub mod constants;
 pub mod error;
 pub mod events;
+pub mod flywheel;
 pub mod instructions;
 pub mod launch;
 pub mod math;
+pub mod raydium;
 pub mod state;
 pub mod trade;
 
@@ -55,5 +57,35 @@ pub mod parabull {
     /// Sell `amount` tokens for at least `min_sol_output` lamports (net of fee).
     pub fn sell(ctx: Context<Trade>, amount: u64, min_sol_output: u64) -> Result<()> {
         instructions::sell::handler(ctx, amount, min_sol_output)
+    }
+
+    /// Graduation 1/3 (crank): move the curve's tokens + SOL to the migration authority.
+    pub fn prepare_migration(ctx: Context<PrepareMigration>) -> Result<()> {
+        instructions::prepare_migration::handler(ctx)
+    }
+
+    /// Graduation 2/3 (crank): create the Raydium CPMM pool.
+    pub fn migrate_raydium(ctx: Context<MigrateRaydium>) -> Result<()> {
+        instructions::migrate_raydium::handler(ctx)
+    }
+
+    /// Graduation 3/3 (crank + fresh NFT mint keypair): lock all LP in Burn & Earn.
+    pub fn lock_migrated_lp(ctx: Context<LockMigratedLp>) -> Result<()> {
+        instructions::lock_migrated_lp::handler(ctx)
+    }
+
+    /// Anyone can add protocol fees to a curve's DexScreener escrow, up to the target.
+    pub fn top_up_dex_escrow(ctx: Context<TopUpDexEscrow>, amount: u64) -> Result<()> {
+        instructions::escrow::top_up_handler(ctx, amount)
+    }
+
+    /// Pay a funded escrow (`dex_target_lamports`) to the treasury, once.
+    pub fn release_dex_escrow(ctx: Context<ReleaseDexEscrow>) -> Result<()> {
+        instructions::escrow::release_handler(ctx)
+    }
+
+    /// Move buyback / holder / treasury buckets to their vaults (never the escrow).
+    pub fn sweep_fees(ctx: Context<SweepFees>) -> Result<()> {
+        instructions::sweep_fees::handler(ctx)
     }
 }

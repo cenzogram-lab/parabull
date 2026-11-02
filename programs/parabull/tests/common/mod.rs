@@ -2,6 +2,8 @@
 //! against the real SPL Token-2022 and ATA programs bundled with program-test.
 #![allow(dead_code, unused_imports)]
 
+pub mod raydium_mock;
+
 pub use anchor_lang::{system_program, AccountDeserialize, AccountSerialize, InstructionData, Space, ToAccountMetas};
 pub use anchor_spl::token_2022_extensions::spl_token_metadata_interface::state::TokenMetadata;
 pub use anchor_spl::token_interface::spl_token_2022::extension::{BaseStateWithExtensions, StateWithExtensions};
@@ -53,6 +55,7 @@ pub fn err_code(e: ParabullError) -> u32 {
 pub struct Env {
     pub ctx: ProgramTestContext,
     pub launch: Keypair,
+    pub crank: Keypair,
     pub treasury: Pubkey,
 }
 
@@ -65,6 +68,7 @@ impl Env {
     pub async fn with_global(tweak: impl FnOnce(&mut Global)) -> Self {
         let mut pt = ProgramTest::new("parabull", parabull::ID, processor!(process));
         let launch = Keypair::new();
+        let crank = Keypair::new();
         let treasury = Pubkey::new_unique();
 
         let (global_key, bump) = Pubkey::find_program_address(&[SEED_GLOBAL], &parabull::ID);
@@ -73,7 +77,7 @@ impl Env {
             paused: false,
             admin: Pubkey::new_unique(),
             launch_authority: launch.pubkey(),
-            crank_authority: Pubkey::new_unique(),
+            crank_authority: crank.pubkey(),
             treasury,
             parabull_mint: Pubkey::new_unique(),
             launch_fee_lamports: DEFAULT_LAUNCH_FEE_LAMPORTS,
@@ -91,7 +95,12 @@ impl Env {
             initial_real_token_reserves: DEFAULT_INITIAL_REAL_TOKEN_RESERVES,
             token_total_supply: DEFAULT_TOKEN_TOTAL_SUPPLY,
             launch_count: 0,
-            _reserved: [0; 128],
+            cpmm_program: raydium_mock::CPMM_ID,
+            cpmm_amm_config: AMM_CONFIG,
+            lp_lock_program: raydium_mock::LOCK_ID,
+            lp_lock_authority: raydium_mock::LOCK_AUTH,
+            migration_reserve_lamports: DEFAULT_MIGRATION_RESERVE_LAMPORTS,
+            _reserved: [0; 64],
         };
         let mut global = global;
         tweak(&mut global);
@@ -100,10 +109,19 @@ impl Env {
         data.resize(8 + Global::INIT_SPACE, 0);
         pt.add_account(global_key, Account { lamports: SOL, data, owner: parabull::ID, executable: false, rent_epoch: 0 });
         pt.add_account(launch.pubkey(), Account { lamports: 10 * SOL, ..Account::default() });
+        pt.add_account(crank.pubkey(), Account { lamports: 10 * SOL, ..Account::default() });
         pt.add_account(treasury, Account { lamports: SOL, ..Account::default() });
+        add_flywheel_vaults(&mut pt);
+        // Raydium mocks at the real program IDs, plus the accounts Raydium
+        // itself would own on a real cluster (config, fee receiver). The WSOL
+        // native mint is already part of program-test genesis.
+        pt.add_program("raydium_cpmm_mock", raydium_mock::CPMM_ID, processor!(raydium_mock::mock_cpmm));
+        pt.add_program("raydium_lock_mock", raydium_mock::LOCK_ID, processor!(raydium_mock::mock_lock));
+        pt.add_account(AMM_CONFIG, Account { lamports: SOL, data: vec![0; 8], owner: raydium_mock::CPMM_ID, executable: false, rent_epoch: 0 });
+        pt.add_account(raydium_mock::POOL_FEE_RECEIVER, Account { lamports: SOL, ..Account::default() });
 
         let ctx = pt.start_with_context().await;
-        Env { ctx, launch, treasury }
+        Env { ctx, launch, crank, treasury }
     }
 
     pub async fn funded_user(&mut self) -> Keypair {
@@ -232,7 +250,10 @@ impl Env {
 }
 
 pub fn assert_custom(res: Result<impl std::fmt::Debug, BanksClientError>, expected: ParabullError) {
-    let code = err_code(expected);
+    assert_custom_code(res, err_code(expected), &format!("{expected:?}"));
+}
+
+pub fn assert_custom_code(res: Result<impl std::fmt::Debug, BanksClientError>, code: u32, expected: &str) {
     match res {
         Err(BanksClientError::TransactionError(TransactionError::InstructionError(_, InstructionError::Custom(c))))
         | Err(BanksClientError::SimulationError { err: TransactionError::InstructionError(_, InstructionError::Custom(c)), .. }) => {
@@ -316,3 +337,250 @@ impl Env {
     }
 }
 
+
+// ---- Flywheel / migration helpers -----------------------------------------------
+
+pub const SPL_TOKEN: Pubkey = anchor_spl::token::ID;
+pub const WSOL_MINT: Pubkey = parabull::raydium::WSOL_MINT;
+/// Test CPMM AmmConfig (owned by the CPMM mock).
+pub const AMM_CONFIG: Pubkey = Pubkey::new_from_array([7u8; 32]);
+
+fn add_flywheel_vaults(pt: &mut ProgramTest) {
+    use parabull::state::{BuybackVault, HolderRewardVault};
+    let (bv, bv_bump) = Pubkey::find_program_address(&[SEED_BUYBACK_VAULT], &parabull::ID);
+    let (hv, hv_bump) = Pubkey::find_program_address(&[SEED_HOLDER_VAULT], &parabull::ID);
+    let b = BuybackVault { bump: bv_bump, total_deposited_lamports: 0, total_spent_lamports: 0, total_tokens_burned: 0, buyback_count: 0, last_buyback_at: 0, _reserved: [0; 64] };
+    let h = HolderRewardVault { bump: hv_bump, total_deposited_lamports: 0, total_committed_lamports: 0, total_claimed_lamports: 0, next_epoch: 0, _reserved: [0; 64] };
+    let rent = solana_sdk::rent::Rent::default();
+    for (key, data) in [(bv, anchor_bytes(&b, 8 + BuybackVault::INIT_SPACE)), (hv, anchor_bytes(&h, 8 + HolderRewardVault::INIT_SPACE))] {
+        pt.add_account(key, Account { lamports: rent.minimum_balance(data.len()), data, owner: parabull::ID, executable: false, rent_epoch: 0 });
+    }
+}
+
+pub fn anchor_bytes<T: AccountSerialize>(v: &T, len: usize) -> Vec<u8> {
+    let mut data = Vec::with_capacity(len);
+    v.try_serialize(&mut data).unwrap();
+    data.resize(len, 0);
+    data
+}
+
+pub fn packed_mint(authority: Option<Pubkey>, decimals: u8, program: Pubkey) -> Account {
+    use anchor_lang::solana_program::program_option::COption;
+    use anchor_lang::solana_program::program_pack::Pack;
+    let m = anchor_spl::token::spl_token::state::Mint {
+        mint_authority: authority.map(COption::Some).unwrap_or(COption::None),
+        supply: 0,
+        decimals,
+        is_initialized: true,
+        freeze_authority: COption::None,
+    };
+    let mut data = vec![0; anchor_spl::token::spl_token::state::Mint::LEN];
+    m.pack_into_slice(&mut data);
+    Account { lamports: SOL, data, owner: program, executable: false, rent_epoch: 0 }
+}
+
+/// Empty token account (165-byte base layout, valid for both token programs).
+pub fn packed_token_account(mint: Pubkey, owner: Pubkey, program: Pubkey) -> Account {
+    use anchor_lang::solana_program::program_option::COption;
+    use anchor_lang::solana_program::program_pack::Pack;
+    use anchor_spl::token::spl_token::state::{Account as TA, AccountState};
+    let rent = solana_sdk::rent::Rent::default().minimum_balance(TA::LEN);
+    let native = mint == WSOL_MINT;
+    let t = TA {
+        mint,
+        owner,
+        amount: 0,
+        delegate: COption::None,
+        state: AccountState::Initialized,
+        is_native: if native { COption::Some(rent) } else { COption::None },
+        delegated_amount: 0,
+        close_authority: COption::None,
+    };
+    let mut data = vec![0; TA::LEN];
+    t.pack_into_slice(&mut data);
+    Account { lamports: rent, data, owner: program, executable: false, rent_epoch: 0 }
+}
+
+/// Raydium-side addresses for a launched mint, derived by Parabull's helpers.
+pub struct PoolKeys {
+    pub order: parabull::raydium::PoolOrder,
+    pub cpmm: parabull::raydium::CpmmAccounts,
+    pub migration_authority: Pubkey,
+}
+
+pub fn migration_authority(mint: &Pubkey) -> Pubkey {
+    pda(&[SEED_MIGRATION_AUTHORITY, mint.as_ref()])
+}
+
+pub fn fee_key_vault() -> Pubkey {
+    pda(&[SEED_FEE_KEY_VAULT])
+}
+
+pub fn pool_keys(mint: &Pubkey) -> PoolKeys {
+    let order = parabull::raydium::sort_pool_mints(mint, &WSOL_MINT).unwrap();
+    let auth = migration_authority(mint);
+    let cpmm = parabull::raydium::cpmm_accounts(&raydium_mock::CPMM_ID, &AMM_CONFIG, &order, &auth);
+    PoolKeys { order, cpmm, migration_authority: auth }
+}
+
+impl Env {
+    /// Accounts the real CPMM program would create inside `initialize`; the
+    /// mock expects them to exist (vaults, LP mint, pool + observation state).
+    pub fn seed_cpmm_pool_accounts(&mut self, mint: &Pubkey) {
+        let k = pool_keys(mint);
+        let (p0, p1) = k.order.programs();
+        let set = |ctx: &mut ProgramTestContext, key: &Pubkey, acc: Account| ctx.set_account(key, &acc.into());
+        set(&mut self.ctx, &k.cpmm.token_0_vault, packed_token_account(k.order.token_0, k.cpmm.authority, p0));
+        set(&mut self.ctx, &k.cpmm.token_1_vault, packed_token_account(k.order.token_1, k.cpmm.authority, p1));
+        set(&mut self.ctx, &k.cpmm.lp_mint, packed_mint(Some(k.cpmm.authority), 9, SPL_TOKEN));
+        let owned = |len: usize| Account { lamports: SOL, data: vec![0; len], owner: raydium_mock::CPMM_ID, executable: false, rent_epoch: 0 };
+        set(&mut self.ctx, &k.cpmm.pool_state, owned(64));
+        set(&mut self.ctx, &k.cpmm.observation_state, owned(8));
+        // Burn & Earn's LP vault (owned by the lock authority).
+        let lock_vault = anchor_spl::associated_token::get_associated_token_address_with_program_id(&raydium_mock::LOCK_AUTH, &k.cpmm.lp_mint, &SPL_TOKEN);
+        set(&mut self.ctx, &lock_vault, packed_token_account(k.cpmm.lp_mint, raydium_mock::LOCK_AUTH, SPL_TOKEN));
+    }
+
+    pub fn prepare_migration_ix(&self, crank: &Pubkey, mint: &Pubkey) -> Instruction {
+        let curve = curve_pda(mint);
+        let auth = migration_authority(mint);
+        Instruction {
+            program_id: parabull::ID,
+            accounts: parabull::accounts::PrepareMigration {
+                crank: *crank,
+                global: global_pda(),
+                mint: *mint,
+                bonding_curve: curve,
+                curve_token_account: ata(&curve, mint),
+                migration_authority: auth,
+                authority_token_account: ata(&auth, mint),
+                token_program: TOKEN_2022,
+                associated_token_program: ATA_PROGRAM,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: parabull::instruction::PrepareMigration {}.data(),
+        }
+    }
+
+    pub fn migrate_raydium_ix(&self, crank: &Pubkey, mint: &Pubkey) -> Instruction {
+        let k = pool_keys(mint);
+        let wsol_ata = anchor_spl::associated_token::get_associated_token_address_with_program_id(&k.migration_authority, &WSOL_MINT, &SPL_TOKEN);
+        Instruction {
+            program_id: parabull::ID,
+            accounts: parabull::accounts::MigrateRaydium {
+                crank: *crank,
+                global: global_pda(),
+                mint: *mint,
+                bonding_curve: curve_pda(mint),
+                migration_authority: k.migration_authority,
+                authority_token_account: ata(&k.migration_authority, mint),
+                authority_wsol_account: wsol_ata,
+                wsol_mint: WSOL_MINT,
+                cpmm_program: raydium_mock::CPMM_ID,
+                amm_config: AMM_CONFIG,
+                cpmm_authority: k.cpmm.authority,
+                pool_state: k.cpmm.pool_state,
+                lp_mint: k.cpmm.lp_mint,
+                creator_lp_token: k.cpmm.creator_lp_token,
+                token_0_vault: k.cpmm.token_0_vault,
+                token_1_vault: k.cpmm.token_1_vault,
+                create_pool_fee: raydium_mock::POOL_FEE_RECEIVER,
+                observation_state: k.cpmm.observation_state,
+                token_program: SPL_TOKEN,
+                token_2022_program: TOKEN_2022,
+                associated_token_program: ATA_PROGRAM,
+                system_program: system_program::ID,
+                rent: solana_sdk::sysvar::rent::ID,
+            }
+            .to_account_metas(None),
+            data: parabull::instruction::MigrateRaydium {}.data(),
+        }
+    }
+
+    pub fn lock_lp_ix(&self, crank: &Pubkey, mint: &Pubkey, fee_nft_mint: &Pubkey) -> Instruction {
+        let k = pool_keys(mint);
+        let lock = parabull::raydium::lock_accounts(&raydium_mock::LOCK_ID, &raydium_mock::LOCK_AUTH, fee_nft_mint, &fee_key_vault(), &k.cpmm.lp_mint);
+        Instruction {
+            program_id: parabull::ID,
+            accounts: parabull::accounts::LockMigratedLp {
+                crank: *crank,
+                global: global_pda(),
+                mint: *mint,
+                bonding_curve: curve_pda(mint),
+                migration_authority: k.migration_authority,
+                fee_key_vault: fee_key_vault(),
+                fee_nft_mint: *fee_nft_mint,
+                treasury: self.treasury,
+                lp_lock_program: raydium_mock::LOCK_ID,
+                lp_lock_authority: raydium_mock::LOCK_AUTH,
+                pool_state: k.cpmm.pool_state,
+                lp_mint: k.cpmm.lp_mint,
+                creator_lp_token: k.cpmm.creator_lp_token,
+                token_0_vault: k.cpmm.token_0_vault,
+                token_1_vault: k.cpmm.token_1_vault,
+                fee_nft_account: lock.fee_nft_account,
+                locked_liquidity: lock.locked_liquidity,
+                lock_lp_vault: lock.lock_lp_vault,
+                nft_metadata: lock.nft_metadata,
+                rent: solana_sdk::sysvar::rent::ID,
+                system_program: system_program::ID,
+                token_program: SPL_TOKEN,
+                associated_token_program: ATA_PROGRAM,
+                metadata_program: parabull::raydium::METADATA_PROGRAM_ID,
+            }
+            .to_account_metas(None),
+            data: parabull::instruction::LockMigratedLp {}.data(),
+        }
+    }
+
+    pub fn top_up_ix(&self, payer: &Pubkey, mint: &Pubkey, amount: u64) -> Instruction {
+        Instruction {
+            program_id: parabull::ID,
+            accounts: parabull::accounts::TopUpDexEscrow {
+                payer: *payer,
+                global: global_pda(),
+                mint: *mint,
+                bonding_curve: curve_pda(mint),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: parabull::instruction::TopUpDexEscrow { amount }.data(),
+        }
+    }
+
+    pub fn release_ix(&self, mint: &Pubkey) -> Instruction {
+        Instruction {
+            program_id: parabull::ID,
+            accounts: parabull::accounts::ReleaseDexEscrow {
+                global: global_pda(),
+                mint: *mint,
+                bonding_curve: curve_pda(mint),
+                treasury: self.treasury,
+            }
+            .to_account_metas(None),
+            data: parabull::instruction::ReleaseDexEscrow {}.data(),
+        }
+    }
+
+    pub fn sweep_ix(&self, mint: &Pubkey) -> Instruction {
+        Instruction {
+            program_id: parabull::ID,
+            accounts: parabull::accounts::SweepFees {
+                global: global_pda(),
+                mint: *mint,
+                bonding_curve: curve_pda(mint),
+                buyback_vault: pda(&[SEED_BUYBACK_VAULT]),
+                holder_vault: pda(&[SEED_HOLDER_VAULT]),
+                treasury: self.treasury,
+            }
+            .to_account_metas(None),
+            data: parabull::instruction::SweepFees {}.data(),
+        }
+    }
+
+    /// Generic SPL/Token-2022 balance for any token account address.
+    pub async fn token_amount_at(&mut self, key: &Pubkey) -> Option<u64> {
+        self.account(key).await.map(|acc| StateWithExtensions::<SplTokenAccount>::unpack(&acc.data).unwrap().base.amount)
+    }
+}

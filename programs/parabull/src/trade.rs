@@ -53,6 +53,15 @@ pub fn apply_sell(curve: &mut BondingCurve, global: &Global, slot: u64, token_am
     Ok(SellOutcome { quote, split })
 }
 
+/// Fail closed unless the curve account's lamports cover rent + real SOL +
+/// every fee bucket. Call at the end of any instruction that moves curve SOL.
+pub fn assert_curve_backed(curve: &Account<BondingCurve>) -> Result<()> {
+    let info = curve.to_account_info();
+    let rent = Rent::get()?.minimum_balance(info.data_len());
+    require!(info.lamports() >= required_curve_lamports(curve, rent)?, ParabullError::LamportInvariantViolated);
+    Ok(())
+}
+
 /// Minimum lamports the curve account must hold: rent + real SOL reserves + all fee buckets.
 pub fn required_curve_lamports(curve: &BondingCurve, rent_exempt_minimum: u64) -> Result<u64> {
     rent_exempt_minimum

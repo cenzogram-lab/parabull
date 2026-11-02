@@ -58,4 +58,22 @@ pub enum ParabullError {
     SlippageExceeded,
     #[msg("Bonding curve lamports do not cover rent + reserves + accrued fees")]
     LamportInvariantViolated,
+    #[msg("Bonding curve is not complete")]
+    CurveNotComplete,
+    #[msg("Migration is not at the required stage")]
+    InvalidMigrationStage,
+    #[msg("Account does not match the derived Raydium/migration address")]
+    InvalidMigrationAccount,
+    #[msg("Curve SOL does not exceed the migration reserve")]
+    InsufficientMigrationSol,
+    #[msg("Opening pool price deviates too far from the curve's final price")]
+    MigrationPriceOutOfRange,
+    #[msg("Invalid migration parameters")]
+    InvalidMigrationParams,
+    #[msg("DexScreener escrow has not reached the target")]
+    EscrowNotFunded,
+    #[msg("DexScreener escrow is already funded")]
+    EscrowAlreadyFunded,
+    #[msg("DexScreener escrow was already released")]
+    EscrowAlreadyReleased,
 }

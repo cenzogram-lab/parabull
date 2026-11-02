@@ -1,0 +1,178 @@
+//! Native mocks of Raydium CPMM `initialize` and Burn & Earn `lock_cp_liquidity`,
+//! registered at the real mainnet program IDs.
+//!
+//! They re-derive every address from Raydium's documented seeds (written out
+//! literally here, independent of `parabull::raydium`), assert account order,
+//! discriminators and signer/payer requirements, then perform the observable
+//! effects via CPI using the signer privileges Parabull passes down:
+//! - CPMM: pull both sides of liquidity from the creator's token accounts into
+//!   the vaults, create the creator's LP ATA (creator pays), mint LP, charge the
+//!   0.15 SOL pool fee, and stamp the pool account.
+//! - Lock: move all LP into the lock vault, create the fee-key NFT mint + ATA
+//!   for the NFT owner (payer pays), create the locked-liquidity record.
+//! Any wrong account, missing signature or unfunded payer panics -> tx fails.
+
+use anchor_lang::solana_program::account_info::AccountInfo;
+use anchor_lang::solana_program::entrypoint::ProgramResult;
+use anchor_lang::solana_program::program::{invoke, invoke_signed};
+use anchor_lang::solana_program::program_pack::Pack;
+use anchor_lang::solana_program::pubkey::Pubkey;
+use anchor_lang::solana_program::rent::Rent;
+use anchor_lang::solana_program::system_instruction;
+use anchor_lang::solana_program::sysvar::Sysvar;
+use anchor_spl::associated_token::get_associated_token_address_with_program_id as ata_of;
+use anchor_spl::associated_token::spl_associated_token_account::instruction::create_associated_token_account;
+use anchor_spl::token::spl_token;
+use anchor_spl::token_2022::spl_token_2022;
+
+pub const CPMM_ID: Pubkey = parabull::raydium::CPMM_PROGRAM_MAINNET;
+pub const LOCK_ID: Pubkey = parabull::raydium::LP_LOCK_PROGRAM_MAINNET;
+pub const LOCK_AUTH: Pubkey = parabull::raydium::LP_LOCK_AUTHORITY_MAINNET;
+pub const POOL_FEE_RECEIVER: Pubkey = parabull::raydium::CPMM_CREATE_POOL_FEE_RECEIVER_MAINNET;
+pub const MOCK_CREATE_POOL_FEE: u64 = 150_000_000;
+pub const POOL_MARKER: &[u8; 8] = b"MOCKPOOL";
+pub const LOCK_MARKER: &[u8; 8] = b"MOCKLOCK";
+const METAPLEX: Pubkey = parabull::raydium::METADATA_PROGRAM_ID;
+const SYSTEM: Pubkey = anchor_lang::system_program::ID;
+
+fn token_account(ai: &AccountInfo) -> spl_token_2022::state::Account {
+    spl_token_2022::state::Account::unpack_from_slice(&ai.data.borrow()[..spl_token_2022::state::Account::LEN]).expect("token account")
+}
+
+fn decimals(mint: &AccountInfo) -> u8 {
+    spl_token_2022::state::Mint::unpack_from_slice(&mint.data.borrow()[..spl_token_2022::state::Mint::LEN]).expect("mint").decimals
+}
+
+fn u64_at(data: &[u8], at: usize) -> u64 {
+    u64::from_le_bytes(data[at..at + 8].try_into().unwrap())
+}
+
+pub fn mock_cpmm(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
+    assert_eq!(*program_id, CPMM_ID);
+    assert_eq!(data.len(), 32, "cpmm: data = disc + 3 x u64");
+    assert_eq!(&data[..8], &[175, 175, 109, 31, 13, 152, 155, 237], "cpmm: initialize discriminator");
+    let (a0, a1, _open_time) = (u64_at(data, 8), u64_at(data, 16), u64_at(data, 24));
+    assert!(accounts.len() >= 20, "cpmm: 20 accounts");
+    let [creator, amm_config, authority, pool_state, mint0, mint1, lp_mint, ct0, ct1, clp, v0, v1, fee, obs, token_program, tp0, tp1, ata_prog, system, rent] =
+        &accounts[..20]
+    else {
+        unreachable!()
+    };
+
+    assert!(creator.is_signer, "cpmm: creator must sign");
+    assert!(creator.is_writable, "cpmm: creator must be writable (it pays)");
+    assert_eq!(*creator.owner, SYSTEM, "cpmm: creator must be system-owned to pay");
+    assert_eq!(*amm_config.owner, CPMM_ID, "cpmm: amm_config owned by CPMM");
+    assert!(mint0.key < mint1.key, "cpmm: token_0 < token_1");
+    let pda = |seeds: &[&[u8]]| Pubkey::find_program_address(seeds, program_id);
+    let (auth_key, auth_bump) = pda(&[b"vault_and_lp_mint_auth_seed"]);
+    assert_eq!(*authority.key, auth_key, "cpmm: authority PDA");
+    let pool = pda(&[b"pool", amm_config.key.as_ref(), mint0.key.as_ref(), mint1.key.as_ref()]).0;
+    assert_eq!(*pool_state.key, pool, "cpmm: pool_state must be the canonical PDA");
+    assert!(!pool_state.is_signer, "cpmm: PDA pool, not a keypair");
+    assert_eq!(*lp_mint.key, pda(&[b"pool_lp_mint", pool.as_ref()]).0, "cpmm: lp mint PDA");
+    assert_eq!(*v0.key, pda(&[b"pool_vault", pool.as_ref(), mint0.key.as_ref()]).0, "cpmm: vault 0");
+    assert_eq!(*v1.key, pda(&[b"pool_vault", pool.as_ref(), mint1.key.as_ref()]).0, "cpmm: vault 1");
+    assert_eq!(*obs.key, pda(&[b"observation", pool.as_ref()]).0, "cpmm: observation");
+    assert_eq!(*clp.key, ata_of(creator.key, lp_mint.key, &spl_token::ID), "cpmm: creator LP ATA");
+    assert_eq!(*fee.key, POOL_FEE_RECEIVER, "cpmm: create_pool_fee receiver");
+    assert_eq!(*token_program.key, spl_token::ID, "cpmm: LP token program is SPL Token");
+    assert_eq!(tp0.key, mint0.owner, "cpmm: token_0_program");
+    assert_eq!(tp1.key, mint1.owner, "cpmm: token_1_program");
+    assert_eq!(*ata_prog.key, anchor_spl::associated_token::ID);
+    assert_eq!(*system.key, SYSTEM);
+    assert_eq!(*rent.key, anchor_lang::solana_program::sysvar::rent::ID);
+    for (src, mint, amount) in [(ct0, mint0, a0), (ct1, mint1, a1)] {
+        let t = token_account(src);
+        assert_eq!(t.mint, *mint.key, "cpmm: creator token account mint");
+        assert_eq!(t.owner, *creator.key, "cpmm: creator token account owner");
+        assert!(t.amount >= amount && amount > 0, "cpmm: creator holds the init amount");
+    }
+
+    // Liquidity in: creator's signature propagates from Parabull's invoke_signed.
+    for (src, mint, vault, prog, amount) in [(ct0, mint0, v0, tp0, a0), (ct1, mint1, v1, tp1, a1)] {
+        let ix = spl_token_2022::instruction::transfer_checked(prog.key, src.key, mint.key, vault.key, creator.key, &[], amount, decimals(mint))?;
+        invoke(&ix, &[src.clone(), mint.clone(), vault.clone(), creator.clone(), prog.clone()])?;
+    }
+
+    // Creator's LP ATA (creator pays rent), then mint LP = sqrt(a0*a1) - 100 locked.
+    let ix = create_associated_token_account(creator.key, creator.key, lp_mint.key, &spl_token::ID);
+    invoke(&ix, &[creator.clone(), clp.clone(), creator.clone(), lp_mint.clone(), system.clone(), token_program.clone(), ata_prog.clone()])?;
+    let lp = ((u128::from(a0) * u128::from(a1)) as f64).sqrt() as u64 - 100;
+    let ix = spl_token::instruction::mint_to(&spl_token::ID, lp_mint.key, clp.key, authority.key, &[], lp)?;
+    invoke_signed(&ix, &[lp_mint.clone(), clp.clone(), authority.clone(), token_program.clone()], &[&[b"vault_and_lp_mint_auth_seed", &[auth_bump]]])?;
+
+    // Pool creation fee from the creator.
+    invoke(&system_instruction::transfer(creator.key, fee.key, MOCK_CREATE_POOL_FEE), &[creator.clone(), fee.clone(), system.clone()])?;
+
+    let mut d = pool_state.data.borrow_mut();
+    d[..8].copy_from_slice(POOL_MARKER);
+    d[8..16].copy_from_slice(&a0.to_le_bytes());
+    d[16..24].copy_from_slice(&a1.to_le_bytes());
+    d[24..32].copy_from_slice(&lp.to_le_bytes());
+    Ok(())
+}
+
+pub fn mock_lock(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
+    assert_eq!(*program_id, LOCK_ID);
+    assert_eq!(data.len(), 17, "lock: disc + u64 + bool");
+    assert_eq!(&data[..8], &[216, 157, 29, 78, 38, 51, 31, 26], "lock: lock_cp_liquidity discriminator");
+    let lp_amount = u64_at(data, 8);
+    assert_eq!(data[16], 1, "lock: with_metadata");
+    assert_eq!(accounts.len(), 19, "lock: 19 accounts");
+    let [auth, payer, liq_owner, nft_owner, nft_mint, nft_account, pool, locked, lp_mint, owner_lp, lock_vault, v0, v1, metadata, rent_sysvar, system, token_program, ata_prog, metadata_prog] =
+        &accounts[..19]
+    else {
+        unreachable!()
+    };
+
+    assert_eq!(*auth.key, LOCK_AUTH, "lock: authority");
+    assert!(payer.is_signer && payer.is_writable, "lock: payer signs, writable");
+    assert_eq!(*payer.owner, SYSTEM, "lock: payer must be system-owned");
+    assert!(liq_owner.is_signer, "lock: liquidity owner signs");
+    assert!(nft_mint.is_signer && nft_mint.is_writable, "lock: fee NFT mint keypair signs");
+    assert!(!nft_owner.is_signer, "lock: NFT owner does not need to sign");
+    assert_eq!(*nft_account.key, ata_of(nft_owner.key, nft_mint.key, &spl_token::ID), "lock: NFT ATA");
+    let (locked_key, locked_bump) = Pubkey::find_program_address(&[b"locked_liquidity", nft_mint.key.as_ref()], program_id);
+    assert_eq!(*locked.key, locked_key, "lock: locked_liquidity PDA");
+    assert_eq!(*lock_vault.key, ata_of(auth.key, lp_mint.key, &spl_token::ID), "lock: LP vault");
+    let md = Pubkey::find_program_address(&[b"metadata", METAPLEX.as_ref(), nft_mint.key.as_ref()], &METAPLEX).0;
+    assert_eq!(*metadata.key, md, "lock: NFT metadata PDA");
+    assert_eq!(*metadata_prog.key, METAPLEX);
+    assert_eq!(*rent_sysvar.key, anchor_lang::solana_program::sysvar::rent::ID);
+    assert_eq!(*system.key, SYSTEM);
+    assert_eq!(*token_program.key, spl_token::ID);
+    assert_eq!(*ata_prog.key, anchor_spl::associated_token::ID);
+    assert!(pool.data.borrow().starts_with(POOL_MARKER), "lock: pool must exist (created by CPMM)");
+    assert!(v0.is_writable && v1.is_writable);
+    let src = token_account(owner_lp);
+    assert_eq!(src.mint, *lp_mint.key);
+    assert_eq!(src.owner, *liq_owner.key, "lock: LP owned by liquidity owner");
+    assert_eq!(src.amount, lp_amount, "lock: locking the full LP balance");
+
+    // All LP into the lock vault (liquidity owner's signature propagates).
+    let ix = spl_token::instruction::transfer_checked(&spl_token::ID, owner_lp.key, lp_mint.key, lock_vault.key, liq_owner.key, &[], lp_amount, 9)?;
+    invoke(&ix, &[owner_lp.clone(), lp_mint.clone(), lock_vault.clone(), liq_owner.clone(), token_program.clone()])?;
+
+    // Locked-liquidity record (payer funds it).
+    let rent = Rent::get()?;
+    let seeds: &[&[u8]] = &[b"locked_liquidity", nft_mint.key.as_ref(), &[locked_bump]];
+    let ix = system_instruction::create_account(payer.key, locked.key, rent.minimum_balance(48), 48, program_id);
+    invoke_signed(&ix, &[payer.clone(), locked.clone(), system.clone()], &[seeds])?;
+
+    // Fee-key NFT: payer funds the mint and the owner's ATA; mint authority is the record PDA.
+    let ix = system_instruction::create_account(payer.key, nft_mint.key, rent.minimum_balance(82), 82, &spl_token::ID);
+    invoke(&ix, &[payer.clone(), nft_mint.clone(), system.clone()])?;
+    let ix = spl_token::instruction::initialize_mint2(&spl_token::ID, nft_mint.key, locked.key, None, 0)?;
+    invoke(&ix, &[nft_mint.clone(), token_program.clone()])?;
+    let ix = create_associated_token_account(payer.key, nft_owner.key, nft_mint.key, &spl_token::ID);
+    invoke(&ix, &[payer.clone(), nft_account.clone(), nft_owner.clone(), nft_mint.clone(), system.clone(), token_program.clone(), ata_prog.clone()])?;
+    let ix = spl_token::instruction::mint_to(&spl_token::ID, nft_mint.key, nft_account.key, locked.key, &[], 1)?;
+    invoke_signed(&ix, &[nft_mint.clone(), nft_account.clone(), locked.clone(), token_program.clone()], &[seeds])?;
+
+    let mut d = locked.data.borrow_mut();
+    d[..8].copy_from_slice(LOCK_MARKER);
+    d[8..16].copy_from_slice(&lp_amount.to_le_bytes());
+    d[16..48].copy_from_slice(pool.key.as_ref());
+    Ok(())
+}
