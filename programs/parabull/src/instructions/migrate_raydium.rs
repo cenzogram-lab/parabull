@@ -11,12 +11,12 @@ use anchor_lang::system_program;
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::{sync_native, SyncNative, Token};
 use anchor_spl::token_2022::Token2022;
-use anchor_spl::token_interface::{close_account, CloseAccount, Mint, TokenAccount};
+use anchor_spl::token_interface::{burn, close_account, Burn, CloseAccount, Mint, TokenAccount};
 
 use crate::constants::*;
 use crate::error::ParabullError;
 use crate::events::MigratedToRaydium;
-use crate::raydium::{cpmm_accounts, sort_pool_mints, CpmmInitialize, WSOL_MINT};
+use crate::raydium::{cpmm_accounts, sort_pool_mints, split_surplus, CpmmInitialize, WSOL_MINT};
 use crate::state::{BondingCurve, Global, MigrationStage};
 
 #[derive(Accounts)]
@@ -27,7 +27,8 @@ pub struct MigrateRaydium<'info> {
     #[account(seeds = [SEED_GLOBAL], bump = global.bump)]
     pub global: Box<Account<'info, Global>>,
 
-    #[account(mint::token_program = token_2022_program)]
+    /// Writable: unsolicited surplus tokens are burned.
+    #[account(mut, mint::token_program = token_2022_program)]
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(mut, seeds = [SEED_BONDING_CURVE, mint.key().as_ref()], bump = bonding_curve.bump)]
@@ -115,7 +116,8 @@ pub fn handler(mut ctx: Context<MigrateRaydium>) -> Result<()> {
         require_keys_eq!(passed, expected, ParabullError::InvalidMigrationAccount);
     }
 
-    let (min_sol, min_tokens) = (c.migration_sol, c.migration_tokens);
+    // Exactly the amounts prepare_migration priced and moved.
+    let (sol, tokens) = (c.migration_sol, c.migration_tokens);
     let signer: &[&[&[u8]]] = &[&[SEED_MIGRATION_AUTHORITY, mint_key.as_ref(), &bump]];
 
     // Wrap the pool SOL.
@@ -128,18 +130,28 @@ pub fn handler(mut ctx: Context<MigrateRaydium>) -> Result<()> {
             },
             signer,
         ),
-        min_sol,
+        sol,
     )?;
     sync_native(CpiContext::new(a.token_program.to_account_info(), SyncNative { account: a.authority_wsol_account.to_account_info() }))?;
 
-    // Seed the pool with the full balances, never less than what step 1 moved.
-    // Anyone can send tokens/WSOL to these ATAs; using balances (instead of
-    // requiring exact amounts) means a donation can't block migration.
+    // Anyone can send tokens / WSOL to these public ATAs. Seed the pool with
+    // the tracked amounts only, so a donation can neither block migration nor
+    // misprice the pool: surplus tokens are burned now; surplus WSOL is
+    // unwrapped below and goes to the treasury with the unspent reserve.
     a.authority_token_account.reload()?;
     a.authority_wsol_account.reload()?;
-    let tokens = a.authority_token_account.amount;
-    let sol = a.authority_wsol_account.amount;
-    require!(tokens >= min_tokens && sol >= min_sol, ParabullError::InsufficientReserves);
+    let (_, surplus_tokens) = split_surplus(a.authority_token_account.amount, tokens)?;
+    let (_, surplus_wsol) = split_surplus(a.authority_wsol_account.amount, sol)?;
+    if surplus_tokens > 0 {
+        burn(
+            CpiContext::new_with_signer(
+                a.token_2022_program.to_account_info(),
+                Burn { mint: a.mint.to_account_info(), from: a.authority_token_account.to_account_info(), authority: a.migration_authority.to_account_info() },
+                signer,
+            ),
+            surplus_tokens,
+        )?;
+    }
 
     // CPMM initialize, migration authority signing as creator.
     let (creator_token_0, creator_token_1) = if order.mint_is_token_0 {
@@ -200,8 +212,8 @@ pub fn handler(mut ctx: Context<MigrateRaydium>) -> Result<()> {
         signer,
     )?;
 
-    // Both source accounts must now be empty; closing them proves CPMM took
-    // exactly the amounts we passed, and returns the ATA rent to the crank.
+    // The token account must now be empty (closing proves CPMM took exactly
+    // `tokens`); its rent goes back to the crank that funded it.
     close_account(CpiContext::new_with_signer(
         a.token_2022_program.to_account_info(),
         CloseAccount {
@@ -211,21 +223,33 @@ pub fn handler(mut ctx: Context<MigrateRaydium>) -> Result<()> {
         },
         signer,
     ))?;
+    // The WSOL account holds only `surplus_wsol` now. Unwrap it into the
+    // migration authority (swept to the treasury by lock_migrated_lp), then
+    // refund the crank exactly the account's rent.
+    a.authority_wsol_account.reload()?;
+    require!(a.authority_wsol_account.amount == surplus_wsol, ParabullError::InsufficientReserves);
+    let wsol_rent = a.authority_wsol_account.to_account_info().lamports().checked_sub(surplus_wsol).ok_or(ParabullError::Overflow)?;
     close_account(CpiContext::new_with_signer(
         a.token_program.to_account_info(),
         CloseAccount {
             account: a.authority_wsol_account.to_account_info(),
-            destination: a.crank.to_account_info(),
+            destination: a.migration_authority.to_account_info(),
             authority: a.migration_authority.to_account_info(),
         },
         signer,
     ))?;
+    system_program::transfer(
+        CpiContext::new_with_signer(
+            a.system_program.to_account_info(),
+            system_program::Transfer { from: a.migration_authority.to_account_info(), to: a.crank.to_account_info() },
+            signer,
+        ),
+        wsol_rent,
+    )?;
 
     let pool = a.pool_state.key();
     let lp_mint = a.lp_mint.key();
     let c = &mut a.bonding_curve;
-    c.migration_sol = sol;
-    c.migration_tokens = tokens;
     c.migration_stage = MigrationStage::PoolCreated as u8;
     c.migrated = true;
     c.raydium_pool = pool;
@@ -238,6 +262,8 @@ pub fn handler(mut ctx: Context<MigrateRaydium>) -> Result<()> {
         token_1: order.token_1,
         tokens_to_pool: tokens,
         sol_to_pool: sol,
+        surplus_tokens_burned: surplus_tokens,
+        surplus_wsol,
         slot: Clock::get()?.slot,
     });
     Ok(())

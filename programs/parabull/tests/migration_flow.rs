@@ -203,9 +203,8 @@ async fn migrate_rejects_substituted_raydium_accounts() {
     crank_send(&mut env, &[ix], &[]).await.unwrap();
 }
 
-#[tokio::test]
-async fn token_donation_to_migration_authority_cannot_block_migration() {
-    let mut env = Env::new().await;
+/// Launch, buy out the curve, seed the mock pool accounts. Returns (mint, curve, whale).
+async fn completed_curve(env: &mut Env) -> (Pubkey, Pubkey, Keypair) {
     let creator = env.funded_user().await;
     let mint = env.launch_token(&creator, 1, "Pepe Coin", "PEPE").await;
     let curve = curve_pda(&mint);
@@ -214,32 +213,124 @@ async fn token_donation_to_migration_authority_cannot_block_migration() {
     let whale = env.user_with(100 * SOL).await;
     env.buy(&whale, &mint, u64::MAX, u64::MAX).await.unwrap();
     env.seed_cpmm_pool_accounts(&mint);
+    (mint, curve, whale)
+}
 
+/// Token-2022 transfer of `amount` raw units from `from`'s ATA to `to_token_account`.
+fn donate_tokens_ix(mint: &Pubkey, from: &Keypair, to_token_account: &Pubkey, amount: u64) -> Instruction {
+    anchor_spl::token_2022::spl_token_2022::instruction::transfer_checked(
+        &TOKEN_2022,
+        &ata(&from.pubkey(), mint),
+        mint,
+        to_token_account,
+        &from.pubkey(),
+        &[],
+        amount,
+        TOKEN_DECIMALS,
+    )
+    .unwrap()
+}
+
+const TRACKED: u64 = DEFAULT_TOKEN_TOTAL_SUPPLY - DEFAULT_INITIAL_REAL_TOKEN_RESERVES;
+
+/// Codex review finding: a donation to the curve's ATA used to be counted in
+/// the pool amount, so ~10M+ tokens failed the 5% price check forever.
+#[tokio::test]
+async fn donation_to_curve_ata_is_burned_not_priced() {
+    let mut env = Env::new().await;
+    let (mint, curve, whale) = completed_curve(&mut env).await;
+    // 50M tokens: far past what the 5% bound tolerates when priced on balance.
+    let donation = 50 * M;
+    env.send(&[donate_tokens_ix(&mint, &whale, &ata(&curve, &mint), donation)], &[&whale]).await.unwrap();
+    assert_eq!(env.token_balance(&curve, &mint).await, TRACKED + donation);
+    let supply_before = env.mint_supply(&mint).await;
+
+    let crank = env.crank.pubkey();
+    let ixs = [env.prepare_migration_ix(&crank, &mint), env.migrate_raydium_ix(&crank, &mint)];
+    crank_send(&mut env, &ixs, &[]).await.unwrap();
+
+    let c: BondingCurve = env.anchor(&curve).await;
+    assert_eq!(c.migration_tokens, TRACKED, "pool priced and seeded on tracked tokens only");
+    assert_eq!(supply_before - env.mint_supply(&mint).await, donation, "the donation was burned");
+    assert_eq!(env.token_balance(&curve, &mint).await, 0);
+    let k = pool_keys(&mint);
+    let token_vault = if k.order.mint_is_token_0 { k.cpmm.token_0_vault } else { k.cpmm.token_1_vault };
+    assert_eq!(env.token_amount_at(&token_vault).await, Some(TRACKED));
+}
+
+/// Codex review finding: a donation to the migration authority after prepare
+/// used to be added to the pool without re-checking the price bound.
+#[tokio::test]
+async fn donation_to_migration_authority_is_burned_not_added_to_pool() {
+    let mut env = Env::new().await;
+    let (mint, curve, whale) = completed_curve(&mut env).await;
     let crank = env.crank.pubkey();
     let ix = env.prepare_migration_ix(&crank, &mint);
     crank_send(&mut env, &[ix], &[]).await.unwrap();
 
-    // Griefer sends 1 raw token unit to the migration authority's ATA.
     let k = pool_keys(&mint);
-    let ix = anchor_spl::token_2022::spl_token_2022::instruction::transfer_checked(
-        &TOKEN_2022,
-        &ata(&whale.pubkey(), &mint),
-        &mint,
-        &ata(&k.migration_authority, &mint),
-        &whale.pubkey(),
-        &[],
-        1,
-        TOKEN_DECIMALS,
-    )
-    .unwrap();
-    env.send(&[ix], &[&whale]).await.unwrap();
+    let donation = 30 * M;
+    env.send(&[donate_tokens_ix(&mint, &whale, &ata(&k.migration_authority, &mint), donation)], &[&whale]).await.unwrap();
+    let supply_before = env.mint_supply(&mint).await;
 
     let ix = env.migrate_raydium_ix(&crank, &mint);
     crank_send(&mut env, &[ix], &[]).await.unwrap();
+
     let c: BondingCurve = env.anchor(&curve).await;
-    assert_eq!(c.migration_tokens, DEFAULT_TOKEN_TOTAL_SUPPLY - DEFAULT_INITIAL_REAL_TOKEN_RESERVES + 1, "donation joins the pool");
-    let vault = if k.order.mint_is_token_0 { k.cpmm.token_0_vault } else { k.cpmm.token_1_vault };
-    assert_eq!(env.token_amount_at(&vault).await, Some(c.migration_tokens));
+    assert_eq!(c.migration_tokens, TRACKED);
+    let (token_vault, sol_vault) = if k.order.mint_is_token_0 { (k.cpmm.token_0_vault, k.cpmm.token_1_vault) } else { (k.cpmm.token_1_vault, k.cpmm.token_0_vault) };
+    assert_eq!(env.token_amount_at(&token_vault).await, Some(TRACKED), "opening price unaffected");
+    assert_eq!(env.token_amount_at(&sol_vault).await, Some(c.migration_sol));
+    assert_eq!(supply_before - env.mint_supply(&mint).await, donation, "the donation was burned");
+}
+
+#[tokio::test]
+async fn wsol_donation_goes_to_treasury_not_pool() {
+    let mut env = Env::new().await;
+    let (mint, curve, _) = completed_curve(&mut env).await;
+    let crank = env.crank.pubkey();
+    let ix = env.prepare_migration_ix(&crank, &mint);
+    crank_send(&mut env, &[ix], &[]).await.unwrap();
+
+    // A donor creates the migration authority's WSOL account and wraps 3 SOL into it.
+    let k = pool_keys(&mint);
+    let donor = env.user_with(5 * SOL).await;
+    let wsol_ata = anchor_spl::associated_token::get_associated_token_address_with_program_id(&k.migration_authority, &WSOL_MINT, &SPL_TOKEN);
+    let donation = 3 * SOL;
+    let ixs = [
+        anchor_spl::associated_token::spl_associated_token_account::instruction::create_associated_token_account(
+            &donor.pubkey(),
+            &k.migration_authority,
+            &WSOL_MINT,
+            &SPL_TOKEN,
+        ),
+        solana_sdk::system_instruction::transfer(&donor.pubkey(), &wsol_ata, donation),
+        anchor_spl::token::spl_token::instruction::sync_native(&SPL_TOKEN, &wsol_ata).unwrap(),
+    ];
+    env.send(&ixs, &[&donor]).await.unwrap();
+
+    let crank_before = env.lamports(&crank).await;
+    let ix = env.migrate_raydium_ix(&crank, &mint);
+    crank_send(&mut env, &[ix], &[]).await.unwrap();
+    let c: BondingCurve = env.anchor(&curve).await;
+    let sol_vault = if k.order.mint_is_token_0 { k.cpmm.token_1_vault } else { k.cpmm.token_0_vault };
+    assert_eq!(env.token_amount_at(&sol_vault).await, Some(c.migration_sol), "pool SOL is exactly the prepared amount");
+    assert!(env.account(&wsol_ata).await.is_none(), "WSOL account unwrapped and closed");
+    // The donor paid this account's rent, so the crank (which paid nothing) is
+    // refunded that rent: never worse off.
+    assert!(env.lamports(&crank).await >= crank_before);
+
+    // The donated SOL sits with the migration authority and reaches the treasury at lock.
+    let auth_after_pool = env.lamports(&k.migration_authority).await;
+    assert!(auth_after_pool >= donation);
+    let treasury_before = env.lamports(&env.treasury.clone()).await;
+    let nft = Keypair::new();
+    let ix = env.lock_lp_ix(&crank, &mint, &nft.pubkey());
+    crank_send(&mut env, &[ix], &[&nft]).await.unwrap();
+    let lock = parabull::raydium::lock_accounts(&common::raydium_mock::LOCK_ID, &LOCK_AUTH, &nft.pubkey(), &fee_key_vault(), &k.cpmm.lp_mint);
+    let lock_rents = env.lamports(&nft.pubkey()).await + env.lamports(&lock.fee_nft_account).await + env.lamports(&lock.locked_liquidity).await;
+    assert_eq!(env.lamports(&env.treasury.clone()).await - treasury_before, auth_after_pool - lock_rents);
+    assert_eq!(env.lamports(&k.migration_authority).await, 0);
 }
 
 #[tokio::test]

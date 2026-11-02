@@ -81,6 +81,8 @@ pub struct MigrationPrepared {
     pub sol_to_pool: u64,
     pub sol_reserve: u64,
     pub tokens_to_pool: u64,
+    /// Unsolicited tokens found in the curve's token account, burned.
+    pub surplus_tokens_burned: u64,
     pub slot: u64,
 }
 
@@ -93,6 +95,11 @@ pub struct MigratedToRaydium {
     pub token_1: Pubkey,
     pub tokens_to_pool: u64,
     pub sol_to_pool: u64,
+    /// Unsolicited tokens found in the migration authority's account, burned.
+    pub surplus_tokens_burned: u64,
+    /// Unsolicited WSOL in the migration authority's account; follows the
+    /// unspent reserve to the treasury in `lock_migrated_lp`.
+    pub surplus_wsol: u64,
     pub slot: u64,
 }
 

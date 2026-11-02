@@ -102,6 +102,23 @@ pub fn migration_split(real_sol_reserves: u64, reserve: u64) -> Result<Migration
     Ok(MigrationSplit { sol_to_pool, reserve })
 }
 
+/// Launched tokens the curve's own accounting says are still in its token
+/// account: the supply minus the net tokens sold off the curve. At completion
+/// this is `token_total_supply - initial_real_token_reserves`.
+/// `initial_real_token_reserves` is not updatable after `initialize`.
+pub fn tracked_curve_tokens(token_total_supply: u64, initial_real_token_reserves: u64, real_token_reserves: u64) -> Result<u64> {
+    let sold = initial_real_token_reserves.checked_sub(real_token_reserves).ok_or(ParabullError::Overflow)?;
+    token_total_supply.checked_sub(sold).ok_or_else(|| error!(ParabullError::Overflow))
+}
+
+/// Split an account balance into the tracked amount and an unsolicited
+/// surplus. Anyone can transfer tokens to a public ATA; the surplus must never
+/// change pool amounts (it would misprice the pool) or block migration.
+pub fn split_surplus(balance: u64, tracked: u64) -> Result<(u64, u64)> {
+    let surplus = balance.checked_sub(tracked).ok_or(ParabullError::InsufficientReserves)?;
+    Ok((tracked, surplus))
+}
+
 /// Opening pool price must not undercut the curve's final price by more than
 /// `max_discount_bps` (guards a misconfigured reserve). Compares
 /// `sol_to_pool / tokens` against `virtual_sol / virtual_token`.
@@ -485,6 +502,35 @@ mod tests {
         assert!(pool_price_within(s.sol_to_pool, tokens, vs, vt, 100));
         // But a reserve that eats half the SOL would be rejected at 10%.
         assert!(!pool_price_within(real_sol / 2, tokens, vs, vt, 1_000));
+    }
+
+    #[test]
+    fn tracked_tokens_ignore_donations() {
+        use crate::constants::*;
+        // Completed default curve: exactly the migration allocation.
+        let t = tracked_curve_tokens(DEFAULT_TOKEN_TOTAL_SUPPLY, DEFAULT_INITIAL_REAL_TOKEN_RESERVES, 0).unwrap();
+        assert_eq!(t, 206_900_000_000_000);
+        // Mid-curve: unsold real tokens are still in the account.
+        assert_eq!(tracked_curve_tokens(1_000, 800, 300).unwrap(), 500);
+        assert!(tracked_curve_tokens(1_000, 800, 900).is_err(), "real above initial is impossible");
+        // A donation only ever shows up as surplus.
+        assert_eq!(split_surplus(t + 50_000_000_000_000, t).unwrap(), (t, 50_000_000_000_000));
+        assert_eq!(split_surplus(t, t).unwrap(), (t, 0));
+        assert!(split_surplus(t - 1, t).is_err(), "less than tracked is an accounting error");
+    }
+
+    #[test]
+    fn donations_cannot_trip_the_price_check_on_tracked_amounts() {
+        use crate::constants::*;
+        let vt = DEFAULT_INITIAL_VIRTUAL_TOKEN_RESERVES - DEFAULT_INITIAL_REAL_TOKEN_RESERVES;
+        let real_sol = 85_005_359_057u64;
+        let vs = DEFAULT_INITIAL_VIRTUAL_SOL_RESERVES + real_sol;
+        let tracked = tracked_curve_tokens(DEFAULT_TOKEN_TOTAL_SUPPLY, DEFAULT_INITIAL_REAL_TOKEN_RESERVES, 0).unwrap();
+        let s = migration_split(real_sol, DEFAULT_MIGRATION_RESERVE_LAMPORTS).unwrap();
+        // The bug: pricing on the raw balance lets a ~10M-token donation fail the 5% bound forever.
+        assert!(!pool_price_within(s.sol_to_pool, tracked + 20_000_000_000_000, vs, vt, MAX_MIGRATION_PRICE_DISCOUNT_BPS));
+        // Pricing on tracked tokens is unaffected by any donation.
+        assert!(pool_price_within(s.sol_to_pool, tracked, vs, vt, MAX_MIGRATION_PRICE_DISCOUNT_BPS));
     }
 
     #[test]
