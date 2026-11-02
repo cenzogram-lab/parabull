@@ -23,9 +23,10 @@ async fn request_launch_escrows_deposit_and_commits_metadata() {
     assert_eq!(t.expires_at, t.created_at + DEFAULT_TICKET_TTL_SECONDS);
     assert!(t.created_at <= now);
 
-    let ticket_lamports = env.lamports(&key).await;
-    let rent = ticket_lamports - DEFAULT_TICKET_DEPOSIT_LAMPORTS;
-    assert_eq!(before - env.lamports(&user.pubkey()).await, DEFAULT_TICKET_DEPOSIT_LAMPORTS + rent);
+    // Flat price: the user pays exactly 0.230 SOL all-in (the harness payer
+    // covers the network fee), and the ticket holds exactly that, rent included.
+    assert_eq!(before - env.lamports(&user.pubkey()).await, DEFAULT_TICKET_DEPOSIT_LAMPORTS);
+    assert_eq!(env.lamports(&key).await, DEFAULT_TICKET_DEPOSIT_LAMPORTS);
 }
 
 #[tokio::test]
@@ -43,8 +44,7 @@ async fn create_consumes_ticket_and_launches_token() {
     env.request(&user, 7, "Pepe Coin", "PEPE", URI).await.unwrap();
 
     let ticket_key = ticket_pda(&user.pubkey(), 7);
-    let ticket_lamports = env.lamports(&ticket_key).await;
-    let ticket_rent = ticket_lamports - DEFAULT_TICKET_DEPOSIT_LAMPORTS;
+    assert_eq!(env.lamports(&ticket_key).await, DEFAULT_TICKET_DEPOSIT_LAMPORTS);
     let user_before = env.lamports(&user.pubkey()).await;
     let treasury_before = env.lamports(&env.treasury.clone()).await;
     let launch_key = env.launch.pubkey();
@@ -54,15 +54,22 @@ async fn create_consumes_ticket_and_launches_token() {
     let slot = env.clock().await.slot;
     let now = env.clock().await.unix_timestamp;
 
-    // Ticket closed; its rent goes back to the payer.
+    // Ticket closed; the user's 0.230 SOL is fully spent (nothing comes back).
     assert!(env.account(&ticket_key).await.is_none());
-    assert_eq!(env.lamports(&user.pubkey()).await, user_before + ticket_rent);
+    assert_eq!(env.lamports(&user.pubkey()).await, user_before);
     // 0.2 SOL to treasury.
-    assert_eq!(env.lamports(&env.treasury.clone()).await, treasury_before + DEFAULT_LAUNCH_FEE_LAMPORTS);
-    // Launch authority is reimbursed 0.03 SOL, which more than covers the rent it fronted.
-    let launch_after = env.lamports(&launch_key).await;
-    assert!(launch_after < launch_before + 30_000_000);
-    assert!(launch_after > launch_before, "0.03 SOL reimbursement must cover rent: before={launch_before} after={launch_after}");
+    // The launch authority is repaid exactly the rent it fronted: it ends whole.
+    assert_eq!(env.lamports(&launch_key).await, launch_before, "launch authority neither gains nor loses");
+    // Treasury gets the whole ticket minus that rent: 0.2 SOL fee + the unspent allocation.
+    let curve_key = pda(&[SEED_BONDING_CURVE, mint.as_ref()]);
+    let rent_fronted = env.lamports(&mint).await
+        + env.lamports(&curve_key).await
+        + env.lamports(&ata(&curve_key, &mint)).await
+        + env.lamports(&pda(&[SEED_TICKER_REGISTRY, b"PEPE"])).await
+        + env.lamports(&pda(&[SEED_NAME_REGISTRY, &normalize_name_hash("Pepe Coin").unwrap()])).await;
+    let treasury_gain = env.lamports(&env.treasury.clone()).await - treasury_before;
+    assert_eq!(treasury_gain, DEFAULT_TICKET_DEPOSIT_LAMPORTS - rent_fronted);
+    assert!(treasury_gain > DEFAULT_LAUNCH_FEE_LAMPORTS && rent_fronted < 30_000_000, "rent {rent_fronted} fits the 0.03 allocation");
 
     // Curve.
     let curve_key = pda(&[SEED_BONDING_CURVE, mint.as_ref()]);
@@ -291,4 +298,40 @@ async fn zero_tweet_id_is_rejected_at_request() {
     let mut env = Env::new().await;
     let user = env.funded_user().await;
     assert_custom(env.request_with_tweet(&user, 1, "Pepe Coin", "PEPE", URI, Some(0)).await, ParabullError::InvalidTweetId);
+}
+
+#[tokio::test]
+async fn relaunch_after_lock_repays_only_newly_created_rent() {
+    // A re-claimed (expired) registry was paid for by an earlier launch, so the
+    // second launch's backend is not repaid for it: that part stays with the treasury.
+    let mut env = Env::new().await;
+    let alice = env.funded_user().await;
+    env.request(&alice, 1, "Pepe Coin", "PEPE", URI).await.unwrap();
+    env.create(&alice.pubkey(), 1, "Pepe Coin", "PEPE", URI).await.unwrap();
+    env.advance(DEFAULT_REGISTRY_LOCK_SECONDS + 1).await;
+
+    let bob = env.funded_user().await;
+    env.request(&bob, 1, "Pepe Coin", "PEPE", URI).await.unwrap();
+    let launch_key = env.launch.pubkey();
+    let launch_before = env.lamports(&launch_key).await;
+    let treasury_before = env.lamports(&env.treasury.clone()).await;
+    let mint = env.create(&bob.pubkey(), 1, "Pepe Coin", "PEPE", URI).await.unwrap();
+
+    assert_eq!(env.lamports(&launch_key).await, launch_before, "repaid exactly: mint + curve + ATA only");
+    let curve_key = pda(&[SEED_BONDING_CURVE, mint.as_ref()]);
+    let fresh_rent = env.lamports(&mint).await + env.lamports(&curve_key).await + env.lamports(&ata(&curve_key, &mint)).await;
+    assert_eq!(env.lamports(&env.treasury.clone()).await - treasury_before, DEFAULT_TICKET_DEPOSIT_LAMPORTS - fresh_rent);
+}
+
+#[tokio::test]
+async fn flat_ticket_with_tweet_still_leaves_launch_authority_whole() {
+    let mut env = Env::new().await;
+    let user = env.funded_user().await;
+    env.request_with_tweet(&user, 1, "Pepe Coin", "PEPE", URI, Some(TWEET)).await.unwrap();
+    let launch_key = env.launch.pubkey();
+    let launch_before = env.lamports(&launch_key).await;
+    let treasury_before = env.lamports(&env.treasury.clone()).await;
+    env.create_with_tweet(&user.pubkey(), 1, "Pepe Coin", "PEPE", URI, Some(tweet_registry_pda(TWEET))).await.unwrap();
+    assert_eq!(env.lamports(&launch_key).await, launch_before, "tweet registry rent repaid too");
+    assert!(env.lamports(&env.treasury.clone()).await - treasury_before > DEFAULT_LAUNCH_FEE_LAMPORTS);
 }
