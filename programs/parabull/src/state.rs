@@ -478,10 +478,11 @@ pub struct RewardEpoch {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod fixtures {
+    //! In-memory accounts shared by unit tests across modules.
     use super::*;
 
-    fn global() -> Global {
+    pub(crate) fn global() -> Global {
         Global {
             bump: 255,
             paused: false,
@@ -509,29 +510,7 @@ mod tests {
         }
     }
 
-    fn params(g: &Global) -> GlobalParams {
-        GlobalParams {
-            launch_authority: g.launch_authority,
-            crank_authority: g.crank_authority,
-            treasury: g.treasury,
-            parabull_mint: g.parabull_mint,
-            launch_fee_lamports: g.launch_fee_lamports,
-            ticket_deposit_lamports: g.ticket_deposit_lamports,
-            ticket_ttl_seconds: g.ticket_ttl_seconds,
-            platform_fee_bps: g.platform_fee_bps,
-            buyback_bps: g.buyback_bps,
-            holder_bps: g.holder_bps,
-            dex_target_lamports: g.dex_target_lamports,
-            trading_open_delay_slots: g.trading_open_delay_slots,
-            registry_lock_seconds: g.registry_lock_seconds,
-            initial_virtual_token_reserves: g.initial_virtual_token_reserves,
-            initial_virtual_sol_reserves: g.initial_virtual_sol_reserves,
-            initial_real_token_reserves: g.initial_real_token_reserves,
-            token_total_supply: g.token_total_supply,
-        }
-    }
-
-    fn curve(g: &Global) -> BondingCurve {
+    pub(crate) fn curve(g: &Global) -> BondingCurve {
         let mut c = BondingCurve {
             bump: 0,
             complete: false,
@@ -555,6 +534,34 @@ mod tests {
         };
         c.init(254, Pubkey::new_unique(), Pubkey::new_unique(), g, 1_000, 1_700_000_000).unwrap();
         c
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fixtures::{curve, global};
+    use super::*;
+
+    fn params(g: &Global) -> GlobalParams {
+        GlobalParams {
+            launch_authority: g.launch_authority,
+            crank_authority: g.crank_authority,
+            treasury: g.treasury,
+            parabull_mint: g.parabull_mint,
+            launch_fee_lamports: g.launch_fee_lamports,
+            ticket_deposit_lamports: g.ticket_deposit_lamports,
+            ticket_ttl_seconds: g.ticket_ttl_seconds,
+            platform_fee_bps: g.platform_fee_bps,
+            buyback_bps: g.buyback_bps,
+            holder_bps: g.holder_bps,
+            dex_target_lamports: g.dex_target_lamports,
+            trading_open_delay_slots: g.trading_open_delay_slots,
+            registry_lock_seconds: g.registry_lock_seconds,
+            initial_virtual_token_reserves: g.initial_virtual_token_reserves,
+            initial_virtual_sol_reserves: g.initial_virtual_sol_reserves,
+            initial_real_token_reserves: g.initial_real_token_reserves,
+            token_total_supply: g.token_total_supply,
+        }
     }
 
     #[test]

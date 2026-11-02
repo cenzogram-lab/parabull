@@ -22,6 +22,15 @@ reading only.
   `refund_ticket` always sends funds to the payer. The payer can call it
   after expiry; the launch authority can call it at any time (to reject a
   launch). Refunds still work while the program is paused.
+- **Trading.** `buy(amount, max_sol_cost)` buys an exact number of tokens;
+  if fewer remain, it fills only what's left, and that final buy completes the
+  curve. `max_sol_cost` includes the fee. `sell(amount, min_sol_output)`:
+  `min_sol_output` is after the fee. Trades are rejected while paused, before
+  `trading_open_slot` (`TradingNotOpenYet`) and once the curve is complete
+  (`CurveComplete`). The whole buy payment (cost plus fee) goes into the curve
+  account; a sell pays out only the net amount, so the fee never leaves the
+  curve. Every trade checks that
+  `curve lamports >= rent + real_sol_reserves + all fee buckets`.
 - **Anti-vamp registry.** `["registry", TICKER]` and `["name", sha256(name)]`
   PDAs lock a ticker or name for 3 days (`Global.registry_lock_seconds`).
   Tickers are 1-10 ASCII letters or digits, stored uppercase. Lookalike
@@ -52,8 +61,11 @@ reading only.
 | `programs/parabull/src/math.rs` | Curve and fee arithmetic (no I/O) |
 | `programs/parabull/src/instructions/` | One file per instruction |
 | `programs/parabull/src/launch.rs` | Pure launch-flow rules (metadata, expiry, refunds, settlement, registry claims) |
+| `programs/parabull/src/trade.rs` | Pure buy/sell state transitions (open-slot check, slippage, fee split, graduation) |
 | `programs/parabull/tests/reference_parity.rs` | Differential tests against `reference/programs/pump` |
-| `programs/parabull/tests/launch_flow.rs` | Runtime tests using solana-program-test (real Token-2022 + ATA programs) |
+| `programs/parabull/tests/common/mod.rs` | Shared solana-program-test harness (`Env`, instruction builders) |
+| `programs/parabull/tests/launch_flow.rs` | Runtime tests: request_launch / refund_ticket / create |
+| `programs/parabull/tests/trade_flow.rs` | Runtime tests: buy / sell (Token-2022 transfers, lamports, slot delay, graduation) |
 | `reference/` | Byte-matching pump.fun reconstructions. Read-only |
 
 ## Rules for changes
@@ -76,6 +88,12 @@ reading only.
   match").
 - New instructions get pure-rule unit tests and runtime tests in
   `tests/launch_flow.rs` (or a sibling file).
+- In runtime tests, advance slots with `Env::warp_to`, which sets the
+  `Clock` sysvar. `ProgramTestContext::warp_to_slot` hits the cloud
+  container's 20,000 open-file limit.
+- In program-test the program runs natively, so its own `msg!`/`emit!` logs
+  don't appear in transaction metadata. Assert on state instead; checking
+  events needs an SBF build.
 
 ## Verified commands
 

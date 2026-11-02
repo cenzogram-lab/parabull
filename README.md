@@ -18,7 +18,8 @@ A Solana meme launchpad built on Anchor 0.31.1:
 | Curve and fee maths (`math.rs`), with parity tests against the reference | Done |
 | `initialize` | Done |
 | `request_launch`, `refund_ticket`, `create` (blind launch, registry locks) | Done |
-| Buy/sell, migration, flywheel cranks | Not started |
+| `buy`, `sell` (open-slot delay, slippage, 1% fee buckets, graduation lock) | Done |
+| Raydium CPMM migration, escrow release, flywheel cranks | Not started |
 
 ## Development
 

@@ -38,3 +38,38 @@ pub struct TokenCreated {
     pub token_total_supply: u64,
     pub launch_fee_lamports: u64,
 }
+
+#[event]
+pub struct TradeEvent {
+    pub mint: Pubkey,
+    pub user: Pubkey,
+    pub is_buy: bool,
+    pub token_amount: u64,
+    /// Buy: lamports added to reserves. Sell: lamports removed from reserves.
+    pub sol_amount: u64,
+    pub fee: u64,
+    pub fee_to_escrow: u64,
+    pub fee_to_buyback: u64,
+    pub fee_to_holders: u64,
+    pub fee_to_treasury: u64,
+    pub virtual_token_reserves: u64,
+    pub virtual_sol_reserves: u64,
+    pub real_token_reserves: u64,
+    pub real_sol_reserves: u64,
+    pub slot: u64,
+    pub timestamp: i64,
+}
+
+/// The last real token was bought; the curve is locked until Raydium migration.
+#[event]
+pub struct GraduationReady {
+    pub mint: Pubkey,
+    pub bonding_curve: Pubkey,
+    pub real_sol_reserves: u64,
+    pub virtual_token_reserves: u64,
+    pub virtual_sol_reserves: u64,
+    pub escrow_accrued: u64,
+    pub escrow_funded: bool,
+    pub slot: u64,
+    pub timestamp: i64,
+}

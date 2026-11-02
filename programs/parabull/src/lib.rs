@@ -11,6 +11,7 @@ pub mod instructions;
 pub mod launch;
 pub mod math;
 pub mod state;
+pub mod trade;
 
 use instructions::*;
 use state::GlobalParams;
@@ -43,5 +44,16 @@ pub mod parabull {
     /// consumes the ticket, claims the ticker/name locks, creates the curve.
     pub fn create(ctx: Context<Create>, name: String, symbol: String, uri: String) -> Result<()> {
         instructions::create::handler(ctx, name, symbol, uri)
+    }
+
+    /// Buy `amount` tokens for at most `max_sol_cost` lamports (fee inclusive).
+    /// Partially fills to the curve's remaining tokens; the final fill completes it.
+    pub fn buy(ctx: Context<Trade>, amount: u64, max_sol_cost: u64) -> Result<()> {
+        instructions::buy::handler(ctx, amount, max_sol_cost)
+    }
+
+    /// Sell `amount` tokens for at least `min_sol_output` lamports (net of fee).
+    pub fn sell(ctx: Context<Trade>, amount: u64, min_sol_output: u64) -> Result<()> {
+        instructions::sell::handler(ctx, amount, min_sol_output)
     }
 }

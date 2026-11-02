@@ -50,4 +50,12 @@ pub enum ParabullError {
     TickerLocked,
     #[msg("Name is locked by a launch in the last 3 days")]
     NameLocked,
+    #[msg("Trading has not opened yet for this curve")]
+    TradingNotOpenYet,
+    #[msg("Bonding curve is complete; trading is locked until migration")]
+    CurveComplete,
+    #[msg("Slippage limit exceeded")]
+    SlippageExceeded,
+    #[msg("Bonding curve lamports do not cover rent + reserves + accrued fees")]
+    LamportInvariantViolated,
 }
