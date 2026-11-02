@@ -97,6 +97,15 @@ reading only.
     holders can also pull their own.
   - At most `MAX_REWARD_LEAVES` (80,000) leaves per epoch. Use more epochs
     for larger snapshots.
+  - **Expiry:** each epoch's `expires_at` is set at publish from
+    `Global.reward_claim_window_seconds` (default 30 days, minimum 7, admin
+    can change it). `expire_reward_epoch(epoch_index)` (crank or admin) is
+    allowed strictly after `expires_at` and only once. After that, no claims
+    are accepted for the epoch, and its unclaimed amount is added to
+    `HolderRewardVault.total_expired_lamports` (outstanding = committed −
+    claimed − expired), so it can fund later epochs. No lamports move. Claims
+    made after the deadline still pay out until someone actually expires the
+    epoch.
   - **Leaf/tree format (the backend must match it exactly):** leaf =
     `sha256(0x00 || index u32 LE || claimant 32B || amount u64 LE)`; node =
     `sha256(0x01 || min(a,b) || max(a,b))`; on a level with an odd number of
@@ -178,6 +187,20 @@ reading only.
 | `programs/parabull/tests/common/raydium_mock.rs` | Native Raydium CPMM / lock mocks at the mainnet IDs; they re-derive and check every account |
 | `reference/` | Byte-matching pump.fun reconstructions. Read-only |
 
+## Cluster addresses (Raydium)
+
+These come from Raydium's own sources: raydium-cp-swap `lib.rs` (the IDs
+behind its `devnet` feature flag) and raydium-sdk-v2 `programId.ts`.
+**Devnet and mainnet use different CPMM and Burn & Earn program IDs.**
+
+| | Mainnet | Devnet |
+| --- | --- | --- |
+| CPMM program | `CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C` | `DRaycpLY18LhpbydsBWbVJtxpNv9oXPgjRSfpF2bWpYb` |
+| CPMM pool-fee receiver | `DNXgeM9EiiaAbaWvwjHj9fQQLAX5ZsfHyvmYUNRAdNC8` | `3oE58BKVt8KuYkGxx8zBojugnymWmBiyafWgMrnb6eYy` |
+| Burn & Earn program | `LockrWmn6K5twhz3y9w1dQERbmgSaRkfnTeTKbpofwE` | `DRay25Usp3YJAi7beckgpGUC7mGJ2cR1AVPxhYfwVCUX` |
+| Burn & Earn authority | `3f7GcQFG397GAaEnv51zR6tsTVihYRydnydDD1cXekxH` | `7qWVV8UY2bRJfDLP4s37YzBPKUkVB46DStYJBpYbQzu3` |
+| AmmConfig | set `RAYDIUM_AMM_CONFIG` | `9zSzfkYy6awexsHvmggeH36pfVUdDGyCcwmjT3AQPBj6` (supplied by the team; `deploy_and_init.ts` checks it's owned by CPMM) |
+
 ## Rules for changes
 
 - Never deploy, build for release, or change the program logic under
@@ -211,11 +234,27 @@ reading only.
   don't appear in transaction metadata. Assert on state instead; checking
   events needs an SBF build.
 
+## Scripts (`scripts/`)
+
+- TypeScript, typed against the IDL from `anchor build`. `npm run typecheck`
+  fails on any wrong instruction, account or argument name.
+- `src/curve.ts`, `src/merkle.ts` and `src/launch.ts` are TypeScript ports
+  of `math.rs`, `merkle.rs` and the ticker/name normalisation in `state.rs`.
+  `npm test` checks them against values pinned in the Rust tests (the
+  Merkle root is also pinned in `merkle.rs`). If you change one side,
+  change both.
+- Without the Anchor CLI, the IDL can be generated with
+  `anchor_lang_idl::build::build_idl` (crate `anchor-lang-idl` 0.1.4,
+  feature `build`). Run it with `RUSTUP_TOOLCHAIN` unset: that version
+  passes a literal `+{toolchain}` to cargo whenever the variable is set.
+
 ## Verified commands
 
 - **test**: `cargo test -p parabull` (from the repository root). The
   first build compiles solana-program-test, which takes several minutes.
 - **check with IDL build**: `cargo check -p parabull --features idl-build`
+- **scripts**: `cd scripts && npm ci && npm run typecheck && npm test`
+  (needs `target/types/parabull.ts` from `anchor build`)
 - **build / deploy**: `anchor build` and `anchor deploy` (needs the Anchor
   0.31.1 and Solana CLIs). Before the first deploy, run `anchor keys sync`
   with your own program keypair.

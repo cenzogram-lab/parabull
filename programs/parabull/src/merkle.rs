@@ -99,6 +99,19 @@ mod tests {
         assert!(!verify(&bad, &t.root(), leaf_hash(4, &k, a)), "corrupted sibling");
     }
 
+    /// Cross-language vector: the same root is pinned in
+    /// `scripts/src/merkle.test.ts` and was computed independently in Python.
+    /// Claimant i = [i+1; 32], amount i = 1000 * (i+1), i in 0..5.
+    #[test]
+    fn pinned_cross_language_vector() {
+        let leaves = (0..5u8)
+            .map(|i| leaf_hash(u32::from(i), &Pubkey::new_from_array([i + 1; 32]), 1_000 * (u64::from(i) + 1)))
+            .collect();
+        let root = MerkleTree::new(leaves).root();
+        let hex: String = root.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, "8e2f88cdcb92884d2f7366851fa96d7301a484d2407381bc1566a4c5de6f1e7a");
+    }
+
     #[test]
     fn internal_node_cannot_pose_as_leaf() {
         let (_, t) = tree(4);

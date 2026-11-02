@@ -27,7 +27,9 @@ A Solana meme launchpad built on Anchor 0.31.1:
 | Collected meme tokens burned inside `collect_lp_fees` | Done |
 | $PARABULL `prepare_buyback` + `buyback_and_burn` (CPMM swap, slippage floor, burn) | Done (tested against Raydium mocks) |
 | Holder rewards: `publish_reward_epoch` / `claim_holder_reward` (Merkle + bitmap, push or pull) | Done |
-| Devnet run against real Raydium programs, backend snapshot/crank services | Not started |
+| `expire_reward_epoch` (claim window fixed per epoch) | Done |
+| `scripts/`: deploy + init, launch/trade smoke test, reference crank (typechecked against the IDL) | Done, not yet run against a live cluster |
+| SBF build + devnet run against real Raydium; LP-fee amount source; holder snapshot job | Not started |
 
 ## Development
 
