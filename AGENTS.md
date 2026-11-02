@@ -148,9 +148,23 @@ reading only.
      `Global.migration_reserve_lamports` is held back to pay the pool fee and
      rent. The pool must open within 5% of the curve's final price.
   2. `migrate_raydium` calls CPMM `initialize` with the PDA signing as
-     creator. Every Raydium address is re-derived and checked. The pool is
-     seeded with the PDA's actual token balances (at least the prepared
-     amounts), so tokens donated to those accounts can't block migration.
+     creator. Every Raydium address is re-derived and checked.
+
+  **Donations never change pool amounts.** Pricing and pool seeding use only
+  the curve's *tracked* amounts:
+  - tokens = `token_total_supply - (initial_real_token_reserves -
+    real_token_reserves)`;
+  - SOL = `real_sol_reserves` minus the reserve.
+
+  Anyone can send tokens or WSOL to the curve's or the migration authority's
+  public token accounts. Any such surplus is handled separately, so it can
+  neither fail the price check (blocking graduation) nor misprice the pool:
+  - Surplus tokens are burned: in `prepare_migration` for the curve account,
+    in `migrate_raydium` for the migration authority's account.
+  - Surplus WSOL is unwrapped into the migration authority and reaches the
+    treasury with the unspent reserve in step 3. The crank is refunded
+    exactly the WSOL account's rent.
+
   3. `lock_migrated_lp` (needs a new keypair for the fee-key NFT mint) calls
      Burn & Earn `lock_cp_liquidity` for the full LP balance. The fee-key NFT
      is owned by the `["fee-key-vault"]` PDA. Any unspent reserve goes to the
@@ -258,10 +272,26 @@ pins both index-0 addresses.
   `npm test` checks them against values pinned in the Rust tests (the
   Merkle root is also pinned in `merkle.rs`). If you change one side,
   change both.
-- Without the Anchor CLI, the IDL can be generated with
+- `anchor idl build -p parabull -o target/idl/parabull.json -t
+  target/types/parabull.ts` produces the IDL and TS types the scripts need,
+  with no Solana toolchain required. That's what CI does (verified with
+  anchor-cli 0.31.1 built from crates.io).
+- Without the Anchor CLI, the IDL can also be generated with
   `anchor_lang_idl::build::build_idl` (crate `anchor-lang-idl` 0.1.4,
   feature `build`). Run it with `RUSTUP_TOOLCHAIN` unset: that version
   passes a literal `+{toolchain}` to cargo whenever the variable is set.
+
+## CI
+
+`.github/workflows/ci.yml` runs on pull requests and on pushes to `main`:
+- **`cargo`:** `cargo test -p parabull --locked`, then `cargo check -p
+  parabull --features idl-build --locked`.
+- **`scripts`:** builds and caches anchor-cli 0.31.1 from crates.io, runs
+  `anchor idl build`, then `npm ci`, `npm run typecheck` and `npm test` in
+  `scripts/`.
+
+Both jobs use `line-tables-only` debug info, because each runtime-test
+binary is about 440 MB with full debug info.
 
 ## Verified commands
 

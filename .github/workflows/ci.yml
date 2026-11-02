@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  ANCHOR_CLI_VERSION: 0.31.1
+  # Each solana-program-test binary is ~440 MB with full debug info; line
+  # tables keep backtraces useful at a fraction of the size and link time.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+
+jobs:
+  cargo:
+    name: cargo test (program)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: parabull
+      # Unit, reference-parity and solana-program-test runtime suites.
+      - name: cargo test
+        run: cargo test -p parabull --locked
+      - name: cargo check (IDL build)
+        run: cargo check -p parabull --features idl-build --locked
+
+  scripts:
+    name: scripts (typecheck + tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: parabull
+
+      # The scripts are typed against target/types/parabull.ts, which the
+      # Anchor CLI generates from the program. Built from crates.io source and
+      # cached; no Solana toolchain is needed for IDL generation.
+      - name: Cache Anchor CLI
+        id: anchor-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/anchor
+          key: anchor-cli-${{ env.ANCHOR_CLI_VERSION }}-${{ runner.os }}
+      - name: Install Anchor CLI
+        if: steps.anchor-cache.outputs.cache-hit != 'true'
+        run: cargo install anchor-cli --version "$ANCHOR_CLI_VERSION" --locked
+      - name: Generate IDL + TS types
+        run: |
+          mkdir -p target/idl target/types
+          anchor idl build -p parabull -o target/idl/parabull.json -t target/types/parabull.ts
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+      - name: npm ci
+        working-directory: scripts
+        run: npm ci
+      - name: Typecheck scripts against the IDL
+        working-directory: scripts
+        run: npm run typecheck
+      - name: Script unit tests
+        working-directory: scripts
+        run: npm test
