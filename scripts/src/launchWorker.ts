@@ -181,7 +181,13 @@ export interface SafeGetOptions {
  * overall timeout, and the body read as a stream that's cut off as soon as it
  * passes `maxBytes`.
  */
-export function safeGet(url: string, opts: SafeGetOptions = {}): Promise<{ status: number; body: string }> {
+export interface SafeGetResult {
+  status: number;
+  body: string;
+  contentType: string;
+}
+
+export function safeGet(url: string, opts: SafeGetOptions = {}): Promise<SafeGetResult> {
   const maxBytes = opts.maxBytes ?? 1_000_000;
   const maxRedirects = opts.maxRedirects ?? 3;
   return new Promise((resolve, reject) => {
@@ -227,7 +233,7 @@ export function safeGet(url: string, opts: SafeGetOptions = {}): Promise<{ statu
         });
         res.on("end", () => {
           clearTimeout(timer);
-          resolve({ status, body: Buffer.concat(chunks).toString("utf8") });
+          resolve({ status, body: Buffer.concat(chunks).toString("utf8"), contentType: String(res.headers["content-type"] ?? "") });
         });
         res.on("error", fail);
       });
@@ -238,21 +244,39 @@ export function safeGet(url: string, opts: SafeGetOptions = {}): Promise<{ statu
   });
 }
 
-/** Metadata JSON must be reachable and name an image. `ipfs://` / `ar://` go through `gateway`. */
+const IMAGE_TYPES = /^image\/(png|jpeg|webp|gif)\b/i;
+const toGateway = (u: string) => u.replace(/^ipfs:\/\//i, "https://ipfs.io/ipfs/").replace(/^ar:\/\//i, "https://arweave.net/");
+
+/**
+ * Metadata JSON must be reachable and name an image that is itself reachable
+ * and a PNG, JPEG, WebP or GIF of at most 5 MB (BACKEND_SPEC §3.1). Both
+ * fetches go through `safeGet`; `ipfs://` / `ar://` go through `gateway`.
+ */
 export async function checkMetadataUri(
   uri: string,
-  opts: { get?: (url: string) => Promise<{ status: number; body: string }>; gateway?: (u: string) => string } & SafeGetOptions = {},
+  opts: { get?: (url: string, maxBytes: number) => Promise<SafeGetResult>; gateway?: (u: string) => string } & SafeGetOptions = {},
 ): Promise<string | null> {
+  const gateway = opts.gateway ?? toGateway;
+  const get = opts.get ?? ((u: string, maxBytes: number) => safeGet(u, { ...opts, maxBytes }));
   if (!ALLOWED_URI.test(uri)) return "metadata URI must be https://, ipfs:// or ar://";
-  const url = opts.gateway ? opts.gateway(uri) : uri.replace(/^ipfs:\/\//i, "https://ipfs.io/ipfs/").replace(/^ar:\/\//i, "https://arweave.net/");
+  let image: string;
   try {
-    const res = await (opts.get ?? ((u: string) => safeGet(u, opts)))(url);
+    const res = await get(gateway(uri), opts.maxBytes ?? 1_000_000);
     if (res.status < 200 || res.status >= 300) return `metadata URI returned ${res.status}`;
     const json = JSON.parse(res.body) as { image?: unknown };
     if (typeof json.image !== "string" || json.image.length === 0) return "metadata JSON has no image";
-    return null;
+    image = json.image;
   } catch (e) {
     return `metadata URI unreachable: ${(e as Error)?.message ?? e}`;
+  }
+  if (!ALLOWED_URI.test(image)) return "image URI must be https://, ipfs:// or ar://";
+  try {
+    const res = await get(gateway(image), 5_000_000);
+    if (res.status < 200 || res.status >= 300) return `image returned ${res.status}`;
+    if (!IMAGE_TYPES.test(res.contentType)) return `image has unsupported content-type ${res.contentType || "(none)"}`;
+    return null;
+  } catch (e) {
+    return `image unreachable: ${(e as Error)?.message ?? e}`;
   }
 }
 

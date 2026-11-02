@@ -31,7 +31,8 @@ tweet checks, the delay) in `scripts/src/launchWorker.ts`. It keeps jobs in
 memory rather than the durable table in §1.3. It fetches the metadata URI
 with `safeGet`: https only, every DNS answer and redirect hop checked against
 a public-address policy at connect time, at most 3 redirects, a 5 s timeout
-and a 1 MB limit enforced while streaming. It checks the tweet's
+and a 1 MB limit enforced while streaming. It then fetches the `image` the
+same way (5 MB, PNG/JPEG/WebP/GIF content-type). It checks the tweet's
 `$TICKER` and age but not its author unless given the linked account ID.
 
 The ticket stores only `metadata_hash`, not the plaintext name, symbol and

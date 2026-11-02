@@ -93,16 +93,38 @@ test("recovers name/symbol/URI/tweet from the user's request_launch transaction"
 
 const respond = (status: number, body: unknown) => (async () => new Response(typeof body === "string" ? body : JSON.stringify(body), { status })) as unknown as typeof fetch;
 
-test("metadata URI check", async () => {
-  const get = (status: number, body: unknown) => async () => ({ status, body: typeof body === "string" ? body : JSON.stringify(body) });
-  assert.equal(await checkMetadataUri(URI, { get: get(200, { name: NAME, image: "https://x/y.png" }) }), null);
+test("metadata URI check fetches the metadata and then the image", async () => {
+  const IMG = "https://arweave.net/pepe.png";
+  type R = { status: number; body: string; contentType: string };
+  const site = (pages: Record<string, R>) => {
+    const asked: [string, number][] = [];
+    const get = async (u: string, max: number) => {
+      asked.push([u, max]);
+      const r = pages[u];
+      if (!r) throw new Error("ECONNREFUSED");
+      return r;
+    };
+    return { get, asked };
+  };
+  const meta = (body: unknown, status = 200): R => ({ status, body: typeof body === "string" ? body : JSON.stringify(body), contentType: "application/json" });
+  const png: R = { status: 200, body: "", contentType: "image/png" };
+
+  const ok = site({ [URI]: meta({ name: NAME, image: IMG }), [IMG]: png });
+  assert.equal(await checkMetadataUri(URI, { get: ok.get }), null);
+  assert.deepEqual(ok.asked, [[URI, 1_000_000], [IMG, 5_000_000]]);
+
   assert.match((await checkMetadataUri("http://plain.example/m.json"))!, /https/);
-  assert.match((await checkMetadataUri(URI, { get: get(404, {}) }))!, /404/);
-  assert.match((await checkMetadataUri(URI, { get: get(200, { name: NAME }) }))!, /no image/);
-  assert.match((await checkMetadataUri(URI, { get: get(200, "not json") }))!, /unreachable/);
-  let asked = "";
-  await checkMetadataUri("ipfs://bafyhash/meta.json", { get: async (u) => ((asked = u), { status: 200, body: '{"image":"i"}' }) });
-  assert.equal(asked, "https://ipfs.io/ipfs/bafyhash/meta.json");
+  assert.match((await checkMetadataUri(URI, { get: site({ [URI]: meta({}, 404) }).get }))!, /metadata URI returned 404/);
+  assert.match((await checkMetadataUri(URI, { get: site({ [URI]: meta({ name: NAME }) }).get }))!, /no image/);
+  assert.match((await checkMetadataUri(URI, { get: site({ [URI]: meta("not json") }).get }))!, /metadata URI unreachable/);
+  // The image itself must exist and be an image.
+  assert.match((await checkMetadataUri(URI, { get: site({ [URI]: meta({ image: IMG }) }).get }))!, /image unreachable/);
+  assert.match((await checkMetadataUri(URI, { get: site({ [URI]: meta({ image: IMG }), [IMG]: { ...png, status: 404 } }).get }))!, /image returned 404/);
+  assert.match((await checkMetadataUri(URI, { get: site({ [URI]: meta({ image: IMG }), [IMG]: { ...png, contentType: "text/html" } }).get }))!, /content-type/);
+  assert.match((await checkMetadataUri(URI, { get: site({ [URI]: meta({ image: "file:///etc/passwd" }) }).get }))!, /image URI must be/);
+  // ipfs:// and ar:// go through the gateway, for the metadata and the image.
+  const ipfs = site({ "https://ipfs.io/ipfs/bafy/meta.json": meta({ image: "ar://tx" }), "https://arweave.net/tx": png });
+  assert.equal(await checkMetadataUri("ipfs://bafy/meta.json", { get: ipfs.get }), null);
 });
 
 test("only globally routable addresses are public", () => {
@@ -134,7 +156,7 @@ test("safeGet: blocks private targets, caps redirects and streams with a byte li
     // The default lookup refuses loopback, before any request is sent.
     await assert.rejects(safeGet(`${base.replace("127.0.0.1", "localhost")}/ok`, { allowHttp: true }), /non-public/);
     await assert.rejects(safeGet(`${base}/ok`), /refusing http:/);
-    assert.deepEqual(await safeGet(`${base}/r2`, local), { status: 200, body: '{"image":"i"}' });
+    assert.equal((await safeGet(`${base}/r2`, local)).body, '{"image":"i"}');
     await assert.rejects(safeGet(`${base}/r3`, { ...local, maxRedirects: 2 }), /too many redirects/);
     await assert.rejects(safeGet(`${base}/big`, { ...local, maxBytes: 60_000 }), /too large/);
     assert.equal((await safeGet(`${base}/big`, { ...local, maxBytes: 200_000 })).body.length, 100_000);
