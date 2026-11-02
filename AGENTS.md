@@ -35,6 +35,19 @@ reading only.
   PDAs lock a ticker or name for 3 days (`Global.registry_lock_seconds`).
   Tickers are 1-10 ASCII letters or digits, stored uppercase. Lookalike
   detection happens in the off-chain indexer, not on-chain.
+- **Announcement-tweet lock.**
+  - `request_launch(..., tweet_id: Option<u64>)` takes the tweet's numeric
+    status ID. The program stores
+    `tweet_id_hash = sha256("parabull:tweet" || id u64 LE)` on the ticket.
+    Hashing the numeric ID on-chain means every URL form of one tweet maps
+    to the same lock.
+  - `create` claims `["tweet", tweet_id_hash]` (`TweetRegistry`) for the same
+    3 days. The optional `tweet_registry` account must be passed exactly
+    when the ticket has a tweet (`TweetRegistryMismatch` otherwise).
+  - Checking that the creator actually authored the tweet is off-chain
+    (`docs/BACKEND_SPEC.md` §1.2).
+- **Off-chain parity** (random 3–15 s create delay, 20-slot bundle check,
+  image and lookalike flags): specified in `docs/BACKEND_SPEC.md`.
 - **Fees.** The platform fee is 1% (hard-capped by `MAX_PLATFORM_FEE_BPS`).
   Creators get 0%. Each trade's fee is split into counters on the token's own
   `BondingCurve`, never written to a shared vault in the trade path:
@@ -199,6 +212,7 @@ reading only.
 | `programs/parabull/tests/buyback_flow.rs` | Runtime tests: buyback swap + burn, slippage, vault rent, access |
 | `programs/parabull/tests/rewards_flow.rs` | Runtime tests: Merkle epochs, pull/push claims, double-claim, solvency |
 | `programs/parabull/tests/common/raydium_mock.rs` | Native Raydium CPMM / lock mocks at the mainnet IDs; they re-derive and check every account |
+| `docs/BACKEND_SPEC.md` | Off-chain services: launch worker (random delay, tweet verification), bundle-risk indexer, similarity flags |
 | `reference/` | Byte-matching pump.fun reconstructions. Read-only |
 
 ## Cluster addresses (Raydium)
