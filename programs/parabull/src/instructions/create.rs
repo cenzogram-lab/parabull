@@ -20,10 +20,20 @@ use crate::error::ParabullError;
 use crate::events::TokenCreated;
 use crate::launch::{check_metadata_matches, check_ticket_live, check_tweet_registry_presence, registry_claimable, settle_ticket};
 
-/// Lamports of an account the launch authority funded in this instruction
-/// (0 for a registry that already existed and is merely re-claimed).
-fn fronted(info: &AccountInfo, newly_created: bool) -> u64 {
-    if newly_created { info.lamports() } else { 0 }
+/// Lamports the launch authority fronted for an account created by its own
+/// fresh keypair (the mint) or derived from it (curve, curve ATA). Nobody can
+/// know those addresses before `create` lands, so nobody can pre-fund them.
+fn fronted_fresh(info: &AccountInfo) -> u64 {
+    info.lamports()
+}
+
+/// Rent fronted for a registry PDA (0 for one that already existed and is
+/// merely re-claimed). Registry seeds are public, so anyone can pre-fund one,
+/// and Anchor's `init` then tops it up only to the rent-exempt minimum.
+/// Repayment is capped at that minimum so a donation is never paid to the
+/// launch authority out of the treasury's share.
+fn fronted_registry(info: &AccountInfo, newly_created: bool, rent: &Rent) -> u64 {
+    if newly_created { info.lamports().min(rent.minimum_balance(info.data_len())) } else { 0 }
 }
 use crate::state::{BondingCurve, Global, LaunchTicket, NameRegistry, TickerRegistry, TweetRegistry};
 
@@ -191,14 +201,15 @@ pub fn handler(ctx: Context<Create>, name: String, symbol: String, uri: String) 
     // CPI so the runtime never sees an unbalanced caller state.
     let settlement = {
         let a = &ctx.accounts;
-        let mut rent = fronted(&a.mint.to_account_info(), true)
-            .checked_add(fronted(&a.bonding_curve.to_account_info(), true))
-            .and_then(|v| v.checked_add(fronted(&a.curve_token_account.to_account_info(), true)))
-            .and_then(|v| v.checked_add(fronted(&a.ticker_registry.to_account_info(), new_ticker)))
-            .and_then(|v| v.checked_add(fronted(&a.name_registry.to_account_info(), new_name)))
+        let r = Rent::get()?;
+        let mut rent = fronted_fresh(&a.mint.to_account_info())
+            .checked_add(fronted_fresh(&a.bonding_curve.to_account_info()))
+            .and_then(|v| v.checked_add(fronted_fresh(&a.curve_token_account.to_account_info())))
+            .and_then(|v| v.checked_add(fronted_registry(&a.ticker_registry.to_account_info(), new_ticker, &r)))
+            .and_then(|v| v.checked_add(fronted_registry(&a.name_registry.to_account_info(), new_name, &r)))
             .ok_or(ParabullError::Overflow)?;
         if let Some(tw) = &a.tweet_registry {
-            rent = rent.checked_add(fronted(&tw.to_account_info(), new_tweet)).ok_or(ParabullError::Overflow)?;
+            rent = rent.checked_add(fronted_registry(&tw.to_account_info(), new_tweet, &r)).ok_or(ParabullError::Overflow)?;
         }
         settle_ticket(a.ticket.to_account_info().lamports(), a.ticket.launch_fee_lamports, rent)?
     };

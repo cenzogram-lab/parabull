@@ -4,6 +4,10 @@
  * scripts/launch_worker.ts.
  */
 import { randomInt } from "crypto";
+import { LookupAddress, LookupAllOptions, lookup as dnsLookup } from "dns";
+import { ClientRequest, RequestOptions, request as httpRequest } from "http";
+import { request as httpsRequest } from "https";
+import { BlockList, isIP } from "net";
 import { BorshCoder } from "@coral-xyz/anchor";
 import { MessageV0, PublicKey, VersionedMessage, VersionedTransactionResponse } from "@solana/web3.js";
 import { metadataCommitment, tweetIdHash } from "./launch";
@@ -118,27 +122,137 @@ export function findRequestArgs(
 
 const ALLOWED_URI = /^(https:\/\/|ipfs:\/\/|ar:\/\/)/i;
 
+/** Ranges a user-supplied URL must never reach (private, loopback, link-local, metadata, multicast, reserved). */
+const BLOCKED = (() => {
+  const b = new BlockList();
+  for (const [net, bits] of [
+    ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16],
+    ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.0.2.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15],
+    ["198.51.100.0", 24], ["203.0.113.0", 24], ["224.0.0.0", 4], ["240.0.0.0", 4],
+  ] as const) b.addSubnet(net, bits, "ipv4");
+  for (const [net, bits] of [
+    ["::", 128], ["::1", 128], ["64:ff9b::", 96], ["100::", 64], ["2001:db8::", 32], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8],
+  ] as const) b.addSubnet(net, bits, "ipv6");
+  return b;
+})();
+
+/** True only for a globally routable unicast address. IPv4-mapped IPv6 is judged by its IPv4 part. */
+export function isPublicAddress(ip: string): boolean {
+  const family = isIP(ip);
+  if (family === 4) return !BLOCKED.check(ip, "ipv4");
+  if (family !== 6) return false;
+  const mapped = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+  if (mapped) return !BLOCKED.check(mapped[1], "ipv4");
+  if (/^::ffff:/i.test(ip)) return false;
+  return !BLOCKED.check(ip, "ipv6");
+}
+
+type LookupFn = NonNullable<RequestOptions["lookup"]>;
+
+/**
+ * DNS lookup that refuses non-public answers. It's the lookup the socket
+ * connects with, so the check and the connection use the same address (no
+ * DNS-rebinding window between them).
+ */
+export const publicOnlyLookup: LookupFn = (hostname, options, callback) => {
+  dnsLookup(hostname, { ...(options as LookupAllOptions), all: true }, (err, addrs) => {
+    const cb = callback as unknown as (e: Error | null, a?: unknown, f?: number) => void;
+    if (err) return cb(err);
+    const list = addrs as LookupAddress[];
+    const bad = list.find((a) => !isPublicAddress(a.address));
+    if (bad || list.length === 0) return cb(Object.assign(new Error(`refusing non-public address ${bad?.address ?? "(none)"} for ${hostname}`), { code: "EBLOCKED" }));
+    if ((options as LookupAllOptions)?.all) return cb(null, list);
+    cb(null, list[0].address, list[0].family);
+  });
+};
+
+export interface SafeGetOptions {
+  timeoutMs?: number;
+  maxBytes?: number;
+  maxRedirects?: number;
+  /** Tests only: allow http: and a permissive lookup against a local server. */
+  allowHttp?: boolean;
+  lookup?: LookupFn;
+}
+
+/**
+ * GET a user-supplied URL safely: https only, every hop's address checked by
+ * `publicOnlyLookup`, at most `maxRedirects` redirects (each re-validated), an
+ * overall timeout, and the body read as a stream that's cut off as soon as it
+ * passes `maxBytes`.
+ */
+export function safeGet(url: string, opts: SafeGetOptions = {}): Promise<{ status: number; body: string }> {
+  const maxBytes = opts.maxBytes ?? 1_000_000;
+  const maxRedirects = opts.maxRedirects ?? 3;
+  return new Promise((resolve, reject) => {
+    let current: ClientRequest | undefined;
+    const timer = setTimeout(() => {
+      current?.destroy();
+      reject(new Error("timeout"));
+    }, opts.timeoutMs ?? 5_000);
+    const fail = (e: Error) => {
+      clearTimeout(timer);
+      reject(e);
+    };
+    const hop = (target: string, redirects: number) => {
+      let u: URL;
+      try {
+        u = new URL(target);
+      } catch {
+        return fail(new Error(`bad URL ${target}`));
+      }
+      const transport = u.protocol === "https:" ? httpsRequest : u.protocol === "http:" && opts.allowHttp ? httpRequest : null;
+      if (!transport) return fail(new Error(`refusing ${u.protocol} URL`));
+      current = transport(u, { method: "GET", lookup: opts.lookup ?? publicOnlyLookup, headers: { accept: "application/json" } }, (res) => {
+        const status = res.statusCode ?? 0;
+        if (status >= 300 && status < 400 && res.headers.location) {
+          res.resume();
+          if (redirects >= maxRedirects) return fail(new Error("too many redirects"));
+          return hop(new URL(res.headers.location, u).toString(), redirects + 1);
+        }
+        const declared = Number(res.headers["content-length"] ?? "0");
+        if (declared > maxBytes) {
+          res.destroy();
+          return fail(new Error("response too large"));
+        }
+        const chunks: Buffer[] = [];
+        let size = 0;
+        res.on("data", (c: Buffer) => {
+          size += c.length;
+          if (size > maxBytes) {
+            res.destroy();
+            return fail(new Error("response too large"));
+          }
+          chunks.push(c);
+        });
+        res.on("end", () => {
+          clearTimeout(timer);
+          resolve({ status, body: Buffer.concat(chunks).toString("utf8") });
+        });
+        res.on("error", fail);
+      });
+      current.on("error", fail);
+      current.end();
+    };
+    hop(url, 0);
+  });
+}
+
 /** Metadata JSON must be reachable and name an image. `ipfs://` / `ar://` go through `gateway`. */
 export async function checkMetadataUri(
   uri: string,
-  opts: { fetchImpl?: typeof fetch; timeoutMs?: number; maxBytes?: number; gateway?: (u: string) => string } = {},
+  opts: { get?: (url: string) => Promise<{ status: number; body: string }>; gateway?: (u: string) => string } & SafeGetOptions = {},
 ): Promise<string | null> {
   if (!ALLOWED_URI.test(uri)) return "metadata URI must be https://, ipfs:// or ar://";
   const url = opts.gateway ? opts.gateway(uri) : uri.replace(/^ipfs:\/\//i, "https://ipfs.io/ipfs/").replace(/^ar:\/\//i, "https://arweave.net/");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 5_000);
   try {
-    const res = await (opts.fetchImpl ?? fetch)(url, { signal: controller.signal, redirect: "follow" });
-    if (!res.ok) return `metadata URI returned ${res.status}`;
-    const text = await res.text();
-    if (text.length > (opts.maxBytes ?? 1_000_000)) return "metadata JSON too large";
-    const json = JSON.parse(text) as { image?: unknown };
+    const res = await (opts.get ?? ((u: string) => safeGet(u, opts)))(url);
+    if (res.status < 200 || res.status >= 300) return `metadata URI returned ${res.status}`;
+    const json = JSON.parse(res.body) as { image?: unknown };
     if (typeof json.image !== "string" || json.image.length === 0) return "metadata JSON has no image";
     return null;
   } catch (e) {
-    return `metadata URI unreachable: ${(e as Error)?.name === "AbortError" ? "timeout" : (e as Error)?.message ?? e}`;
-  } finally {
-    clearTimeout(timer);
+    return `metadata URI unreachable: ${(e as Error)?.message ?? e}`;
   }
 }
 

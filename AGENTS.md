@@ -20,7 +20,8 @@ reading only.
   expires and must match that hash. From the ticket's lamports, `create`
   repays the launch authority exactly the rent it fronted (mint, curve, curve
   ATA, and only the registries it newly created), capped at the 0.03 SOL
-  allocation; the ticket then closes to the **treasury**, which receives the
+  allocation. A registry's repayment is capped at its rent-exempt minimum,
+  because registry PDAs can be pre-funded by anyone; the ticket then closes to the **treasury**, which receives the
   fee plus whatever of the allocation is unspent (`TokenCreated.rent_reimbursed`
   / `treasury_received`). The payer gets nothing back from a successful launch. After `create` the mint has a
   fixed supply, no mint or freeze authority, and metadata nobody can change.

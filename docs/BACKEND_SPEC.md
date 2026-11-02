@@ -28,7 +28,10 @@ Conventions:
 Minimal implementation: `scripts/launch_worker.ts` (`npm run worker`), with
 the testable logic (`decide`, request-transaction decoding, metadata and
 tweet checks, the delay) in `scripts/src/launchWorker.ts`. It keeps jobs in
-memory rather than the durable table in §1.3, and checks the tweet's
+memory rather than the durable table in §1.3. It fetches the metadata URI
+with `safeGet`: https only, every DNS answer and redirect hop checked against
+a public-address policy at connect time, at most 3 redirects, a 5 s timeout
+and a 1 MB limit enforced while streaming. It checks the tweet's
 `$TICKER` and age but not its author unless given the linked account ID.
 
 The ticket stores only `metadata_hash`, not the plaintext name, symbol and

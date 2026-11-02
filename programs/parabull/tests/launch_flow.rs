@@ -335,3 +335,39 @@ async fn flat_ticket_with_tweet_still_leaves_launch_authority_whole() {
     assert_eq!(env.lamports(&launch_key).await, launch_before, "tweet registry rent repaid too");
     assert!(env.lamports(&env.treasury.clone()).await - treasury_before > DEFAULT_LAUNCH_FEE_LAMPORTS);
 }
+
+#[tokio::test]
+async fn prefunded_registry_donation_never_comes_out_of_the_treasury() {
+    // Registry PDAs have public seeds, so anyone can send lamports to one
+    // before `create`. Repayment is capped at the rent-exempt minimum, so the
+    // treasury receives exactly what it would without the donation.
+    let mut env = Env::new().await;
+    let user = env.funded_user().await;
+    env.request(&user, 1, "Pepe Coin", "PEPE", URI).await.unwrap();
+    let ticker_key = pda(&[SEED_TICKER_REGISTRY, b"PEPE"]);
+    let name_key = pda(&[SEED_NAME_REGISTRY, &normalize_name_hash("Pepe Coin").unwrap()]);
+    let donation = 20_000_000; // well above either registry's rent
+    for key in [ticker_key, name_key] {
+        let ix = solana_sdk::system_instruction::transfer(&user.pubkey(), &key, donation);
+        env.send(&[ix], &[&user]).await.unwrap();
+    }
+    let launch_key = env.launch.pubkey();
+    let launch_before = env.lamports(&launch_key).await;
+    let treasury_before = env.lamports(&env.treasury.clone()).await;
+    let mint = env.create(&user.pubkey(), 1, "Pepe Coin", "PEPE", URI).await.unwrap();
+
+    let rent = env.ctx.banks_client.get_rent().await.unwrap();
+    let registry_rent = rent.minimum_balance(env.account(&ticker_key).await.unwrap().data.len())
+        + rent.minimum_balance(env.account(&name_key).await.unwrap().data.len());
+    let curve_key = pda(&[SEED_BONDING_CURVE, mint.as_ref()]);
+    let fresh_rent = env.lamports(&mint).await + env.lamports(&curve_key).await + env.lamports(&ata(&curve_key, &mint)).await;
+    assert_eq!(
+        env.lamports(&env.treasury.clone()).await - treasury_before,
+        DEFAULT_TICKET_DEPOSIT_LAMPORTS - fresh_rent - registry_rent,
+        "treasury gets the same as without the donation"
+    );
+    // The authority paid nothing for the pre-funded registries and is repaid
+    // only their minimum rent: the donor's lamports, never the treasury's.
+    assert_eq!(env.lamports(&launch_key).await - launch_before, registry_rent);
+    assert_eq!(env.lamports(&ticker_key).await, donation);
+}

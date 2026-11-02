@@ -4,7 +4,10 @@ import { AnchorProvider, BN, BorshCoder, Program, Wallet } from "@coral-xyz/anch
 import { Connection, Keypair, PublicKey, SystemProgram, TransactionMessage, VersionedTransactionResponse } from "@solana/web3.js";
 import type { Parabull } from "../../target/types/parabull";
 import { metadataCommitment, tweetIdHash } from "./launch";
-import { DELAY_MAX_MS, DELAY_MIN_MS, DecisionInput, checkMetadataUri, decide, findRequestArgs, randomDelayMs, verifyTweet } from "./launchWorker";
+import { lookup as dnsLookup } from "dns";
+import { createServer } from "http";
+import { AddressInfo } from "net";
+import { DELAY_MAX_MS, DELAY_MIN_MS, DecisionInput, checkMetadataUri, decide, findRequestArgs, isPublicAddress, randomDelayMs, safeGet, verifyTweet } from "./launchWorker";
 import { loadIdl } from "./program";
 import { Pdas } from "./pdas";
 
@@ -91,15 +94,53 @@ test("recovers name/symbol/URI/tweet from the user's request_launch transaction"
 const respond = (status: number, body: unknown) => (async () => new Response(typeof body === "string" ? body : JSON.stringify(body), { status })) as unknown as typeof fetch;
 
 test("metadata URI check", async () => {
-  assert.equal(await checkMetadataUri(URI, { fetchImpl: respond(200, { name: NAME, image: "https://x/y.png" }) }), null);
+  const get = (status: number, body: unknown) => async () => ({ status, body: typeof body === "string" ? body : JSON.stringify(body) });
+  assert.equal(await checkMetadataUri(URI, { get: get(200, { name: NAME, image: "https://x/y.png" }) }), null);
   assert.match((await checkMetadataUri("http://plain.example/m.json"))!, /https/);
-  assert.match((await checkMetadataUri(URI, { fetchImpl: respond(404, {}) }))!, /404/);
-  assert.match((await checkMetadataUri(URI, { fetchImpl: respond(200, { name: NAME }) }))!, /no image/);
-  assert.match((await checkMetadataUri(URI, { fetchImpl: respond(200, "not json") }))!, /unreachable/);
+  assert.match((await checkMetadataUri(URI, { get: get(404, {}) }))!, /404/);
+  assert.match((await checkMetadataUri(URI, { get: get(200, { name: NAME }) }))!, /no image/);
+  assert.match((await checkMetadataUri(URI, { get: get(200, "not json") }))!, /unreachable/);
   let asked = "";
-  const spy = (async (u: string) => ((asked = u), new Response(JSON.stringify({ image: "i" }), { status: 200 }))) as unknown as typeof fetch;
-  await checkMetadataUri("ipfs://bafyhash/meta.json", { fetchImpl: spy });
+  await checkMetadataUri("ipfs://bafyhash/meta.json", { get: async (u) => ((asked = u), { status: 200, body: '{"image":"i"}' }) });
   assert.equal(asked, "https://ipfs.io/ipfs/bafyhash/meta.json");
+});
+
+test("only globally routable addresses are public", () => {
+  for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "224.0.0.1",
+    "::1", "::", "fe80::1", "fd00::1", "::ffff:127.0.0.1", "::ffff:169.254.169.254", "not-an-ip"]) {
+    assert.equal(isPublicAddress(ip), false, ip);
+  }
+  for (const ip of ["1.1.1.1", "104.16.0.1", "2606:4700::1111", "::ffff:8.8.8.8"]) assert.equal(isPublicAddress(ip), true, ip);
+});
+
+test("safeGet: blocks private targets, caps redirects and streams with a byte limit", async () => {
+  const big = "x".repeat(50_000);
+  const server = createServer((req, res) => {
+    if (req.url === "/ok") return res.end('{"image":"i"}');
+    if (req.url?.startsWith("/r")) {
+      const n = Number(req.url.slice(2));
+      res.writeHead(302, { location: n > 0 ? `/r${n - 1}` : "/ok" });
+      return res.end();
+    }
+    // Chunked, no content-length: the limit has to apply while streaming.
+    res.write(big);
+    res.write(big);
+    res.end();
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const local = { allowHttp: true, lookup: dnsLookup as never };
+  try {
+    // The default lookup refuses loopback, before any request is sent.
+    await assert.rejects(safeGet(`${base.replace("127.0.0.1", "localhost")}/ok`, { allowHttp: true }), /non-public/);
+    await assert.rejects(safeGet(`${base}/ok`), /refusing http:/);
+    assert.deepEqual(await safeGet(`${base}/r2`, local), { status: 200, body: '{"image":"i"}' });
+    await assert.rejects(safeGet(`${base}/r3`, { ...local, maxRedirects: 2 }), /too many redirects/);
+    await assert.rejects(safeGet(`${base}/big`, { ...local, maxBytes: 60_000 }), /too large/);
+    assert.equal((await safeGet(`${base}/big`, { ...local, maxBytes: 200_000 })).body.length, 100_000);
+  } finally {
+    server.close();
+  }
 });
 
 test("tweet check (X API v2)", async () => {
