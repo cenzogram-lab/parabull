@@ -55,7 +55,8 @@ pub fn handler(ctx: Context<Initialize>, params: GlobalParams) -> Result<()> {
     global.paused = false;
     global.admin = ctx.accounts.admin.key();
     global.launch_count = 0;
-    global._reserved = [0; 64];
+    global.pending_admin = Pubkey::default();
+    global._reserved = [0; 32];
     global.apply_params(&params, now)?;
 
     ctx.accounts.buyback_vault.bump = ctx.bumps.buyback_vault;

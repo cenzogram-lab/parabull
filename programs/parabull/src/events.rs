@@ -130,3 +130,37 @@ pub struct FeesSwept {
     pub to_holder_vault: u64,
     pub to_treasury: u64,
 }
+
+#[event]
+pub struct GlobalParamsUpdated {
+    pub admin: Pubkey,
+    pub update: crate::state::GlobalUpdate,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct AdminTransferProposed {
+    pub admin: Pubkey,
+    pub pending_admin: Pubkey,
+}
+
+#[event]
+pub struct AdminTransferred {
+    pub previous_admin: Pubkey,
+    pub new_admin: Pubkey,
+}
+
+#[event]
+pub struct LpFeesCollected {
+    pub mint: Pubkey,
+    pub pool: Pubkey,
+    pub fee_lp_amount: u64,
+    /// Measured SOL actually received (unwrapped from WSOL).
+    pub sol_collected: u64,
+    /// Measured launched-token amount received; held by the fee-key vault.
+    pub tokens_collected: u64,
+    pub to_escrow: u64,
+    pub to_buyback_vault: u64,
+    pub to_holder_vault: u64,
+    pub to_treasury: u64,
+}

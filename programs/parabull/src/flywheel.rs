@@ -76,6 +76,23 @@ pub fn take_sweepable_fees(curve: &mut BondingCurve) -> FeeSweep {
     sweep
 }
 
+/// Route SOL harvested from a graduated pool's locked LP: fill the token's
+/// DexScreener escrow first (if still open), then split the rest by
+/// `buyback_bps` / `holder_bps`, remainder to treasury. Same rule as trading
+/// fees; credits `escrow_accrued` on the curve.
+pub fn route_harvested_sol(curve: &mut BondingCurve, global: &crate::state::Global, sol: u64) -> Result<crate::math::FeeSplit> {
+    let split = crate::math::split_platform_fee(
+        sol,
+        curve.escrow_accrued,
+        global.dex_target_lamports,
+        !curve.escrow_released,
+        global.buyback_bps,
+        global.holder_bps,
+    )?;
+    apply_escrow_top_up(curve, split.escrow)?;
+    Ok(split)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,6 +173,25 @@ mod tests {
         assert_eq!(s.total().unwrap(), 99);
         assert_eq!((c.escrow_accrued, c.buyback_accrued, c.holder_accrued, c.treasury_accrued), (11, 0, 0, 0));
         assert_eq!(take_sweepable_fees(&mut c), FeeSweep::default(), "second sweep is a no-op");
+    }
+
+    #[test]
+    fn harvest_fills_escrow_first_then_splits() {
+        let g = global(); // target 2 SOL, buyback 50%, holder 40%
+        let mut c = curve(&g);
+        c.escrow_accrued = TARGET - 1_000;
+        let s = route_harvested_sol(&mut c, &g, 11_000).unwrap();
+        assert_eq!(s, crate::math::FeeSplit { escrow: 1_000, buyback: 5_000, holder: 4_000, treasury: 1_000 });
+        assert_eq!(c.escrow_accrued, TARGET);
+        // Funded (not yet released): nothing more goes to escrow.
+        let s = route_harvested_sol(&mut c, &g, 10).unwrap();
+        assert_eq!(s.escrow, 0);
+        assert_eq!(s.total().unwrap(), 10);
+        // Released: same.
+        release_escrow(&mut c, TARGET).unwrap();
+        let s = route_harvested_sol(&mut c, &g, 1_000).unwrap();
+        assert_eq!((s.escrow, s.buyback, s.holder, s.treasury), (0, 500, 400, 100));
+        assert_eq!(c.escrow_accrued, 0, "a released escrow is never refilled");
     }
 
     /// Option 1 end to end: a token graduates with an under-funded escrow, the

@@ -68,7 +68,9 @@ pub struct Global {
     pub lp_lock_authority: Pubkey,
     /// SOL held back from the pool to pay Raydium fees and rent.
     pub migration_reserve_lamports: u64,
-    pub _reserved: [u8; 64],
+    /// Two-step admin transfer: set by `propose_admin`, cleared by `accept_admin`.
+    pub pending_admin: Pubkey,
+    pub _reserved: [u8; 32],
 }
 
 /// Admin-settable parameters, validated as a unit.
@@ -136,7 +138,67 @@ impl GlobalParams {
     }
 }
 
+/// Partial update for `update_global_params`: `None` leaves a field unchanged.
+/// The merged result is validated with the same rules as `initialize`.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct GlobalUpdate {
+    pub dex_target_lamports: Option<u64>,
+    pub buyback_bps: Option<u16>,
+    pub holder_bps: Option<u16>,
+    pub migration_reserve_lamports: Option<u64>,
+    pub trading_open_delay_slots: Option<u64>,
+    pub cpmm_program: Option<Pubkey>,
+    pub cpmm_amm_config: Option<Pubkey>,
+    pub lp_lock_program: Option<Pubkey>,
+    pub lp_lock_authority: Option<Pubkey>,
+}
+
 impl Global {
+    pub fn to_params(&self) -> GlobalParams {
+        GlobalParams {
+            launch_authority: self.launch_authority,
+            crank_authority: self.crank_authority,
+            treasury: self.treasury,
+            parabull_mint: self.parabull_mint,
+            launch_fee_lamports: self.launch_fee_lamports,
+            ticket_deposit_lamports: self.ticket_deposit_lamports,
+            ticket_ttl_seconds: self.ticket_ttl_seconds,
+            platform_fee_bps: self.platform_fee_bps,
+            buyback_bps: self.buyback_bps,
+            holder_bps: self.holder_bps,
+            dex_target_lamports: self.dex_target_lamports,
+            trading_open_delay_slots: self.trading_open_delay_slots,
+            registry_lock_seconds: self.registry_lock_seconds,
+            initial_virtual_token_reserves: self.initial_virtual_token_reserves,
+            initial_virtual_sol_reserves: self.initial_virtual_sol_reserves,
+            initial_real_token_reserves: self.initial_real_token_reserves,
+            token_total_supply: self.token_total_supply,
+            cpmm_program: self.cpmm_program,
+            cpmm_amm_config: self.cpmm_amm_config,
+            lp_lock_program: self.lp_lock_program,
+            lp_lock_authority: self.lp_lock_authority,
+            migration_reserve_lamports: self.migration_reserve_lamports,
+        }
+    }
+
+    /// Merge, validate as a whole, then apply. All-or-nothing.
+    pub fn apply_update(&mut self, u: &GlobalUpdate, now: i64) -> Result<()> {
+        let mut p = self.to_params();
+        if let Some(v) = u.dex_target_lamports { p.dex_target_lamports = v; }
+        if let Some(v) = u.buyback_bps { p.buyback_bps = v; }
+        if let Some(v) = u.holder_bps { p.holder_bps = v; }
+        if let Some(v) = u.migration_reserve_lamports { p.migration_reserve_lamports = v; }
+        if let Some(v) = u.trading_open_delay_slots { p.trading_open_delay_slots = v; }
+        if let Some(v) = u.cpmm_program { p.cpmm_program = v; }
+        if let Some(v) = u.cpmm_amm_config { p.cpmm_amm_config = v; }
+        if let Some(v) = u.lp_lock_program { p.lp_lock_program = v; }
+        if let Some(v) = u.lp_lock_authority { p.lp_lock_authority = v; }
+        let target_updated_at = if u.dex_target_lamports.is_some() { now } else { self.dex_target_updated_at };
+        self.apply_params(&p, now)?;
+        self.dex_target_updated_at = target_updated_at;
+        Ok(())
+    }
+
     pub fn apply_params(&mut self, p: &GlobalParams, now: i64) -> Result<()> {
         p.validate()?;
         self.launch_authority = p.launch_authority;
@@ -215,8 +277,11 @@ pub struct BondingCurve {
     pub raydium_pool: Pubkey,
     /// Burn & Earn fee-key NFT mint created by `lock_migrated_lp`.
     pub fee_nft_mint: Pubkey,
+    /// Lifetime post-graduation LP fees collected (measured amounts).
+    pub lp_fees_sol_collected: u64,
+    pub lp_fees_tokens_collected: u64,
 
-    pub _reserved: [u8; 32],
+    pub _reserved: [u8; 16],
 }
 
 /// Graduation progress. Each step is a separate instruction (CPMM init and the
@@ -285,6 +350,8 @@ impl BondingCurve {
         self.migration_tokens = 0;
         self.raydium_pool = Pubkey::default();
         self.fee_nft_mint = Pubkey::default();
+        self.lp_fees_sol_collected = 0;
+        self.lp_fees_tokens_collected = 0;
         Ok(())
     }
 
@@ -580,7 +647,8 @@ pub(crate) mod fixtures {
             lp_lock_program: crate::raydium::LP_LOCK_PROGRAM_MAINNET,
             lp_lock_authority: crate::raydium::LP_LOCK_AUTHORITY_MAINNET,
             migration_reserve_lamports: DEFAULT_MIGRATION_RESERVE_LAMPORTS,
-            _reserved: [0; 64],
+            pending_admin: Pubkey::default(),
+            _reserved: [0; 32],
         }
     }
 
@@ -609,7 +677,9 @@ pub(crate) mod fixtures {
             migration_tokens: 0,
             raydium_pool: Pubkey::default(),
             fee_nft_mint: Pubkey::default(),
-            _reserved: [0; 32],
+            lp_fees_sol_collected: 0,
+            lp_fees_tokens_collected: 0,
+            _reserved: [0; 16],
         };
         c.init(254, Pubkey::new_unique(), Pubkey::new_unique(), g, 1_000, 1_700_000_000).unwrap();
         c
@@ -651,6 +721,44 @@ mod tests {
     #[test]
     fn default_params_validate() {
         params(&global()).validate().unwrap();
+        assert_eq!(global().to_params().cpmm_program, params(&global()).cpmm_program);
+    }
+
+    #[test]
+    fn partial_update_changes_only_given_fields() {
+        let mut g = global();
+        let before = g.to_params();
+        let u = GlobalUpdate { dex_target_lamports: Some(1_800_000_000), trading_open_delay_slots: Some(5), ..Default::default() };
+        g.apply_update(&u, 42).unwrap();
+        assert_eq!((g.dex_target_lamports, g.dex_target_updated_at, g.trading_open_delay_slots), (1_800_000_000, 42, 5));
+        let after = g.to_params();
+        assert_eq!(after.buyback_bps, before.buyback_bps);
+        assert_eq!(after.cpmm_program, before.cpmm_program);
+        assert_eq!(after.launch_authority, before.launch_authority);
+
+        // Not touching the target keeps its timestamp.
+        g.apply_update(&GlobalUpdate { buyback_bps: Some(6_000), ..Default::default() }, 99).unwrap();
+        assert_eq!((g.buyback_bps, g.dex_target_updated_at), (6_000, 42));
+    }
+
+    #[test]
+    fn invalid_update_is_rejected_atomically() {
+        let mut g = global(); // buyback 5000, holder 4000
+        let snapshot = g.to_params();
+        // Raising holder alone would push the split over 100%.
+        let bad = GlobalUpdate { holder_bps: Some(5_001), dex_target_lamports: Some(1), ..Default::default() };
+        assert!(g.apply_update(&bad, 7).is_err());
+        assert_eq!(g.to_params().holder_bps, snapshot.holder_bps);
+        assert_eq!(g.dex_target_lamports, snapshot.dex_target_lamports, "nothing applied");
+        // Both together is fine.
+        g.apply_update(&GlobalUpdate { buyback_bps: Some(4_000), holder_bps: Some(5_000), ..Default::default() }, 7).unwrap();
+        for bad in [
+            GlobalUpdate { migration_reserve_lamports: Some(0), ..Default::default() },
+            GlobalUpdate { cpmm_program: Some(Pubkey::default()), ..Default::default() },
+            GlobalUpdate { lp_lock_authority: Some(Pubkey::default()), ..Default::default() },
+        ] {
+            assert!(g.apply_update(&bad, 8).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

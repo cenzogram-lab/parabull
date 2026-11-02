@@ -76,4 +76,8 @@ pub enum ParabullError {
     EscrowAlreadyFunded,
     #[msg("DexScreener escrow was already released")]
     EscrowAlreadyReleased,
+    #[msg("No admin transfer is pending for this signer")]
+    NoPendingAdmin,
+    #[msg("Nothing was collected")]
+    NothingCollected,
 }

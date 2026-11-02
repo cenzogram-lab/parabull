@@ -34,6 +34,10 @@ pub const LOCK_LIQUIDITY_SEED: &[u8] = b"locked_liquidity";
 
 pub const IX_CPMM_INITIALIZE: [u8; 8] = [175, 175, 109, 31, 13, 152, 155, 237];
 pub const IX_LOCK_CP_LIQUIDITY: [u8; 8] = [216, 157, 29, 78, 38, 51, 31, 26];
+/// Burn & Earn `collect_cp_fees(fee_lp_amount: u64)`. The SDK calls this
+/// `collectCpFee`; the on-chain name was confirmed via the discriminator.
+pub const IX_LOCK_COLLECT_CP_FEES: [u8; 8] = [8, 30, 51, 199, 209, 184, 247, 133];
+pub const MEMO_PROGRAM_ID: Pubkey = pubkey!("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 
 const TOKEN_PROGRAM: Pubkey = anchor_spl::token::ID;
 const TOKEN_2022_PROGRAM: Pubkey = anchor_spl::token_2022::ID;
@@ -135,6 +139,23 @@ pub fn cpmm_accounts(program: &Pubkey, amm_config: &Pubkey, order: &PoolOrder, c
         token_1_vault: pda(&[CPMM_VAULT_SEED, pool_state.as_ref(), order.token_1.as_ref()]),
         observation_state: pda(&[CPMM_OBSERVATION_SEED, pool_state.as_ref()]),
         // CPMM's LP mint is always classic SPL Token.
+        creator_lp_token: ata(creator, &lp_mint, &TOKEN_PROGRAM),
+    }
+}
+
+/// Accounts of an *existing* pool, derived from its address (not from the
+/// AmmConfig), so post-graduation instructions keep working if
+/// `Global.cpmm_amm_config` is changed later.
+pub fn cpmm_pool_accounts(program: &Pubkey, pool_state: &Pubkey, order: &PoolOrder, creator: &Pubkey) -> CpmmAccounts {
+    let pda = |seeds: &[&[u8]]| Pubkey::find_program_address(seeds, program).0;
+    let lp_mint = pda(&[CPMM_LP_MINT_SEED, pool_state.as_ref()]);
+    CpmmAccounts {
+        authority: pda(&[CPMM_AUTH_SEED]),
+        pool_state: *pool_state,
+        lp_mint,
+        token_0_vault: pda(&[CPMM_VAULT_SEED, pool_state.as_ref(), order.token_0.as_ref()]),
+        token_1_vault: pda(&[CPMM_VAULT_SEED, pool_state.as_ref(), order.token_1.as_ref()]),
+        observation_state: pda(&[CPMM_OBSERVATION_SEED, pool_state.as_ref()]),
         creator_lp_token: ata(creator, &lp_mint, &TOKEN_PROGRAM),
     }
 }
@@ -266,6 +287,60 @@ impl LockCpLiquidity {
     }
 }
 
+/// Burn & Earn `collect_cp_fees`: withdraws the fee share of the locked LP
+/// from the pool and pays both tokens to the recipient accounts. Account
+/// order from raydium-sdk-v2 `collectCpFeeInstruction`.
+pub struct CollectCpFees {
+    pub program: Pubkey,
+    pub authority: Pubkey,
+    pub fee_nft_owner: Pubkey,
+    pub fee_nft_account: Pubkey,
+    pub locked_liquidity: Pubkey,
+    pub cpmm_program: Pubkey,
+    pub cpmm_authority: Pubkey,
+    pub pool_state: Pubkey,
+    pub lp_mint: Pubkey,
+    pub recipient_token_0: Pubkey,
+    pub recipient_token_1: Pubkey,
+    pub token_0_vault: Pubkey,
+    pub token_1_vault: Pubkey,
+    pub token_0_mint: Pubkey,
+    pub token_1_mint: Pubkey,
+    pub lock_lp_vault: Pubkey,
+    pub fee_lp_amount: u64,
+}
+
+impl CollectCpFees {
+    pub fn instruction(&self) -> Instruction {
+        let mut data = IX_LOCK_COLLECT_CP_FEES.to_vec();
+        data.extend_from_slice(&self.fee_lp_amount.to_le_bytes());
+        Instruction {
+            program_id: self.program,
+            accounts: vec![
+                AccountMeta::new_readonly(self.authority, false),
+                AccountMeta::new_readonly(self.fee_nft_owner, true),
+                AccountMeta::new(self.fee_nft_account, false),
+                AccountMeta::new(self.locked_liquidity, false),
+                AccountMeta::new_readonly(self.cpmm_program, false),
+                AccountMeta::new_readonly(self.cpmm_authority, false),
+                AccountMeta::new(self.pool_state, false),
+                AccountMeta::new(self.lp_mint, false),
+                AccountMeta::new(self.recipient_token_0, false),
+                AccountMeta::new(self.recipient_token_1, false),
+                AccountMeta::new(self.token_0_vault, false),
+                AccountMeta::new(self.token_1_vault, false),
+                AccountMeta::new_readonly(self.token_0_mint, false),
+                AccountMeta::new_readonly(self.token_1_mint, false),
+                AccountMeta::new(self.lock_lp_vault, false),
+                AccountMeta::new_readonly(TOKEN_PROGRAM, false),
+                AccountMeta::new_readonly(TOKEN_2022_PROGRAM, false),
+                AccountMeta::new_readonly(MEMO_PROGRAM_ID, false),
+            ],
+            data,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,6 +350,46 @@ mod tests {
     fn discriminators_match_anchor_global_namespace() {
         assert_eq!(hash(b"global:initialize").to_bytes()[..8], IX_CPMM_INITIALIZE);
         assert_eq!(hash(b"global:lock_cp_liquidity").to_bytes()[..8], IX_LOCK_CP_LIQUIDITY);
+        assert_eq!(hash(b"global:collect_cp_fees").to_bytes()[..8], IX_LOCK_COLLECT_CP_FEES);
+    }
+
+    #[test]
+    fn pool_derivation_from_address_matches_config_derivation() {
+        let config = Pubkey::new_unique();
+        let creator = Pubkey::new_unique();
+        let order = sort_pool_mints(&Pubkey::new_unique(), &WSOL_MINT).unwrap();
+        let from_config = cpmm_accounts(&CPMM_PROGRAM_MAINNET, &config, &order, &creator);
+        let from_pool = cpmm_pool_accounts(&CPMM_PROGRAM_MAINNET, &from_config.pool_state, &order, &creator);
+        assert_eq!(from_config, from_pool);
+    }
+
+    #[test]
+    fn collect_ix_layout() {
+        let ix = CollectCpFees {
+            program: LP_LOCK_PROGRAM_MAINNET,
+            authority: LP_LOCK_AUTHORITY_MAINNET,
+            fee_nft_owner: Pubkey::new_unique(),
+            fee_nft_account: Pubkey::new_unique(),
+            locked_liquidity: Pubkey::new_unique(),
+            cpmm_program: CPMM_PROGRAM_MAINNET,
+            cpmm_authority: Pubkey::new_unique(),
+            pool_state: Pubkey::new_unique(),
+            lp_mint: Pubkey::new_unique(),
+            recipient_token_0: Pubkey::new_unique(),
+            recipient_token_1: Pubkey::new_unique(),
+            token_0_vault: Pubkey::new_unique(),
+            token_1_vault: Pubkey::new_unique(),
+            token_0_mint: Pubkey::new_unique(),
+            token_1_mint: Pubkey::new_unique(),
+            lock_lp_vault: Pubkey::new_unique(),
+            fee_lp_amount: 77,
+        }
+        .instruction();
+        assert_eq!(ix.accounts.len(), 18);
+        assert_eq!(ix.data, [IX_LOCK_COLLECT_CP_FEES.as_slice(), &77u64.to_le_bytes()].concat());
+        let signers: Vec<_> = ix.accounts.iter().enumerate().filter(|(_, m)| m.is_signer).map(|(i, _)| i).collect();
+        assert_eq!(signers, vec![1], "only the fee-key NFT owner signs");
+        assert_eq!(ix.accounts[17].pubkey, MEMO_PROGRAM_ID);
     }
 
     #[test]

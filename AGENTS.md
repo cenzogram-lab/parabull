@@ -54,6 +54,34 @@ reading only.
   `sweep_fees` (permissionless) moves the buyback, holder and treasury
   buckets to `BuybackVault`, `HolderRewardVault` and the treasury. It never
   sweeps the escrow.
+- **Who can call what (locked decision).**
+  - **Anyone:** `sweep_fees`, `release_dex_escrow` and `top_up_dex_escrow`.
+    Their destinations are PDAs or `Global.treasury`, so no caller can
+    redirect funds.
+  - **Crank only:** graduation and `collect_lp_fees`.
+  - **Admin only:** `update_global_params` and `propose_admin`. The new admin
+    must call `accept_admin` themselves (two-step transfer; proposing
+    `Pubkey::default()` cancels).
+- **Admin parameters.** `update_global_params` takes a `GlobalUpdate` where
+  every field is optional (`None` = unchanged): `dex_target_lamports`,
+  `buyback_bps`, `holder_bps`, `migration_reserve_lamports`,
+  `trading_open_delay_slots`, `cpmm_program`, `cpmm_amm_config`,
+  `lp_lock_program`, `lp_lock_authority`. The merged result is validated
+  with the same rules as `initialize` and either applies in full or not at
+  all. `dex_target_updated_at` changes only when the target does.
+- **Post-graduation LP fees.** `collect_lp_fees(fee_lp_amount)` (crank only)
+  has the `["fee-key-vault"]` PDA sign Burn & Earn `collect_cp_fees`. The
+  `fee_lp_amount` is supplied by the caller, from Raydium's API, but is never
+  trusted for accounting. Only the measured balance increases are routed:
+  - **SOL side:** unwrapped; fills the token's escrow first (if it's still
+    open), then goes straight to `BuybackVault` / `HolderRewardVault` by the
+    global split, with the remainder to the treasury.
+  - **Launched-token side:** held in the fee-key vault's token account.
+
+  The temporary WSOL account's rent goes back to the crank.
+  Post-graduation instructions derive pool accounts from the curve's
+  recorded `raydium_pool`, not from the current `cpmm_amm_config`, so an
+  AmmConfig change never strands pools that already graduated.
 - **Graduation.** When the curve's real token reserves reach zero, it migrates
   to a **Raydium CPMM** pool (not LaunchLab, not pump-amm). The LP tokens are
   locked with Raydium Burn & Earn rather than burned, so the protocol keeps
@@ -96,6 +124,8 @@ reading only.
 | `programs/parabull/tests/launch_flow.rs` | Runtime tests: request_launch / refund_ticket / create |
 | `programs/parabull/tests/trade_flow.rs` | Runtime tests: buy / sell (Token-2022 transfers, lamports, slot delay, graduation) |
 | `programs/parabull/tests/migration_flow.rs` | Runtime tests: migration, escrow, sweeps |
+| `programs/parabull/tests/fee_collection.rs` | Runtime tests: collect_lp_fees routing |
+| `programs/parabull/tests/admin_flow.rs` | Runtime tests: update_global_params and the two-step admin transfer |
 | `programs/parabull/tests/common/raydium_mock.rs` | Native Raydium CPMM / lock mocks at the mainnet IDs; they re-derive and check every account |
 | `reference/` | Byte-matching pump.fun reconstructions. Read-only |
 

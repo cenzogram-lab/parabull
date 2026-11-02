@@ -16,7 +16,7 @@ pub mod state;
 pub mod trade;
 
 use instructions::*;
-use state::GlobalParams;
+use state::{GlobalParams, GlobalUpdate};
 
 declare_id!("8tBGLgWXDAssTBgUaamsB4ZbyRQivNDiGFiyTMfQiPFW");
 
@@ -87,5 +87,26 @@ pub mod parabull {
     /// Move buyback / holder / treasury buckets to their vaults (never the escrow).
     pub fn sweep_fees(ctx: Context<SweepFees>) -> Result<()> {
         instructions::sweep_fees::handler(ctx)
+    }
+
+    /// Admin: partial `Global` update, validated as a whole.
+    pub fn update_global_params(ctx: Context<AdminOnly>, update: GlobalUpdate) -> Result<()> {
+        instructions::admin::update_handler(ctx, update)
+    }
+
+    /// Admin: nominate a new admin (`Pubkey::default()` cancels).
+    pub fn propose_admin(ctx: Context<AdminOnly>, new_admin: Pubkey) -> Result<()> {
+        instructions::admin::propose_handler(ctx, new_admin)
+    }
+
+    /// Nominee: accept the admin role.
+    pub fn accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
+        instructions::admin::accept_handler(ctx)
+    }
+
+    /// Crank: harvest post-graduation LP fees via the fee-key NFT and route the
+    /// SOL (escrow first, then buyback / holder vaults / treasury).
+    pub fn collect_lp_fees(ctx: Context<CollectLpFees>, fee_lp_amount: u64) -> Result<()> {
+        instructions::collect_lp_fees::handler(ctx, fee_lp_amount)
     }
 }

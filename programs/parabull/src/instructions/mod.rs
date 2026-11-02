@@ -1,5 +1,7 @@
 #![allow(ambiguous_glob_reexports)]
+pub mod admin;
 pub mod buy;
+pub mod collect_lp_fees;
 pub mod create;
 pub mod escrow;
 pub mod initialize;
@@ -12,6 +14,8 @@ pub mod sell;
 pub mod sweep_fees;
 pub mod trade_accounts;
 
+pub use admin::*;
+pub use collect_lp_fees::*;
 pub use create::*;
 pub use escrow::*;
 pub use initialize::*;

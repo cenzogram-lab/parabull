@@ -15,7 +15,7 @@ use anchor_spl::token_interface::{Mint, TokenAccount};
 use crate::constants::*;
 use crate::error::ParabullError;
 use crate::events::LiquidityLocked;
-use crate::raydium::{cpmm_accounts, lock_accounts, sort_pool_mints, LockCpLiquidity, METADATA_PROGRAM_ID, WSOL_MINT};
+use crate::raydium::{cpmm_pool_accounts, lock_accounts, sort_pool_mints, LockCpLiquidity, METADATA_PROGRAM_ID, WSOL_MINT};
 use crate::state::{BondingCurve, Global, MigrationStage};
 
 #[derive(Accounts)]
@@ -101,7 +101,7 @@ pub fn handler(ctx: Context<LockMigratedLp>) -> Result<()> {
     let mint_key = a.mint.key();
     let creator = a.migration_authority.key();
     let order = sort_pool_mints(&mint_key, &WSOL_MINT)?;
-    let pool = cpmm_accounts(&a.global.cpmm_program, &a.global.cpmm_amm_config, &order, &creator);
+    let pool = cpmm_pool_accounts(&a.global.cpmm_program, &a.bonding_curve.raydium_pool, &order, &creator);
     let lock = lock_accounts(&a.lp_lock_program.key(), &a.lp_lock_authority.key(), &a.fee_nft_mint.key(), &a.fee_key_vault.key(), &pool.lp_mint);
     for (passed, expected) in [
         (a.pool_state.key(), pool.pool_state),

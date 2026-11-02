@@ -54,6 +54,7 @@ pub fn err_code(e: ParabullError) -> u32 {
 
 pub struct Env {
     pub ctx: ProgramTestContext,
+    pub admin: Keypair,
     pub launch: Keypair,
     pub crank: Keypair,
     pub treasury: Pubkey,
@@ -67,6 +68,7 @@ impl Env {
     /// Start a test validator with a pre-initialised `Global`, customised by `tweak`.
     pub async fn with_global(tweak: impl FnOnce(&mut Global)) -> Self {
         let mut pt = ProgramTest::new("parabull", parabull::ID, processor!(process));
+        let admin = Keypair::new();
         let launch = Keypair::new();
         let crank = Keypair::new();
         let treasury = Pubkey::new_unique();
@@ -75,7 +77,7 @@ impl Env {
         let global = Global {
             bump,
             paused: false,
-            admin: Pubkey::new_unique(),
+            admin: admin.pubkey(),
             launch_authority: launch.pubkey(),
             crank_authority: crank.pubkey(),
             treasury,
@@ -100,7 +102,8 @@ impl Env {
             lp_lock_program: raydium_mock::LOCK_ID,
             lp_lock_authority: raydium_mock::LOCK_AUTH,
             migration_reserve_lamports: DEFAULT_MIGRATION_RESERVE_LAMPORTS,
-            _reserved: [0; 64],
+            pending_admin: Pubkey::default(),
+            _reserved: [0; 32],
         };
         let mut global = global;
         tweak(&mut global);
@@ -110,6 +113,7 @@ impl Env {
         pt.add_account(global_key, Account { lamports: SOL, data, owner: parabull::ID, executable: false, rent_epoch: 0 });
         pt.add_account(launch.pubkey(), Account { lamports: 10 * SOL, ..Account::default() });
         pt.add_account(crank.pubkey(), Account { lamports: 10 * SOL, ..Account::default() });
+        pt.add_account(admin.pubkey(), Account { lamports: 10 * SOL, ..Account::default() });
         pt.add_account(treasury, Account { lamports: SOL, ..Account::default() });
         add_flywheel_vaults(&mut pt);
         // Raydium mocks at the real program IDs, plus the accounts Raydium
@@ -121,7 +125,7 @@ impl Env {
         pt.add_account(raydium_mock::POOL_FEE_RECEIVER, Account { lamports: SOL, ..Account::default() });
 
         let ctx = pt.start_with_context().await;
-        Env { ctx, launch, crank, treasury }
+        Env { ctx, admin, launch, crank, treasury }
     }
 
     pub async fn funded_user(&mut self) -> Keypair {
@@ -582,5 +586,93 @@ impl Env {
     /// Generic SPL/Token-2022 balance for any token account address.
     pub async fn token_amount_at(&mut self, key: &Pubkey) -> Option<u64> {
         self.account(key).await.map(|acc| StateWithExtensions::<SplTokenAccount>::unpack(&acc.data).unwrap().base.amount)
+    }
+}
+
+impl Env {
+    pub fn update_params_ix(&self, signer: &Pubkey, update: parabull::state::GlobalUpdate) -> Instruction {
+        Instruction {
+            program_id: parabull::ID,
+            accounts: parabull::accounts::AdminOnly { admin: *signer, global: global_pda() }.to_account_metas(None),
+            data: parabull::instruction::UpdateGlobalParams { update }.data(),
+        }
+    }
+
+    pub fn propose_admin_ix(&self, signer: &Pubkey, new_admin: Pubkey) -> Instruction {
+        Instruction {
+            program_id: parabull::ID,
+            accounts: parabull::accounts::AdminOnly { admin: *signer, global: global_pda() }.to_account_metas(None),
+            data: parabull::instruction::ProposeAdmin { new_admin }.data(),
+        }
+    }
+
+    pub fn accept_admin_ix(&self, signer: &Pubkey) -> Instruction {
+        Instruction {
+            program_id: parabull::ID,
+            accounts: parabull::accounts::AcceptAdmin { pending_admin: *signer, global: global_pda() }.to_account_metas(None),
+            data: parabull::instruction::AcceptAdmin {}.data(),
+        }
+    }
+
+    /// `pool` is the pool recorded on the curve at migration.
+    pub fn collect_lp_fees_ix(&self, crank: &Pubkey, mint: &Pubkey, pool: &Pubkey, fee_nft_mint: &Pubkey, fee_lp_amount: u64) -> Instruction {
+        let order = parabull::raydium::sort_pool_mints(mint, &WSOL_MINT).unwrap();
+        let p = parabull::raydium::cpmm_pool_accounts(&raydium_mock::CPMM_ID, pool, &order, &migration_authority(mint));
+        let vault = fee_key_vault();
+        let lock = parabull::raydium::lock_accounts(&raydium_mock::LOCK_ID, &raydium_mock::LOCK_AUTH, fee_nft_mint, &vault, &p.lp_mint);
+        Instruction {
+            program_id: parabull::ID,
+            accounts: parabull::accounts::CollectLpFees {
+                crank: *crank,
+                global: global_pda(),
+                mint: *mint,
+                bonding_curve: curve_pda(mint),
+                fee_key_vault: vault,
+                fee_vault_token_account: ata(&vault, mint),
+                fee_vault_wsol_account: anchor_spl::associated_token::get_associated_token_address_with_program_id(&vault, &WSOL_MINT, &SPL_TOKEN),
+                wsol_mint: WSOL_MINT,
+                buyback_vault: pda(&[SEED_BUYBACK_VAULT]),
+                holder_vault: pda(&[SEED_HOLDER_VAULT]),
+                treasury: self.treasury,
+                lp_lock_program: raydium_mock::LOCK_ID,
+                lp_lock_authority: raydium_mock::LOCK_AUTH,
+                fee_nft_account: lock.fee_nft_account,
+                locked_liquidity: lock.locked_liquidity,
+                cpmm_program: raydium_mock::CPMM_ID,
+                cpmm_authority: p.authority,
+                pool_state: *pool,
+                lp_mint: p.lp_mint,
+                token_0_vault: p.token_0_vault,
+                token_1_vault: p.token_1_vault,
+                lock_lp_vault: lock.lock_lp_vault,
+                token_program: SPL_TOKEN,
+                token_2022_program: TOKEN_2022,
+                memo_program: parabull::raydium::MEMO_PROGRAM_ID,
+                associated_token_program: ATA_PROGRAM,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: parabull::instruction::CollectLpFees { fee_lp_amount }.data(),
+        }
+    }
+
+    /// Launch, buy out the curve, run all three graduation steps.
+    /// Returns (mint, curve, fee NFT mint).
+    pub async fn graduate_and_lock(&mut self) -> (Pubkey, Pubkey, Pubkey) {
+        let creator = self.funded_user().await;
+        let mint = self.launch_token(&creator, 1, "Pepe Coin", "PEPE").await;
+        let curve = curve_pda(&mint);
+        let c: BondingCurve = self.anchor(&curve).await;
+        self.warp_to(c.trading_open_slot).await;
+        let whale = self.user_with(100 * SOL).await;
+        self.buy(&whale, &mint, u64::MAX, u64::MAX).await.unwrap();
+        self.seed_cpmm_pool_accounts(&mint);
+        let crank = self.crank.insecure_clone();
+        let ixs = [self.prepare_migration_ix(&crank.pubkey(), &mint), self.migrate_raydium_ix(&crank.pubkey(), &mint)];
+        self.send(&ixs, &[&crank]).await.unwrap();
+        let nft = Keypair::new();
+        let ix = self.lock_lp_ix(&crank.pubkey(), &mint, &nft.pubkey());
+        self.send(&[ix], &[&crank, &nft]).await.unwrap();
+        (mint, curve, nft.pubkey())
     }
 }
