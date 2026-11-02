@@ -1,2 +1,5 @@
 **/target/
+.anchor/
+test-ledger/
+node_modules/
 .DS_Store

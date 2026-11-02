@@ -1,8 +1,7 @@
 # Contributing
 
-This project is finished and archived. No further reconstruction, development
-or maintenance work is needed, and new contributions are not being accepted.
-
-The repository preserves the final on-chain program sources and their required
-build inputs. Please do not submit cleanup, refactoring, tooling, documentation,
-feature or reconstruction pull requests.
+1. Branch from `main`.
+2. Keep each change to one instruction or one concern.
+3. Run `cargo test -p parabull` and make sure it passes.
+4. Follow the rules in [AGENTS.md](AGENTS.md). In particular, don't change
+   `reference/`, and keep `math.rs` matching the reference curve.

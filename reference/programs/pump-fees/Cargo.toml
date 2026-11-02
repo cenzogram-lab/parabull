@@ -23,3 +23,20 @@ pump-fees-math = { path = "pump-fees-math" }
 anchor-lang = { version = "=0.31.1", features = ["event-cpi", "init-if-needed"] }
 
 anchor-spl = { version = "=0.31.1", default-features = false, features = ["token", "token_2022", "associated_token"] }
+
+# Standalone reference workspace. These settings (and the vendored
+# anchor-attribute-program patch) previously lived in the repository root
+# Cargo.toml; they are scoped here so they never leak into the Parabull build.
+[workspace]
+members = [".", "pump-fees-math"]
+exclude = ["vendor/used-public"]
+resolver = "2"
+
+[profile.release]
+panic = "abort"
+overflow-checks = true
+lto = false
+codegen-units = 1
+
+[patch.crates-io]
+anchor-attribute-program = { path = "vendor/used-public" }
