@@ -17,7 +17,7 @@
  */
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, createMint } from "@solana/spl-token";
-import { DEXSCREENER_LISTING_USD, LAMPORTS_PER_SOL, cluster, raydium, roles } from "./src/config";
+import { DEXSCREENER_LISTING_USD, LAMPORTS_PER_SOL, ammConfigPda, cluster, raydium, roles } from "./src/config";
 import { bn, connect } from "./src/program";
 
 const DEFAULTS = {
@@ -61,12 +61,17 @@ async function main() {
     const acc = await connection.getAccountInfo(key);
     if (!acc?.executable) throw new Error(`${label} ${key.toBase58()} is not an executable program on ${cluster()}`);
   }
-  if (!ray.ammConfig) throw new Error("set RAYDIUM_AMM_CONFIG");
   const cfg = await connection.getAccountInfo(ray.ammConfig);
   if (!cfg?.owner.equals(ray.cpmmProgram)) {
     throw new Error(`AmmConfig ${ray.ammConfig.toBase58()} is owned by ${cfg?.owner.toBase58() ?? "nobody"}, not CPMM ${ray.cpmmProgram.toBase58()}`);
   }
-  console.log(`AmmConfig ok: trade_fee_rate=${cfg.data.readBigUInt64LE(12)} / 1e6, create_pool_fee=${cfg.data.readBigUInt64LE(36)} lamports`);
+  // AmmConfig layout: disc(8) bump(1) disable_create_pool(1) index u16 LE(2) trade_fee_rate u64 ... create_pool_fee u64 @36.
+  const index = cfg.data.readUInt16LE(10);
+  if (!ammConfigPda(ray.cpmmProgram, index).equals(ray.ammConfig)) {
+    throw new Error(`AmmConfig ${ray.ammConfig.toBase58()} does not re-derive from its stored index ${index}`);
+  }
+  if (cfg.data[9] !== 0) throw new Error(`AmmConfig index ${index} has pool creation disabled`);
+  console.log(`AmmConfig ok: index ${index}, trade_fee_rate=${cfg.data.readBigUInt64LE(12)} / 1e6, create_pool_fee=${cfg.data.readBigUInt64LE(36)} lamports`);
 
   const globalKey = pdas.global();
   if (await connection.getAccountInfo(globalKey)) {

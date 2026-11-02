@@ -15,7 +15,7 @@ export type ClusterName = "devnet" | "mainnet-beta" | "localnet";
 export interface RaydiumAddresses {
   cpmmProgram: PublicKey;
   /** CPMM AmmConfig (fee tier) new pools are created under. */
-  ammConfig: PublicKey | null;
+  ammConfig: PublicKey;
   /** CPMM `create_pool_fee` receiver; CPMM enforces it on-chain. */
   poolFeeReceiver: PublicKey;
   lockProgram: PublicKey;
@@ -24,20 +24,35 @@ export interface RaydiumAddresses {
 
 const pk = (s: string) => new PublicKey(s);
 
+/**
+ * CPMM AmmConfig address for a fee-tier index. Raydium creates every config at
+ * this PDA (raydium-cp-swap `create_config.rs`: seeds = ["amm_config",
+ * index.to_be_bytes()]). Note: big-endian.
+ */
+export function ammConfigPda(cpmmProgram: PublicKey, index: number): PublicKey {
+  const i = Buffer.alloc(2);
+  i.writeUInt16BE(index);
+  return PublicKey.findProgramAddressSync([Buffer.from("amm_config"), i], cpmmProgram)[0];
+}
+
+const DEVNET_CPMM = pk("DRaycpLY18LhpbydsBWbVJtxpNv9oXPgjRSfpF2bWpYb");
+const MAINNET_CPMM = pk("CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C");
+
 export const RAYDIUM: Record<Exclude<ClusterName, "localnet">, RaydiumAddresses> = {
   devnet: {
-    cpmmProgram: pk("DRaycpLY18LhpbydsBWbVJtxpNv9oXPgjRSfpF2bWpYb"),
-    // Supplied by the team as the devnet 0.25% tier. Not verifiable from this
-    // repo's sources; deploy_and_init.ts checks on-chain that it is owned by
-    // `cpmmProgram` before using it.
-    ammConfig: pk("9zSzfkYy6awexsHvmggeH36pfVUdDGyCcwmjT3AQPBj6"),
+    cpmmProgram: DEVNET_CPMM,
+    // Index 0 = 5MxLgy9oPdTC3YgkiePHqr3EoCRD9uLVYRQS2ANAs7wy. (The previously
+    // supplied 9zSzfkYy... is not an amm_config PDA for any u16 index under
+    // either CPMM program, so it cannot be a CPMM AmmConfig.)
+    ammConfig: ammConfigPda(DEVNET_CPMM, 0),
     poolFeeReceiver: pk("3oE58BKVt8KuYkGxx8zBojugnymWmBiyafWgMrnb6eYy"),
     lockProgram: pk("DRay25Usp3YJAi7beckgpGUC7mGJ2cR1AVPxhYfwVCUX"),
     lockAuthority: pk("7qWVV8UY2bRJfDLP4s37YzBPKUkVB46DStYJBpYbQzu3"),
   },
   "mainnet-beta": {
-    cpmmProgram: pk("CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C"),
-    ammConfig: null, // must be supplied via RAYDIUM_AMM_CONFIG
+    cpmmProgram: MAINNET_CPMM,
+    // Index 0, the standard 0.25% tier = D4FPEruKEHrG5TenZ2mpDGEfu1iUvTiqBxvpU8HLBvC2.
+    ammConfig: ammConfigPda(MAINNET_CPMM, 0),
     poolFeeReceiver: pk("DNXgeM9EiiaAbaWvwjHj9fQQLAX5ZsfHyvmYUNRAdNC8"),
     lockProgram: pk("LockrWmn6K5twhz3y9w1dQERbmgSaRkfnTeTKbpofwE"),
     lockAuthority: pk("3f7GcQFG397GAaEnv51zR6tsTVihYRydnydDD1cXekxH"),
@@ -68,13 +83,19 @@ function envKey(name: string): PublicKey | undefined {
   return v ? new PublicKey(v) : undefined;
 }
 
-/** Raydium addresses for the active cluster, with env overrides applied. */
+/**
+ * Raydium addresses for the active cluster, with env overrides applied.
+ * AmmConfig precedence: RAYDIUM_AMM_CONFIG, then RAYDIUM_AMM_CONFIG_INDEX
+ * (derived under the active CPMM program), then the cluster default (index 0).
+ */
 export function raydium(): RaydiumAddresses {
   const c = cluster();
   const base = c === "localnet" ? RAYDIUM.devnet : RAYDIUM[c];
+  const cpmmProgram = envKey("RAYDIUM_CPMM_PROGRAM") ?? base.cpmmProgram;
+  const index = process.env.RAYDIUM_AMM_CONFIG_INDEX;
   return {
-    cpmmProgram: envKey("RAYDIUM_CPMM_PROGRAM") ?? base.cpmmProgram,
-    ammConfig: envKey("RAYDIUM_AMM_CONFIG") ?? base.ammConfig,
+    cpmmProgram,
+    ammConfig: envKey("RAYDIUM_AMM_CONFIG") ?? (index !== undefined ? ammConfigPda(cpmmProgram, Number(index)) : base.ammConfig),
     poolFeeReceiver: envKey("RAYDIUM_POOL_FEE_RECEIVER") ?? base.poolFeeReceiver,
     lockProgram: envKey("RAYDIUM_LOCK_PROGRAM") ?? base.lockProgram,
     lockAuthority: envKey("RAYDIUM_LOCK_AUTHORITY") ?? base.lockAuthority,

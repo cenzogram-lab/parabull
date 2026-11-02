@@ -5,6 +5,7 @@
   "description": "Devnet deployment, smoke-test and crank scripts for the Parabull program",
   "type": "commonjs",
   "scripts": {
+    "build:program": "cd .. && anchor build",
     "deploy:init": "tsx deploy_and_init.ts",
     "smoke": "tsx test_launch_and_trade.ts",
     "crank": "tsx crank_worker.ts",

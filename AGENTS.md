@@ -199,7 +199,12 @@ behind its `devnet` feature flag) and raydium-sdk-v2 `programId.ts`.
 | CPMM pool-fee receiver | `DNXgeM9EiiaAbaWvwjHj9fQQLAX5ZsfHyvmYUNRAdNC8` | `3oE58BKVt8KuYkGxx8zBojugnymWmBiyafWgMrnb6eYy` |
 | Burn & Earn program | `LockrWmn6K5twhz3y9w1dQERbmgSaRkfnTeTKbpofwE` | `DRay25Usp3YJAi7beckgpGUC7mGJ2cR1AVPxhYfwVCUX` |
 | Burn & Earn authority | `3f7GcQFG397GAaEnv51zR6tsTVihYRydnydDD1cXekxH` | `7qWVV8UY2bRJfDLP4s37YzBPKUkVB46DStYJBpYbQzu3` |
-| AmmConfig | set `RAYDIUM_AMM_CONFIG` | `9zSzfkYy6awexsHvmggeH36pfVUdDGyCcwmjT3AQPBj6` (supplied by the team; `deploy_and_init.ts` checks it's owned by CPMM) |
+| AmmConfig index 0 (default) | `D4FPEruKEHrG5TenZ2mpDGEfu1iUvTiqBxvpU8HLBvC2` (0.25%) | `5MxLgy9oPdTC3YgkiePHqr3EoCRD9uLVYRQS2ANAs7wy` |
+
+AmmConfigs are PDAs `["amm_config", index as big-endian u16]` under the
+cluster's CPMM program (raydium-cp-swap `create_config.rs`).
+`scripts/src/config.ts` `ammConfigPda` derives them, and `config.test.ts`
+pins both index-0 addresses.
 
 ## Rules for changes
 
@@ -257,4 +262,6 @@ behind its `devnet` feature flag) and raydium-sdk-v2 `programId.ts`.
   (needs `target/types/parabull.ts` from `anchor build`)
 - **build / deploy**: `anchor build` and `anchor deploy` (needs the Anchor
   0.31.1 and Solana CLIs). Before the first deploy, run `anchor keys sync`
-  with your own program keypair.
+  with your own program keypair. The root `Makefile` wraps every step. The
+  cloud sandbox can't run the Solana toolchain, so the SBF build has never
+  run here: run it locally (see `scripts/README.md`).
