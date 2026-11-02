@@ -34,4 +34,20 @@ pub enum ParabullError {
     InvalidName,
     #[msg("URI exceeds 200 bytes")]
     InvalidUri,
+    #[msg("Symbol must already be the canonical ticker (uppercase A-Z/0-9, no $ or spaces)")]
+    NonCanonicalSymbol,
+    #[msg("Name must not have leading or trailing whitespace")]
+    NonCanonicalName,
+    #[msg("Launch ticket has expired")]
+    TicketExpired,
+    #[msg("Launch ticket has not expired yet")]
+    TicketNotExpired,
+    #[msg("Launch fee exceeds the ticket deposit")]
+    LaunchFeeExceedsDeposit,
+    #[msg("Name/symbol/URI do not match the launch ticket commitment")]
+    MetadataMismatch,
+    #[msg("Ticker is locked by a launch in the last 3 days")]
+    TickerLocked,
+    #[msg("Name is locked by a launch in the last 3 days")]
+    NameLocked,
 }

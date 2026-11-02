@@ -12,6 +12,16 @@ reading only.
   Nobody can trade before `trading_open_slot` (creation slot plus a delay).
   The creator's first buy is an ordinary buy after the market opens. A ticket
   that isn't used before it expires can be refunded to the payer.
+- **Launch flow rules.** `request_launch` records the launch fee in effect at
+  request time and a hash of the exact name, symbol and URI. `symbol` must
+  already be the canonical ticker. `create` must run before the ticket
+  expires and must match that hash. 0.2 SOL goes to the treasury and the rest
+  of the deposit repays the launch authority for the rent it fronted; the
+  ticket's own rent goes back to the payer. After `create` the mint has a
+  fixed supply, no mint or freeze authority, and metadata nobody can change.
+  `refund_ticket` always sends funds to the payer. The payer can call it
+  after expiry; the launch authority can call it at any time (to reject a
+  launch). Refunds still work while the program is paused.
 - **Anti-vamp registry.** `["registry", TICKER]` and `["name", sha256(name)]`
   PDAs lock a ticker or name for 3 days (`Global.registry_lock_seconds`).
   Tickers are 1-10 ASCII letters or digits, stored uppercase. Lookalike
@@ -26,6 +36,9 @@ reading only.
   3. $PARABULL holder rewards (`holder_bps`), paid out per epoch from a
      Merkle root (`RewardEpoch`).
   Whatever is left over goes to the treasury.
+  If a token graduates or goes inactive before its escrow reaches the
+  target, the unreleased `escrow_accrued` goes to `BuybackVault`, never to
+  the treasury.
 - **Graduation.** When the curve's real token reserves reach zero, it migrates
   to a **Raydium CPMM** pool (not LaunchLab, not pump-amm). The LP tokens are
   locked with Raydium Burn & Earn rather than burned, so the protocol keeps
@@ -38,7 +51,9 @@ reading only.
 | `programs/parabull/src/state.rs` | Account layouts, normalisation helpers |
 | `programs/parabull/src/math.rs` | Curve and fee arithmetic (no I/O) |
 | `programs/parabull/src/instructions/` | One file per instruction |
+| `programs/parabull/src/launch.rs` | Pure launch-flow rules (metadata, expiry, refunds, settlement, registry claims) |
 | `programs/parabull/tests/reference_parity.rs` | Differential tests against `reference/programs/pump` |
+| `programs/parabull/tests/launch_flow.rs` | Runtime tests using solana-program-test (real Token-2022 + ATA programs) |
 | `reference/` | Byte-matching pump.fun reconstructions. Read-only |
 
 ## Rules for changes
@@ -55,10 +70,17 @@ reading only.
   `state::tests::account_sizes_fit_and_are_stable`.
 - Every arithmetic operation in on-chain code must be checked (`checked_*` or
   `ParabullError`).
+- Move lamports directly (`sub_lamports`/`add_lamports`) only after the
+  instruction's last CPI. Doing it earlier fails in solana-program-test's
+  native mode ("sum of account balances before and after instruction do not
+  match").
+- New instructions get pure-rule unit tests and runtime tests in
+  `tests/launch_flow.rs` (or a sibling file).
 
 ## Verified commands
 
-- **test**: `cargo test -p parabull` (from the repository root)
+- **test**: `cargo test -p parabull` (from the repository root). The
+  first build compiles solana-program-test, which takes several minutes.
 - **check with IDL build**: `cargo check -p parabull --features idl-build`
 - **build / deploy**: `anchor build` and `anchor deploy` (needs the Anchor
   0.31.1 and Solana CLIs). Before the first deploy, run `anchor keys sync`

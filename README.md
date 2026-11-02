@@ -17,7 +17,8 @@ A Solana meme launchpad built on Anchor 0.31.1:
 | Accounts (`state.rs`) | Done |
 | Curve and fee maths (`math.rs`), with parity tests against the reference | Done |
 | `initialize` | Done |
-| Launch tickets, create, buy/sell, migration, flywheel cranks | Not started |
+| `request_launch`, `refund_ticket`, `create` (blind launch, registry locks) | Done |
+| Buy/sell, migration, flywheel cranks | Not started |
 
 ## Development
 

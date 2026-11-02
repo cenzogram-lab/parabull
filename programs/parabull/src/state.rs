@@ -285,7 +285,11 @@ pub struct LaunchTicket {
     pub bump: u8,
     pub payer: Pubkey,
     pub nonce: u64,
+    /// Total lamports deposited on top of the ticket's own rent.
     pub deposit_lamports: u64,
+    /// Protocol fee quoted at request time; the rest of the deposit covers
+    /// rent + fees paid by the launch authority during `create`.
+    pub launch_fee_lamports: u64,
     pub created_at: i64,
     pub expires_at: i64,
     pub ticker: [u8; MAX_TICKER_LEN],
@@ -293,7 +297,7 @@ pub struct LaunchTicket {
     pub name_hash: [u8; 32],
     /// `metadata_commitment(name, symbol, uri)`.
     pub metadata_hash: [u8; 32],
-    pub _reserved: [u8; 32],
+    pub _reserved: [u8; 24],
 }
 
 impl LaunchTicket {
