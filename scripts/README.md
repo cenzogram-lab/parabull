@@ -72,6 +72,11 @@ the instruction it names.
 | `src/snapshot.ts` (`npm run snapshot [-- --publish]`) | Takes a $PARABULL holder snapshot and turns it into reward epochs. It writes `snapshots/epoch-<n>.draft.json` on a dry run, or publishes and writes `snapshots/epoch-<n>.json` (root, total, and every leaf with its amount, balance and proof) for the claim UI. |
 | `src/lpFees.ts` | Fetches the claimable Burn & Earn LP fee for one locked position from Raydium's lock-position API. |
 
+Backend services that aren't built as scripts here (the launch worker's
+random 3–15 s delay and tweet verification, the 20-slot bundle-risk
+indexer, and image/lookalike flags) are specified in
+[`docs/BACKEND_SPEC.md`](../docs/BACKEND_SPEC.md).
+
 ## LP-fee collection
 
 Raydium tracks fees per locked position (the fee-key NFT), not per pool.

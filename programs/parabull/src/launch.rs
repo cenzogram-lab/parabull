@@ -3,6 +3,9 @@
 
 use anchor_lang::prelude::*;
 
+use anchor_lang::solana_program::hash::hashv;
+
+use crate::constants::TWEET_HASH_DOMAIN;
 use crate::error::ParabullError;
 use crate::state::{metadata_commitment, normalize_name_hash, normalize_ticker, registry_locked, validate_uri, Ticker};
 
@@ -23,6 +26,21 @@ pub fn validate_launch_metadata(name: &str, symbol: &str, uri: &str) -> Result<L
     require!(ticker.as_seed() == symbol.as_bytes(), ParabullError::NonCanonicalSymbol);
     validate_uri(uri)?;
     Ok(LaunchMetadata { ticker, name_hash, metadata_hash: metadata_commitment(name, symbol, uri) })
+}
+
+/// Canonical lock key for an announcement tweet:
+/// `sha256("parabull:tweet" || status_id as u64 LE)`. The numeric status ID is
+/// the same for every URL form (x.com / twitter.com / mobile / query params),
+/// so a copycat can't get a fresh lock by re-spelling the link.
+pub fn tweet_id_hash(tweet_id: u64) -> Result<[u8; 32]> {
+    require!(tweet_id != 0, ParabullError::InvalidTweetId);
+    Ok(hashv(&[TWEET_HASH_DOMAIN, &tweet_id.to_le_bytes()]).to_bytes())
+}
+
+/// The tweet registry account must be supplied exactly when the ticket has a tweet.
+pub fn check_tweet_registry_presence(ticket_has_tweet: bool, registry_passed: bool) -> Result<()> {
+    require!(ticket_has_tweet == registry_passed, ParabullError::TweetRegistryMismatch);
+    Ok(())
 }
 
 pub fn ticket_expiry(now: i64, ttl_seconds: i64) -> Result<i64> {
@@ -167,6 +185,35 @@ mod tests {
         assert!(registry_claimable(&mint, T0, T0 + 3 * DAY, lock));
         // Lock disabled.
         assert!(registry_claimable(&mint, T0, T0, 0));
+    }
+
+    const TWEET_VECTOR_HEX: &str = "f756d823a024b7f7f6c87021678d1835720f0fba261f26d8bfdf5a0f31925206";
+
+    /// Pinned in scripts/src/launch.test.ts too (computed independently in Python).
+    #[test]
+    fn tweet_hash_is_canonical_and_pinned() {
+        let h = tweet_id_hash(1_850_000_000_000_000_000).unwrap();
+        let hex: String = h.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, TWEET_VECTOR_HEX);
+        assert_ne!(h, tweet_id_hash(1_850_000_000_000_000_001).unwrap());
+        assert!(tweet_id_hash(0).is_err());
+    }
+
+    #[test]
+    fn tweet_registry_presence_must_match_ticket() {
+        assert!(check_tweet_registry_presence(true, true).is_ok());
+        assert!(check_tweet_registry_presence(false, false).is_ok());
+        assert!(check_tweet_registry_presence(true, false).is_err(), "tweet on ticket but no registry");
+        assert!(check_tweet_registry_presence(false, true).is_err(), "registry without a tweet");
+    }
+
+    #[test]
+    fn tweet_lock_window_matches_ticker_lock() {
+        let lock = DEFAULT_REGISTRY_LOCK_SECONDS;
+        assert_eq!(lock, 259_200);
+        let mint = Pubkey::new_unique();
+        assert!(!registry_claimable(&mint, T0, T0 + lock - 1, lock));
+        assert!(registry_claimable(&mint, T0, T0 + lock, lock));
     }
 
     #[test]

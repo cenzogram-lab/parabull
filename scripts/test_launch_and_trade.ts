@@ -5,13 +5,14 @@
  *   wait for trading_open_slot -> buy -> sell, with slippage from src/curve.ts.
  *
  *   CLUSTER=devnet npm run smoke
- * Env: ADMIN_KEYPAIR (funds the test user and pays fees), LAUNCH_AUTHORITY_KEYPAIR.
+ * Env: ADMIN_KEYPAIR (funds the test user and pays fees), LAUNCH_AUTHORITY_KEYPAIR,
+ * TWEET (optional announcement tweet URL or status ID; locked for 3 days).
  */
 import { Keypair, LAMPORTS_PER_SOL, SystemProgram, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import { roles } from "./src/config";
 import { applySlippage, quoteBuyExactTokens, quoteSell } from "./src/curve";
-import { canonicalTicker, nameHash } from "./src/launch";
+import { canonicalTicker, nameHash, parseTweetId, tweetIdHash } from "./src/launch";
 import { ata2022 } from "./src/pdas";
 import { anchorErrorName, big, bn, connect, send } from "./src/program";
 
@@ -39,8 +40,9 @@ async function main() {
   const uri = "https://example.com/parabull-smoke.json";
   const nonce = BigInt(Date.now());
   const ticket = pdas.ticket(user.publicKey, nonce);
+  const tweetId = process.env.TWEET ? parseTweetId(process.env.TWEET) : null;
   await program.methods
-    .requestLaunch(bn(nonce), name, symbol, uri)
+    .requestLaunch(bn(nonce), name, symbol, uri, tweetId === null ? null : bn(tweetId))
     .accountsStrict({ payer: user.publicKey, global: pdas.global(), ticket, systemProgram: SystemProgram.programId })
     .signers([user])
     .rpc();
@@ -63,6 +65,7 @@ async function main() {
       curveTokenAccount: ata2022(mint.publicKey, curve),
       tickerRegistry: pdas.tickerRegistry(symbol),
       nameRegistry: pdas.nameRegistry(nameHash(name)),
+      tweetRegistry: tweetId === null ? null : pdas.tweetRegistry(tweetIdHash(tweetId)),
       tokenProgram: TOKEN_2022_PROGRAM_ID,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,

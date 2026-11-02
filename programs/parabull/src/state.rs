@@ -453,12 +453,22 @@ pub struct LaunchTicket {
     pub name_hash: [u8; 32],
     /// `metadata_commitment(name, symbol, uri)`.
     pub metadata_hash: [u8; 32],
+    /// `launch::tweet_id_hash(tweet_id)` of the announcement tweet, if any.
+    /// Computed on-chain from the numeric status ID so URL variants of one
+    /// tweet can't dodge the lock.
+    pub tweet_id_hash: Option<[u8; 32]>,
     pub _reserved: [u8; 24],
 }
 
 impl LaunchTicket {
     pub fn ticker(&self) -> &[u8] {
         &self.ticker[..usize::from(self.ticker_len)]
+    }
+
+    /// Seed for the tweet registry PDA (empty when the ticket has no tweet;
+    /// `create` rejects a registry account in that case).
+    pub fn tweet_seed(&self) -> &[u8] {
+        self.tweet_id_hash.as_ref().map_or(&[], |h| &h[..])
     }
 
     pub fn is_expired(&self, now: i64) -> bool {
@@ -503,6 +513,22 @@ pub struct NameRegistry {
     pub name_hash: [u8; 32],
     pub mint: Pubkey,
     pub launch_timestamp: i64,
+}
+
+/// Announcement-tweet lock. PDA: `["tweet", tweet_id_hash]`.
+#[account]
+#[derive(InitSpace, Debug)]
+pub struct TweetRegistry {
+    pub bump: u8,
+    pub tweet_id_hash: [u8; 32],
+    pub mint: Pubkey,
+    pub launch_timestamp: i64,
+}
+
+impl TweetRegistry {
+    pub fn is_locked(&self, now: i64, lock_seconds: i64) -> bool {
+        registry_locked(self.launch_timestamp, now, lock_seconds)
+    }
 }
 
 /// A registry entry blocks re-use while `now < launch_timestamp + lock_seconds`.
@@ -1046,7 +1072,8 @@ mod tests {
         // 8-byte discriminator + INIT_SPACE. Pinned so layout changes are deliberate.
         assert_eq!(8 + Global::INIT_SPACE, 504);
         assert_eq!(8 + BondingCurve::INIT_SPACE, 285);
-        assert_eq!(8 + LaunchTicket::INIT_SPACE, 180);
+        assert_eq!(8 + LaunchTicket::INIT_SPACE, 213);
+        assert_eq!(8 + TweetRegistry::INIT_SPACE, 81);
         assert_eq!(8 + TickerRegistry::INIT_SPACE, 60);
         assert_eq!(8 + NameRegistry::INIT_SPACE, 81);
         assert_eq!(8 + BuybackVault::INIT_SPACE, 113);

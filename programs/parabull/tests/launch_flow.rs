@@ -162,13 +162,13 @@ async fn create_rejects_wrong_metadata_signer_and_expired_ticket() {
     // Only the launch authority can create.
     let impostor = env.funded_user().await;
     let mint = Keypair::new();
-    let ix = env.create_ix(&impostor.pubkey(), &user.pubkey(), 1, &mint.pubkey(), "Pepe Coin", "PEPE", URI);
+    let ix = env.create_ix(&impostor.pubkey(), &user.pubkey(), 1, &mint.pubkey(), "Pepe Coin", "PEPE", URI, None);
     assert_custom(env.send(&[ix], &[&impostor, &mint]).await, ParabullError::Unauthorized);
 
     // The mint keypair must sign (blind launch: the backend holds it).
     let mint = Keypair::new();
     let launch = env.launch.insecure_clone();
-    let mut ix = env.create_ix(&launch.pubkey(), &user.pubkey(), 1, &mint.pubkey(), "Pepe Coin", "PEPE", URI);
+    let mut ix = env.create_ix(&launch.pubkey(), &user.pubkey(), 1, &mint.pubkey(), "Pepe Coin", "PEPE", URI, None);
     for meta in ix.accounts.iter_mut() {
         if meta.pubkey == mint.pubkey() {
             meta.is_signer = false;
@@ -207,4 +207,88 @@ async fn payer_refund_only_after_expiry_and_strangers_never() {
     env.send(&[ix], &[&user]).await.unwrap();
     assert!(env.account(&key).await.is_none());
     assert_eq!(env.lamports(&user.pubkey()).await, before + held);
+}
+
+// ---- Announcement-tweet lock ---------------------------------------------------
+
+const TWEET: u64 = 1_850_000_000_000_000_000;
+
+#[tokio::test]
+async fn tweet_is_hashed_on_chain_and_locked_by_create() {
+    let mut env = Env::new().await;
+    let user = env.funded_user().await;
+    env.request_with_tweet(&user, 1, "Pepe Coin", "PEPE", URI, Some(TWEET)).await.unwrap();
+    let t: LaunchTicket = env.anchor(&ticket_pda(&user.pubkey(), 1)).await;
+    assert_eq!(t.tweet_id_hash, Some(parabull::launch::tweet_id_hash(TWEET).unwrap()));
+
+    let mint = env.create_with_tweet(&user.pubkey(), 1, "Pepe Coin", "PEPE", URI, Some(tweet_registry_pda(TWEET))).await.unwrap();
+    let r: parabull::state::TweetRegistry = env.anchor(&tweet_registry_pda(TWEET)).await;
+    assert_eq!((r.mint, r.tweet_id_hash), (mint, t.tweet_id_hash.unwrap()));
+    assert!(r.launch_timestamp > 0);
+}
+
+#[tokio::test]
+async fn reused_tweet_is_blocked_for_three_days_then_reclaimable() {
+    let mut env = Env::new().await;
+    let alice = env.funded_user().await;
+    let bob = env.funded_user().await;
+    env.request_with_tweet(&alice, 1, "Pepe Coin", "PEPE", URI, Some(TWEET)).await.unwrap();
+    let first = env.create_with_tweet(&alice.pubkey(), 1, "Pepe Coin", "PEPE", URI, Some(tweet_registry_pda(TWEET))).await.unwrap();
+
+    // Copycat: different ticker and name, same announcement tweet.
+    env.request_with_tweet(&bob, 1, "Frog Cash", "FROG", URI, Some(TWEET)).await.unwrap();
+    assert_custom(
+        env.create_with_tweet(&bob.pubkey(), 1, "Frog Cash", "FROG", URI, Some(tweet_registry_pda(TWEET))).await,
+        ParabullError::TweetLocked,
+    );
+    // A different tweet goes through.
+    env.request_with_tweet(&bob, 2, "Frog Cash", "FROG", URI, Some(TWEET + 1)).await.unwrap();
+    env.create_with_tweet(&bob.pubkey(), 2, "Frog Cash", "FROG", URI, Some(tweet_registry_pda(TWEET + 1))).await.unwrap();
+
+    // One second before the 259,200 s lock lapses: still blocked.
+    env.advance(DEFAULT_REGISTRY_LOCK_SECONDS - 120).await;
+    env.request_with_tweet(&bob, 3, "Toad Cash", "TOAD", URI, Some(TWEET)).await.unwrap();
+    assert_custom(
+        env.create_with_tweet(&bob.pubkey(), 3, "Toad Cash", "TOAD", URI, Some(tweet_registry_pda(TWEET))).await,
+        ParabullError::TweetLocked,
+    );
+    // After the lock: reclaimable, and the registry points at the new mint.
+    env.advance(180).await;
+    let second = env.create_with_tweet(&bob.pubkey(), 3, "Toad Cash", "TOAD", URI, Some(tweet_registry_pda(TWEET))).await.unwrap();
+    assert_ne!(first, second);
+    let r: parabull::state::TweetRegistry = env.anchor(&tweet_registry_pda(TWEET)).await;
+    assert_eq!(r.mint, second);
+}
+
+#[tokio::test]
+async fn tweet_registry_must_match_the_ticket() {
+    let mut env = Env::new().await;
+    let user = env.funded_user().await;
+
+    // Ticket with a tweet, but the backend omits the registry: rejected.
+    env.request_with_tweet(&user, 1, "Pepe Coin", "PEPE", URI, Some(TWEET)).await.unwrap();
+    assert_custom(env.create_with_tweet(&user.pubkey(), 1, "Pepe Coin", "PEPE", URI, None).await, ParabullError::TweetRegistryMismatch);
+    // ...or passes a registry for a different tweet: seeds don't match.
+    assert!(env.create_with_tweet(&user.pubkey(), 1, "Pepe Coin", "PEPE", URI, Some(tweet_registry_pda(TWEET + 7))).await.is_err());
+
+    // Ticket without a tweet, but a registry is passed: rejected (no lock is created).
+    env.request(&user, 2, "Frog Cash", "FROG", URI).await.unwrap();
+    assert!(env.create_with_tweet(&user.pubkey(), 2, "Frog Cash", "FROG", URI, Some(tweet_registry_pda(TWEET))).await.is_err());
+    // Even the exact PDA a tweet-less ticket derives (["tweet", <empty>]) is refused.
+    let empty_seed_pda = pda(&[SEED_TWEET_REGISTRY, &[]]);
+    assert_custom(
+        env.create_with_tweet(&user.pubkey(), 2, "Frog Cash", "FROG", URI, Some(empty_seed_pda)).await,
+        ParabullError::TweetRegistryMismatch,
+    );
+    assert!(env.account(&empty_seed_pda).await.is_none());
+    // Without a tweet the normal path works and creates no tweet registry.
+    env.create(&user.pubkey(), 2, "Frog Cash", "FROG", URI).await.unwrap();
+    assert!(env.account(&tweet_registry_pda(TWEET)).await.is_none());
+}
+
+#[tokio::test]
+async fn zero_tweet_id_is_rejected_at_request() {
+    let mut env = Env::new().await;
+    let user = env.funded_user().await;
+    assert_custom(env.request_with_tweet(&user, 1, "Pepe Coin", "PEPE", URI, Some(0)).await, ParabullError::InvalidTweetId);
 }

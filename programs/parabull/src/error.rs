@@ -98,4 +98,10 @@ pub enum ParabullError {
     RewardEpochExpired,
     #[msg("Reward epoch claim window has not ended")]
     RewardEpochNotExpired,
+    #[msg("Tweet ID must be a non-zero X/Twitter status ID")]
+    InvalidTweetId,
+    #[msg("Announcement tweet is locked by a launch in the last 3 days")]
+    TweetLocked,
+    #[msg("Tweet registry account must be passed exactly when the ticket has a tweet")]
+    TweetRegistryMismatch,
 }

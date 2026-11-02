@@ -21,6 +21,7 @@ export class Pdas {
   ticket = (payer: PublicKey, nonce: bigint | number) => this.find([enc("ticket"), payer.toBuffer(), u64le(nonce)]);
   tickerRegistry = (ticker: string) => this.find([enc("registry"), enc(ticker)]);
   nameRegistry = (nameHash: Buffer) => this.find([enc("name"), nameHash]);
+  tweetRegistry = (tweetIdHash: Buffer) => this.find([enc("tweet"), tweetIdHash]);
   buybackVault = () => this.find([enc("buyback-vault")]);
   holderVault = () => this.find([enc("holder-vault")]);
   rewardEpoch = (epoch: bigint | number) => this.find([enc("reward-epoch"), u64le(epoch)]);

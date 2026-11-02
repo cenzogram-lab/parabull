@@ -172,7 +172,7 @@ impl Env {
         self.ctx.set_sysvar(&clock);
     }
 
-    pub fn request_ix(&self, payer: &Pubkey, nonce: u64, name: &str, symbol: &str, uri: &str) -> Instruction {
+    pub fn request_ix(&self, payer: &Pubkey, nonce: u64, name: &str, symbol: &str, uri: &str, tweet_id: Option<u64>) -> Instruction {
         Instruction {
             program_id: parabull::ID,
             accounts: parabull::accounts::RequestLaunch {
@@ -187,6 +187,7 @@ impl Env {
                 name: name.into(),
                 symbol: symbol.into(),
                 uri: uri.into(),
+                tweet_id,
             }
             .data(),
         }
@@ -216,6 +217,7 @@ impl Env {
         name: &str,
         symbol: &str,
         uri: &str,
+        tweet_registry: Option<Pubkey>,
     ) -> Instruction {
         let curve = pda(&[SEED_BONDING_CURVE, mint.as_ref()]);
         Instruction {
@@ -232,6 +234,7 @@ impl Env {
                 curve_token_account: ata(&curve, mint),
                 ticker_registry: pda(&[SEED_TICKER_REGISTRY, symbol.as_bytes()]),
                 name_registry: pda(&[SEED_NAME_REGISTRY, &normalize_name_hash(name).unwrap()]),
+                tweet_registry,
                 token_program: TOKEN_2022,
                 associated_token_program: ATA_PROGRAM,
                 system_program: system_program::ID,
@@ -242,15 +245,24 @@ impl Env {
     }
 
     pub async fn request(&mut self, user: &Keypair, nonce: u64, name: &str, symbol: &str, uri: &str) -> Result<(), BanksClientError> {
-        let ix = self.request_ix(&user.pubkey(), nonce, name, symbol, uri);
+        self.request_with_tweet(user, nonce, name, symbol, uri, None).await
+    }
+
+    pub async fn request_with_tweet(&mut self, user: &Keypair, nonce: u64, name: &str, symbol: &str, uri: &str, tweet_id: Option<u64>) -> Result<(), BanksClientError> {
+        let ix = self.request_ix(&user.pubkey(), nonce, name, symbol, uri, tweet_id);
         self.send(&[ix], &[user]).await
     }
 
     /// Backend create with a fresh mint keypair. Returns the mint on success.
     pub async fn create(&mut self, user: &Pubkey, nonce: u64, name: &str, symbol: &str, uri: &str) -> Result<Pubkey, BanksClientError> {
+        self.create_with_tweet(user, nonce, name, symbol, uri, None).await
+    }
+
+    /// `tweet_registry`: pass `Some(tweet_registry_pda(hash))` when the ticket has a tweet.
+    pub async fn create_with_tweet(&mut self, user: &Pubkey, nonce: u64, name: &str, symbol: &str, uri: &str, tweet_registry: Option<Pubkey>) -> Result<Pubkey, BanksClientError> {
         let mint = Keypair::new();
         let launch = self.launch.insecure_clone();
-        let ix = self.create_ix(&launch.pubkey(), user, nonce, &mint.pubkey(), name, symbol, uri);
+        let ix = self.create_ix(&launch.pubkey(), user, nonce, &mint.pubkey(), name, symbol, uri, tweet_registry);
         self.send(&[ix], &[&launch, &mint]).await.map(|_| mint.pubkey())
     }
 }
@@ -854,4 +866,9 @@ impl Env {
             data: parabull::instruction::ExpireRewardEpoch { epoch_index }.data(),
         }
     }
+}
+
+pub fn tweet_registry_pda(tweet_id: u64) -> Pubkey {
+    let hash = parabull::launch::tweet_id_hash(tweet_id).unwrap();
+    pda(&[SEED_TWEET_REGISTRY, &hash])
 }

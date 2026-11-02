@@ -7,6 +7,9 @@ pub const SEED_MINT_AUTHORITY: &[u8] = b"mint-authority";
 pub const SEED_LAUNCH_TICKET: &[u8] = b"ticket";
 pub const SEED_TICKER_REGISTRY: &[u8] = b"registry";
 pub const SEED_NAME_REGISTRY: &[u8] = b"name";
+pub const SEED_TWEET_REGISTRY: &[u8] = b"tweet";
+/// Domain separator for `tweet_id_hash` (see `launch::tweet_id_hash`).
+pub const TWEET_HASH_DOMAIN: &[u8] = b"parabull:tweet";
 pub const SEED_BUYBACK_VAULT: &[u8] = b"buyback-vault";
 pub const SEED_HOLDER_VAULT: &[u8] = b"holder-vault";
 pub const SEED_REWARD_EPOCH: &[u8] = b"reward-epoch";

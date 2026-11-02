@@ -4,7 +4,7 @@ use anchor_lang::system_program;
 use crate::constants::{SEED_GLOBAL, SEED_LAUNCH_TICKET};
 use crate::error::ParabullError;
 use crate::events::LaunchRequested;
-use crate::launch::{ticket_expiry, validate_launch_metadata};
+use crate::launch::{ticket_expiry, tweet_id_hash, validate_launch_metadata};
 use crate::state::{Global, LaunchTicket};
 
 #[derive(Accounts)]
@@ -28,10 +28,13 @@ pub struct RequestLaunch<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<RequestLaunch>, nonce: u64, name: String, symbol: String, uri: String) -> Result<()> {
+/// `tweet_id`: numeric X/Twitter status ID of the announcement tweet
+/// (optional). It is hashed on-chain and locked for 3 days by `create`.
+pub fn handler(ctx: Context<RequestLaunch>, nonce: u64, name: String, symbol: String, uri: String, tweet_id: Option<u64>) -> Result<()> {
     let global = &ctx.accounts.global;
     require!(!global.paused, ParabullError::Paused);
     let meta = validate_launch_metadata(&name, &symbol, &uri)?;
+    let tweet_hash = tweet_id.map(tweet_id_hash).transpose()?;
     let now = Clock::get()?.unix_timestamp;
     let expires_at = ticket_expiry(now, global.ticket_ttl_seconds)?;
     let deposit = global.ticket_deposit_lamports;
@@ -61,6 +64,7 @@ pub fn handler(ctx: Context<RequestLaunch>, nonce: u64, name: String, symbol: St
     ticket.ticker_len = meta.ticker.len;
     ticket.name_hash = meta.name_hash;
     ticket.metadata_hash = meta.metadata_hash;
+    ticket.tweet_id_hash = tweet_hash;
 
     emit!(LaunchRequested {
         ticket: ticket.key(),
@@ -71,6 +75,7 @@ pub fn handler(ctx: Context<RequestLaunch>, nonce: u64, name: String, symbol: St
         metadata_hash: meta.metadata_hash,
         deposit_lamports: deposit,
         expires_at,
+        tweet_id_hash: tweet_hash,
     });
     Ok(())
 }

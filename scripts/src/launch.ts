@@ -1,4 +1,4 @@
-/** Port of state.rs `normalize_ticker` / `normalize_name_hash`. */
+/** Port of state.rs `normalize_ticker` / `normalize_name_hash` and launch.rs `tweet_id_hash`. */
 import { createHash } from "crypto";
 
 export function canonicalTicker(input: string): string {
@@ -25,4 +25,23 @@ export function nameHash(name: string): Buffer {
     }
   }
   return createHash("sha256").update(Buffer.from(out)).digest();
+}
+
+/**
+ * Lock key for an announcement tweet: sha256("parabull:tweet" || id as u64 LE).
+ * The program computes this itself from `request_launch(..., tweet_id)`; this
+ * port is for deriving the `["tweet", hash]` registry PDA client-side.
+ */
+export function tweetIdHash(tweetId: bigint): Buffer {
+  if (tweetId <= 0n || tweetId >= 2n ** 64n) throw new Error("tweet id must be a non-zero u64");
+  const id = Buffer.alloc(8);
+  id.writeBigUInt64LE(tweetId);
+  return createHash("sha256").update(Buffer.concat([Buffer.from("parabull:tweet"), id])).digest();
+}
+
+/** Numeric status ID from any x.com / twitter.com status URL (or a bare ID). */
+export function parseTweetId(input: string): bigint {
+  const m = input.trim().match(/^(\d{1,20})$/) ?? input.match(/(?:twitter\.com|x\.com)\/(?:[^/]+\/status(?:es)?|i\/web\/status)\/(\d{1,20})/i);
+  if (!m) throw new Error(`not a tweet URL or ID: ${input}`);
+  return BigInt(m[1]);
 }

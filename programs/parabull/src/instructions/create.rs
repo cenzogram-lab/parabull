@@ -18,8 +18,8 @@ use anchor_spl::token_interface::{mint_to, set_authority, Mint, MintTo, SetAutho
 use crate::constants::*;
 use crate::error::ParabullError;
 use crate::events::TokenCreated;
-use crate::launch::{check_metadata_matches, check_ticket_live, registry_claimable, settle_ticket};
-use crate::state::{BondingCurve, Global, LaunchTicket, NameRegistry, TickerRegistry};
+use crate::launch::{check_metadata_matches, check_ticket_live, check_tweet_registry_presence, registry_claimable, settle_ticket};
+use crate::state::{BondingCurve, Global, LaunchTicket, NameRegistry, TickerRegistry, TweetRegistry};
 
 #[derive(Accounts)]
 pub struct Create<'info> {
@@ -99,6 +99,16 @@ pub struct Create<'info> {
     )]
     pub name_registry: Box<Account<'info, NameRegistry>>,
 
+    /// Required exactly when the ticket carries an announcement tweet.
+    #[account(
+        init_if_needed,
+        payer = launch_authority,
+        space = 8 + TweetRegistry::INIT_SPACE,
+        seeds = [SEED_TWEET_REGISTRY, ticket.tweet_seed()],
+        bump,
+    )]
+    pub tweet_registry: Option<Box<Account<'info, TweetRegistry>>>,
+
     pub token_program: Program<'info, Token2022>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -119,6 +129,10 @@ pub fn handler(ctx: Context<Create>, name: String, symbol: String, uri: String) 
         require!(registry_claimable(&t.mint, t.launch_timestamp, now, lock), ParabullError::TickerLocked);
         let n = &a.name_registry;
         require!(registry_claimable(&n.mint, n.launch_timestamp, now, lock), ParabullError::NameLocked);
+        check_tweet_registry_presence(a.ticket.tweet_id_hash.is_some(), a.tweet_registry.is_some())?;
+        if let Some(tw) = &a.tweet_registry {
+            require!(registry_claimable(&tw.mint, tw.launch_timestamp, now, lock), ParabullError::TweetLocked);
+        }
     }
 
     let mint_key = ctx.accounts.mint.key();
@@ -133,6 +147,13 @@ pub fn handler(ctx: Context<Create>, name: String, symbol: String, uri: String) 
         t.ticker_len = ticket.ticker_len;
         t.mint = mint_key;
         t.launch_timestamp = now;
+
+        if let (Some(tw), Some(hash)) = (ctx.accounts.tweet_registry.as_mut(), ticket.tweet_id_hash) {
+            tw.bump = ctx.bumps.tweet_registry.ok_or(ParabullError::TweetRegistryMismatch)?;
+            tw.tweet_id_hash = hash;
+            tw.mint = mint_key;
+            tw.launch_timestamp = now;
+        }
 
         let n = &mut ctx.accounts.name_registry;
         n.bump = ctx.bumps.name_registry;
@@ -184,6 +205,7 @@ pub fn handler(ctx: Context<Create>, name: String, symbol: String, uri: String) 
         real_token_reserves: c.real_token_reserves,
         token_total_supply: c.token_total_supply,
         launch_fee_lamports: settlement.to_treasury,
+        tweet_id_hash: ctx.accounts.ticket.tweet_id_hash,
     });
     Ok(())
 }

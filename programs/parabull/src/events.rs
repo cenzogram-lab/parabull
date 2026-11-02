@@ -10,6 +10,7 @@ pub struct LaunchRequested {
     pub metadata_hash: [u8; 32],
     pub deposit_lamports: u64,
     pub expires_at: i64,
+    pub tweet_id_hash: Option<[u8; 32]>,
 }
 
 #[event]
@@ -37,6 +38,8 @@ pub struct TokenCreated {
     pub real_token_reserves: u64,
     pub token_total_supply: u64,
     pub launch_fee_lamports: u64,
+    /// Announcement tweet locked for this launch, if any.
+    pub tweet_id_hash: Option<[u8; 32]>,
 }
 
 #[event]

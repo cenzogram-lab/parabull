@@ -33,8 +33,16 @@ pub mod parabull {
 
     /// User deposits `Global.ticket_deposit_lamports` and commits to the exact
     /// name/symbol/URI. `symbol` must be the canonical ticker.
-    pub fn request_launch(ctx: Context<RequestLaunch>, nonce: u64, name: String, symbol: String, uri: String) -> Result<()> {
-        instructions::request_launch::handler(ctx, nonce, name, symbol, uri)
+    /// `tweet_id` (optional) is the numeric status ID of the announcement tweet.
+    pub fn request_launch(
+        ctx: Context<RequestLaunch>,
+        nonce: u64,
+        name: String,
+        symbol: String,
+        uri: String,
+        tweet_id: Option<u64>,
+    ) -> Result<()> {
+        instructions::request_launch::handler(ctx, nonce, name, symbol, uri, tweet_id)
     }
 
     /// Return an unused ticket's deposit + rent to its payer. Payer: after
