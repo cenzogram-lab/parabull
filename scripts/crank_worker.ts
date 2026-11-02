@@ -4,20 +4,24 @@
  *     (separate transactions; each step is resumable from the curve's stage)
  *  2. release_dex_escrow for funded escrows (permissionless)
  *  3. sweep_fees above a threshold (permissionless)
- *  4. collect_lp_fees for locked pools (needs fee_lp_amount, see getLpFeeAmount)
+ *  4. collect_lp_fees for locked pools (fee amount from Raydium's lock API,
+ *     capped by the on-chain locked LP; OVERRIDE_LP_FEE_AMOUNT for testing)
  *  5. prepare_buyback + buyback_and_burn (one transaction) with a quoted floor
  *  6. expire_reward_epoch past each epoch's deadline
  *  7. optional: refresh the $299 DexScreener target (admin key) with --sol-usd
+ *  8. optional: snapshot $PARABULL holders and publish a reward epoch with
+ *     --publish-rewards (see src/snapshot.ts)
  *
- *   CLUSTER=devnet npm run crank -- --once [--sol-usd 152.3]
+ *   CLUSTER=devnet npm run crank -- --once [--sol-usd 152.3] [--publish-rewards]
  * Env: CRANK_KEYPAIR, ADMIN_KEYPAIR, SWEEP_MIN_LAMPORTS, BUYBACK_MIN_LAMPORTS,
- * BUYBACK_SLIPPAGE_BPS, POLL_MS.
- * Holder-reward epochs need an off-chain $PARABULL snapshot; see src/merkle.ts
- * buildEpoch() for the exact tree format, and publish with publish_reward_epoch.
+ * BUYBACK_SLIPPAGE_BPS, POLL_MS, LP_FEE_MIN, OVERRIDE_LP_FEE_AMOUNT, and the
+ * SNAPSHOT_* variables read by src/snapshot.ts.
  */
 import { Keypair, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, NATIVE_MINT, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { MEMO_PROGRAM_ID, METADATA_PROGRAM_ID, raydium, roles } from "./src/config";
+import { MEMO_PROGRAM_ID, METADATA_PROGRAM_ID, cluster, raydium, roles } from "./src/config";
+import { fetchLpFeeAmount } from "./src/lpFees";
+import { runSnapshot } from "./src/snapshot";
 import { applySlippage, cpmmQuoteOut } from "./src/curve";
 import { ata2022, ataSpl, cpmmAccounts, cpmmPoolAccounts, lockAccounts } from "./src/pdas";
 import { ParabullProgram, big, bn, connect, isDefault, send } from "./src/program";
@@ -129,23 +133,39 @@ async function graduate(x: Ctx, mint: PublicKey, curve: PublicKey, stage: number
   }
 }
 
+const LP_FEE_MIN = BigInt(process.env.LP_FEE_MIN ?? "1");
+
 /**
- * Burn & Earn needs the LP-fee amount the lock has earned. Raydium computes it
- * off-chain (the SDK takes it as `lpFeeAmount`). Plug in Raydium's API or your
- * own computation here; returning null skips collection for that pool.
+ * Claimable LP for one Burn & Earn position, keyed by its fee-key NFT (Raydium
+ * tracks fees per lock position, not per pool). Uses Raydium's lock-position
+ * API (src/lpFees.ts) and caps the result at the LP actually locked for
+ * this pool. Our locks are the only ones on Parabull-migrated pools, so the
+ * lock vault's balance is our locked LP. Returns null to skip the pool this
+ * pass: no fees, API down or rate limited, or a value that isn't plausible.
  */
-async function getLpFeeAmount(_x: Ctx, _pool: PublicKey, _feeNftMint: PublicKey): Promise<bigint | null> {
-  return null;
+async function getLpFeeAmount(x: Ctx, lpMint: PublicKey, lockLpVault: PublicKey, feeNftMint: PublicKey): Promise<bigint | null> {
+  const amount = await fetchLpFeeAmount(feeNftMint, { cluster: cluster(), log: (m) => log(m) });
+  if (amount === null || amount < LP_FEE_MIN) return null;
+  const locked = await x.connection.getTokenAccountBalance(lockLpVault).then((r) => BigInt(r.value.amount)).catch(() => null);
+  if (locked === null) {
+    log(`lock vault ${lockLpVault.toBase58()} (lp ${lpMint.toBase58()}) unreadable; skipping`);
+    return null;
+  }
+  if (amount >= locked) {
+    log(`claimable ${amount} >= locked ${locked} for NFT ${feeNftMint.toBase58()}; implausible, skipping`);
+    return null;
+  }
+  return amount;
 }
 
 async function collectLpFees(x: Ctx, mint: PublicKey, curve: PublicKey) {
   const { program, pdas, crank, connection } = x;
   const c = await program.account.bondingCurve.fetch(curve);
-  const amount = await getLpFeeAmount(x, c.raydiumPool, c.feeNftMint);
-  if (!amount) return;
   const g = await program.account.global.fetch(pdas.global());
   const k = cpmmPoolAccounts(g.cpmmProgram, c.raydiumPool, mint, pdas.migrationAuthority(mint));
   const l = lockAccounts(g.lpLockProgram, g.lpLockAuthority, c.feeNftMint, pdas.feeKeyVault(), k.lpMint);
+  const amount = await getLpFeeAmount(x, k.lpMint, l.lockLpVault, c.feeNftMint);
+  if (!amount) return;
   const ix = await program.methods
     .collectLpFees(bn(amount))
     .accountsStrict({
@@ -281,7 +301,7 @@ async function refreshDexTarget(x: Ctx, solUsd: number) {
   log(`dex target -> ${target} lamports ($299 @ $${solUsd}): ${sig}`);
 }
 
-async function pass(x: Ctx, solUsd?: number) {
+async function pass(x: Ctx, solUsd?: number, publishRewards = false) {
   const { program, pdas } = x;
   const g = await program.account.global.fetch(pdas.global());
   if (solUsd) await refreshDexTarget(x, solUsd).catch((e) => log("dex target update failed:", e));
@@ -308,6 +328,9 @@ async function pass(x: Ctx, solUsd?: number) {
   }
   if (!g.paused) await buyback(x).catch((e) => log("buyback failed:", e?.message ?? e));
   await expireEpochs(x).catch((e) => log("expire epochs failed:", e?.message ?? e));
+  if (publishRewards && !g.paused) {
+    await runSnapshot({ publish: true, log }).catch((e) => log("reward snapshot failed:", e?.message ?? e));
+  }
 }
 
 async function main() {
@@ -315,11 +338,12 @@ async function main() {
   const once = args.includes("--once");
   const i = args.indexOf("--sol-usd");
   const solUsd = i >= 0 ? Number(args[i + 1]) : undefined;
+  const publishRewards = args.includes("--publish-rewards");
   const { crank, admin } = roles();
   const x: Ctx = { ...connect(crank), crank, admin, ray: raydium() };
   log(`crank ${crank.publicKey.toBase58()} on program ${x.program.programId.toBase58()}`);
   do {
-    await pass(x, solUsd);
+    await pass(x, solUsd, publishRewards);
     if (!once) await new Promise((r) => setTimeout(r, Number(process.env.POLL_MS ?? "15000")));
   } while (!once);
 }

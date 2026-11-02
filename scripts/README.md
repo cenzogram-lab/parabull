@@ -68,7 +68,56 @@ the instruction it names.
 | --- | --- |
 | `deploy_and_init.ts` | Checks that the program is deployed with `ADMIN_KEYPAIR` as upgrade authority, that the Raydium programs are executable, and that the AmmConfig is owned by the configured CPMM program. Then initialises `Global`. It does nothing if `Global` already exists. On devnet it creates a test Token-2022 `$PARABULL` mint unless `PARABULL_MINT` is set. |
 | `test_launch_and_trade.ts` | Funds a throwaway user, then runs `request_launch` and `create` (signed by the launch authority and a new mint keypair). It shows a buy inside the slot delay being rejected, then buys and sells with slippage limits from `src/curve.ts`. |
-| `crank_worker.ts` | Reference crank: graduation (3 transactions), escrow release, fee sweeps, LP-fee collection, buyback and burn with a quoted `min_amount_out`, reward-epoch expiry, and optional DexScreener-target refresh. |
+| `crank_worker.ts` | Reference crank: graduation (3 transactions), escrow release, fee sweeps, LP-fee collection, buyback and burn with a quoted `min_amount_out`, reward-epoch expiry, optional DexScreener-target refresh (`--sol-usd`), and optional holder-reward publishing (`--publish-rewards`). |
+| `src/snapshot.ts` (`npm run snapshot [-- --publish]`) | Takes a $PARABULL holder snapshot and turns it into reward epochs. It writes `snapshots/epoch-<n>.draft.json` on a dry run, or publishes and writes `snapshots/epoch-<n>.json` (root, total, and every leaf with its amount, balance and proof) for the claim UI. |
+| `src/lpFees.ts` | Fetches the claimable Burn & Earn LP fee for one locked position from Raydium's lock-position API. |
+
+## LP-fee collection
+
+Raydium tracks fees per locked position (the fee-key NFT), not per pool.
+`src/lpFees.ts` calls the endpoint raydium-sdk-v2 uses (`fetchCpmmLockInfo`):
+`https://dynamic-ipfs[-devnet].raydium.io/lock/cpmm/position?id=<NFT mint>`.
+It reads `positionInfo.unclaimedFee.lp` and converts it to raw LP units using
+`poolInfo.lpMint.decimals` (default 9), rounding down. It then keeps 0.1%
+back as a safety margin, and the crank also caps the amount at the
+on-chain locked-LP balance.
+
+- A 404, a 429, a timeout, bad JSON or a zero fee all return `null`, and
+  that pool is skipped for this pass.
+- `OVERRIDE_LP_FEE_AMOUNT=<raw LP units>` skips the API (for devnet/local
+  testing). `RAYDIUM_CPMM_LOCK_API` overrides the endpoint, and `LP_FEE_MIN`
+  sets the smallest amount worth collecting.
+- **Not yet confirmed:** that `unclaimedFee.lp` is in UI units. The API
+  isn't reachable from the development sandbox. Burn & Earn rejects an
+  over-claim, so if the unit is wrong, collection fails; it never over-pays.
+  Check one real response before relying on it.
+- The pool-info endpoint (`/pools/info/ids`) returns pool-level stats, not
+  what a particular lock can claim, so it isn't used.
+
+## Holder snapshots
+
+Who counts as a holder:
+- `claim_holder_reward` only pays system-owned wallets, so the snapshot keeps
+  only token-account owners that are system-owned (or have no account yet),
+  not executable, and either on the ed25519 curve or holding lamports.
+- That excludes pool vaults, bonding curves and other programs' PDAs, the
+  burn and incinerator addresses, the Burn & Earn authority, Parabull's own
+  PDAs, the $PARABULL pool's vault authority, and anything listed in
+  `SNAPSHOT_EXCLUDE` (comma-separated).
+
+How rewards are split:
+- Distributable = vault balance − rent − outstanding rewards, times
+  `SNAPSHOT_DISTRIBUTE_BPS` (default 10000).
+- It's split by balance, rounding down. Payouts below
+  `SNAPSHOT_MIN_PAYOUT_LAMPORTS` (default 10,000) are dropped, and nothing is
+  published below `SNAPSHOT_MIN_DISTRIBUTABLE_LAMPORTS` (default 0.1 SOL).
+- Up to 80,000 holders go in one epoch; above that the snapshot spans
+  several.
+
+Every proof is checked locally before publishing, and after publishing the
+on-chain root and total are compared with what was built. The claim UI should
+read `leaves[i]` (`index`, `claimant`, `amount`, `proof`) and send
+`claim_holder_reward(epoch, index, amount, proof)`.
 
 Environment variables: `CLUSTER` (`devnet` / `mainnet-beta` / `localnet`),
 `RPC_URL`, `ADMIN_KEYPAIR` (default `~/.config/solana/id.json`),

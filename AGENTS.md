@@ -243,6 +243,16 @@ pins both index-0 addresses.
 
 - TypeScript, typed against the IDL from `anchor build`. `npm run typecheck`
   fails on any wrong instruction, account or argument name.
+- `src/lpFees.ts` gets the claimable Burn & Earn fee per locked position
+  (fee-key NFT) from Raydium's lock-position API, the same one raydium-sdk-v2
+  uses. It never throws, and the crank caps the result at the on-chain locked
+  LP. **Not yet confirmed:** that the API's `unclaimedFee.lp` is in UI units.
+- `src/snapshot.ts` takes the $PARABULL holder snapshot and turns it into
+  reward epochs. It only includes system-owned wallets (the ones
+  `claim_holder_reward` can pay), splits rewards by balance rounding down,
+  respects the 80,000-leaf limit, checks every proof, and confirms the
+  on-chain root after publishing. Artifacts go to `scripts/snapshots/`
+  (git-ignored).
 - `src/curve.ts`, `src/merkle.ts` and `src/launch.ts` are TypeScript ports
   of `math.rs`, `merkle.rs` and the ticker/name normalisation in `state.rs`.
   `npm test` checks them against values pinned in the Rust tests (the

@@ -10,7 +10,8 @@
     "smoke": "tsx test_launch_and_trade.ts",
     "crank": "tsx crank_worker.ts",
     "test": "tsx --test src/*.test.ts",
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "tsc --noEmit -p .",
+    "snapshot": "tsx src/snapshot.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "0.31.1",
