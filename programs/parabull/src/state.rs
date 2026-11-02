@@ -70,6 +70,9 @@ pub struct Global {
     pub migration_reserve_lamports: u64,
     /// Two-step admin transfer: set by `propose_admin`, cleared by `accept_admin`.
     pub pending_admin: Pubkey,
+    /// Raydium CPMM WSOL/$PARABULL pool used by `buyback_and_burn`
+    /// (`Pubkey::default()` until the pool exists).
+    pub parabull_pool: Pubkey,
     pub _reserved: [u8; 32],
 }
 
@@ -98,6 +101,8 @@ pub struct GlobalParams {
     pub lp_lock_program: Pubkey,
     pub lp_lock_authority: Pubkey,
     pub migration_reserve_lamports: u64,
+    /// May be default at initialize; required only by `buyback_and_burn`.
+    pub parabull_pool: Pubkey,
 }
 
 impl GlobalParams {
@@ -151,6 +156,8 @@ pub struct GlobalUpdate {
     pub cpmm_amm_config: Option<Pubkey>,
     pub lp_lock_program: Option<Pubkey>,
     pub lp_lock_authority: Option<Pubkey>,
+    pub parabull_mint: Option<Pubkey>,
+    pub parabull_pool: Option<Pubkey>,
 }
 
 impl Global {
@@ -178,6 +185,7 @@ impl Global {
             lp_lock_program: self.lp_lock_program,
             lp_lock_authority: self.lp_lock_authority,
             migration_reserve_lamports: self.migration_reserve_lamports,
+            parabull_pool: self.parabull_pool,
         }
     }
 
@@ -193,6 +201,8 @@ impl Global {
         if let Some(v) = u.cpmm_amm_config { p.cpmm_amm_config = v; }
         if let Some(v) = u.lp_lock_program { p.lp_lock_program = v; }
         if let Some(v) = u.lp_lock_authority { p.lp_lock_authority = v; }
+        if let Some(v) = u.parabull_mint { p.parabull_mint = v; }
+        if let Some(v) = u.parabull_pool { p.parabull_pool = v; }
         let target_updated_at = if u.dex_target_lamports.is_some() { now } else { self.dex_target_updated_at };
         self.apply_params(&p, now)?;
         self.dex_target_updated_at = target_updated_at;
@@ -224,6 +234,7 @@ impl Global {
         self.lp_lock_program = p.lp_lock_program;
         self.lp_lock_authority = p.lp_lock_authority;
         self.migration_reserve_lamports = p.migration_reserve_lamports;
+        self.parabull_pool = p.parabull_pool;
         Ok(())
     }
 }
@@ -277,9 +288,10 @@ pub struct BondingCurve {
     pub raydium_pool: Pubkey,
     /// Burn & Earn fee-key NFT mint created by `lock_migrated_lp`.
     pub fee_nft_mint: Pubkey,
-    /// Lifetime post-graduation LP fees collected (measured amounts).
+    /// Lifetime post-graduation LP fees: SOL collected and launched tokens
+    /// collected-and-burned (measured amounts).
     pub lp_fees_sol_collected: u64,
-    pub lp_fees_tokens_collected: u64,
+    pub lp_fees_tokens_burned: u64,
 
     pub _reserved: [u8; 16],
 }
@@ -351,7 +363,7 @@ impl BondingCurve {
         self.raydium_pool = Pubkey::default();
         self.fee_nft_mint = Pubkey::default();
         self.lp_fees_sol_collected = 0;
-        self.lp_fees_tokens_collected = 0;
+        self.lp_fees_tokens_burned = 0;
         Ok(())
     }
 
@@ -598,10 +610,11 @@ impl HolderRewardVault {
     }
 }
 
-/// One holder-reward distribution (off-chain snapshot of $PARABULL holders,
-/// claimed against a Merkle root). PDA: `["reward-epoch", epoch_le]`.
+/// One holder-reward distribution: an off-chain snapshot of $PARABULL holders
+/// committed as a Merkle root over `(index, claimant, amount)` leaves.
+/// PDA: `["reward-epoch", epoch_le]`. Sized per epoch for its claimed-bitmap.
 #[account]
-#[derive(InitSpace, Debug)]
+#[derive(Debug)]
 pub struct RewardEpoch {
     pub bump: u8,
     pub epoch: u64,
@@ -609,8 +622,63 @@ pub struct RewardEpoch {
     pub snapshot_slot: u64,
     pub total_lamports: u64,
     pub claimed_lamports: u64,
+    pub num_leaves: u32,
+    pub claimed_count: u32,
     pub published_at: i64,
-    pub _reserved: [u8; 32],
+    /// Bit `i` set once leaf `i` has been paid.
+    pub claimed_bitmap: Vec<u8>,
+}
+
+impl RewardEpoch {
+    const FIXED: usize = 1 + 8 + 32 + 8 + 8 + 8 + 4 + 4 + 8;
+
+    pub fn bitmap_len(num_leaves: u32) -> usize {
+        (num_leaves as usize).div_ceil(8)
+    }
+
+    /// Account space including the 8-byte discriminator.
+    pub fn space(num_leaves: u32) -> usize {
+        8 + Self::FIXED + 4 + Self::bitmap_len(num_leaves)
+    }
+
+    pub fn is_claimed(&self, index: u32) -> bool {
+        self.claimed_bitmap[(index / 8) as usize] & (1 << (index % 8)) != 0
+    }
+
+    /// Mark leaf `index` paid. Fails if out of range or already claimed.
+    pub fn mark_claimed(&mut self, index: u32, amount: u64) -> Result<()> {
+        require!(index < self.num_leaves, ParabullError::InvalidMerkleProof);
+        require!(!self.is_claimed(index), ParabullError::RewardAlreadyClaimed);
+        let claimed = self.claimed_lamports.checked_add(amount).ok_or(ParabullError::Overflow)?;
+        require!(claimed <= self.total_lamports, ParabullError::RewardEpochExhausted);
+        self.claimed_bitmap[(index / 8) as usize] |= 1 << (index % 8);
+        self.claimed_lamports = claimed;
+        self.claimed_count = self.claimed_count.checked_add(1).ok_or(ParabullError::Overflow)?;
+        Ok(())
+    }
+}
+
+impl HolderRewardVault {
+    /// Committed to published epochs but not yet claimed.
+    pub fn outstanding(&self) -> Result<u64> {
+        self.total_committed_lamports
+            .checked_sub(self.total_claimed_lamports)
+            .ok_or_else(|| error!(ParabullError::Overflow))
+    }
+}
+
+/// A vault may commit a new epoch of `total` only if its lamports cover rent,
+/// every outstanding (published, unclaimed) reward, and `total`.
+pub fn reward_epoch_fundable(vault_lamports: u64, rent_minimum: u64, outstanding: u64, total: u64) -> bool {
+    rent_minimum
+        .checked_add(outstanding)
+        .and_then(|v| v.checked_add(total))
+        .is_some_and(|need| vault_lamports >= need)
+}
+
+/// Lamports a program-owned vault can pay out while staying rent-exempt.
+pub fn vault_spendable(vault_lamports: u64, rent_minimum: u64) -> u64 {
+    vault_lamports.saturating_sub(rent_minimum)
 }
 
 #[cfg(test)]
@@ -648,6 +716,7 @@ pub(crate) mod fixtures {
             lp_lock_authority: crate::raydium::LP_LOCK_AUTHORITY_MAINNET,
             migration_reserve_lamports: DEFAULT_MIGRATION_RESERVE_LAMPORTS,
             pending_admin: Pubkey::default(),
+            parabull_pool: Pubkey::default(),
             _reserved: [0; 32],
         }
     }
@@ -678,7 +747,7 @@ pub(crate) mod fixtures {
             raydium_pool: Pubkey::default(),
             fee_nft_mint: Pubkey::default(),
             lp_fees_sol_collected: 0,
-            lp_fees_tokens_collected: 0,
+            lp_fees_tokens_burned: 0,
             _reserved: [0; 16],
         };
         c.init(254, Pubkey::new_unique(), Pubkey::new_unique(), g, 1_000, 1_700_000_000).unwrap();
@@ -715,6 +784,7 @@ mod tests {
             lp_lock_program: g.lp_lock_program,
             lp_lock_authority: g.lp_lock_authority,
             migration_reserve_lamports: g.migration_reserve_lamports,
+            parabull_pool: g.parabull_pool,
         }
     }
 
@@ -859,6 +929,43 @@ mod tests {
         assert!(registry_locked(i64::MAX - 1, i64::MAX - 1, 3 * day), "saturates, never wraps");
     }
 
+    fn epoch(num_leaves: u32, total: u64) -> RewardEpoch {
+        RewardEpoch {
+            bump: 0,
+            epoch: 0,
+            merkle_root: [0; 32],
+            snapshot_slot: 0,
+            total_lamports: total,
+            claimed_lamports: 0,
+            num_leaves,
+            claimed_count: 0,
+            published_at: 0,
+            claimed_bitmap: vec![0; RewardEpoch::bitmap_len(num_leaves)],
+        }
+    }
+
+    #[test]
+    fn reward_bitmap_marks_each_leaf_once() {
+        let mut e = epoch(10, 1_000);
+        e.mark_claimed(0, 100).unwrap();
+        e.mark_claimed(9, 200).unwrap();
+        assert!(e.is_claimed(0) && e.is_claimed(9) && !e.is_claimed(8));
+        assert!(e.mark_claimed(9, 1).is_err(), "double claim");
+        assert!(e.mark_claimed(10, 1).is_err(), "out of range");
+        assert!(e.mark_claimed(5, 701).is_err(), "over the epoch total");
+        e.mark_claimed(5, 700).unwrap();
+        assert_eq!((e.claimed_lamports, e.claimed_count), (1_000, 3));
+    }
+
+    #[test]
+    fn reward_funding_and_vault_spend_rules() {
+        assert!(reward_epoch_fundable(1_000, 100, 300, 600));
+        assert!(!reward_epoch_fundable(1_000, 100, 300, 601));
+        assert!(!reward_epoch_fundable(u64::MAX, u64::MAX, 1, 0), "overflow is not fundable");
+        assert_eq!(vault_spendable(1_000, 100), 900);
+        assert_eq!(vault_spendable(50, 100), 0);
+    }
+
     #[test]
     fn metadata_commitment_is_boundary_safe() {
         assert_ne!(metadata_commitment("ab", "c", "u"), metadata_commitment("a", "bc", "u"));
@@ -868,13 +975,17 @@ mod tests {
     #[test]
     fn account_sizes_fit_and_are_stable() {
         // 8-byte discriminator + INIT_SPACE. Pinned so layout changes are deliberate.
-        assert_eq!(8 + Global::INIT_SPACE, 472);
+        assert_eq!(8 + Global::INIT_SPACE, 504);
         assert_eq!(8 + BondingCurve::INIT_SPACE, 285);
         assert_eq!(8 + LaunchTicket::INIT_SPACE, 180);
         assert_eq!(8 + TickerRegistry::INIT_SPACE, 60);
         assert_eq!(8 + NameRegistry::INIT_SPACE, 81);
         assert_eq!(8 + BuybackVault::INIT_SPACE, 113);
         assert_eq!(8 + HolderRewardVault::INIT_SPACE, 105);
-        assert_eq!(8 + RewardEpoch::INIT_SPACE, 113);
+        // Variable size: fixed header + Vec length prefix + 1 bit per leaf.
+        assert_eq!(RewardEpoch::space(1), 8 + 81 + 4 + 1);
+        assert_eq!(RewardEpoch::space(8), 8 + 81 + 4 + 1);
+        assert_eq!(RewardEpoch::space(9), 8 + 81 + 4 + 2);
+        assert!(RewardEpoch::space(MAX_REWARD_LEAVES) <= 10_240, "must be creatable by CPI");
     }
 }

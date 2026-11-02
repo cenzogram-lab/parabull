@@ -7,7 +7,9 @@
 //! - SOL side: unwrapped, then the token's DexScreener escrow is filled first
 //!   (if still open), the rest goes directly to BuybackVault / HolderRewardVault
 //!   by the global split, remainder to the treasury.
-//! - Launched-token side: held in the fee-key vault's token account.
+//! - Launched-token side: burned immediately (Token-2022 burn signed by the
+//!   vault), then the temporary token account is closed: the protocol never
+//!   holds launched tokens.
 //! Every lamport move is a CPI (token close / system transfer).
 
 use anchor_lang::prelude::*;
@@ -16,7 +18,7 @@ use anchor_lang::system_program;
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::Token;
 use anchor_spl::token_2022::Token2022;
-use anchor_spl::token_interface::{close_account, CloseAccount, Mint, TokenAccount};
+use anchor_spl::token_interface::{burn, close_account, Burn, CloseAccount, Mint, TokenAccount};
 
 use crate::constants::*;
 use crate::error::ParabullError;
@@ -35,7 +37,8 @@ pub struct CollectLpFees<'info> {
     #[account(seeds = [SEED_GLOBAL], bump = global.bump)]
     pub global: Box<Account<'info, Global>>,
 
-    #[account(mint::token_program = token_2022_program)]
+    /// Writable: burning the collected tokens reduces the mint's supply.
+    #[account(mut, mint::token_program = token_2022_program)]
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(mut, seeds = [SEED_BONDING_CURVE, mint.key().as_ref()], bump = bonding_curve.bump)]
@@ -44,7 +47,7 @@ pub struct CollectLpFees<'info> {
     #[account(mut, seeds = [SEED_FEE_KEY_VAULT], bump)]
     pub fee_key_vault: SystemAccount<'info>,
 
-    /// Launched-token side of collected fees accumulates here.
+    /// Receives the launched-token side; burned and closed before the instruction ends.
     #[account(
         init_if_needed,
         payer = crank,
@@ -215,6 +218,33 @@ pub fn handler(mut ctx: Context<CollectLpFees>, fee_lp_amount: u64) -> Result<()
         signer,
     ))?;
 
+    // Burn the launched-token side (whole balance, incl. anything donated to
+    // this account), then close it; rent back to the crank that funded it.
+    let burn_amount = a.fee_vault_token_account.amount;
+    if burn_amount > 0 {
+        burn(
+            CpiContext::new_with_signer(
+                a.token_2022_program.to_account_info(),
+                Burn {
+                    mint: a.mint.to_account_info(),
+                    from: a.fee_vault_token_account.to_account_info(),
+                    authority: a.fee_key_vault.to_account_info(),
+                },
+                signer,
+            ),
+            burn_amount,
+        )?;
+    }
+    close_account(CpiContext::new_with_signer(
+        a.token_2022_program.to_account_info(),
+        CloseAccount {
+            account: a.fee_vault_token_account.to_account_info(),
+            destination: a.crank.to_account_info(),
+            authority: a.fee_key_vault.to_account_info(),
+        },
+        signer,
+    ))?;
+
     // Route the measured SOL.
     let split = route_harvested_sol(&mut a.bonding_curve, &a.global, sol_collected)?;
     let (sys, from) = (&a.system_program, &a.fee_key_vault);
@@ -234,7 +264,7 @@ pub fn handler(mut ctx: Context<CollectLpFees>, fee_lp_amount: u64) -> Result<()
     hv.total_deposited_lamports = hv.total_deposited_lamports.checked_add(split.holder).ok_or(ParabullError::Overflow)?;
     let c = &mut a.bonding_curve;
     c.lp_fees_sol_collected = c.lp_fees_sol_collected.checked_add(sol_collected).ok_or(ParabullError::Overflow)?;
-    c.lp_fees_tokens_collected = c.lp_fees_tokens_collected.checked_add(tokens_collected).ok_or(ParabullError::Overflow)?;
+    c.lp_fees_tokens_burned = c.lp_fees_tokens_burned.checked_add(burn_amount).ok_or(ParabullError::Overflow)?;
     assert_curve_backed(&a.bonding_curve)?;
 
     emit!(LpFeesCollected {
@@ -242,7 +272,7 @@ pub fn handler(mut ctx: Context<CollectLpFees>, fee_lp_amount: u64) -> Result<()
         pool: pool.pool_state,
         fee_lp_amount,
         sol_collected,
-        tokens_collected,
+        tokens_burned: burn_amount,
         to_escrow: split.escrow,
         to_buyback_vault: split.buyback,
         to_holder_vault: split.holder,

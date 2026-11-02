@@ -80,4 +80,18 @@ pub enum ParabullError {
     NoPendingAdmin,
     #[msg("Nothing was collected")]
     NothingCollected,
+    #[msg("$PARABULL buyback pool is not configured")]
+    BuybackNotConfigured,
+    #[msg("Vault cannot pay this amount and stay rent-exempt")]
+    InsufficientVaultBalance,
+    #[msg("Holder vault cannot fund this epoch on top of outstanding rewards")]
+    InsufficientRewardFunds,
+    #[msg("Invalid holder-reward epoch parameters")]
+    InvalidRewardEpoch,
+    #[msg("Merkle proof does not match the epoch root")]
+    InvalidMerkleProof,
+    #[msg("Reward already claimed")]
+    RewardAlreadyClaimed,
+    #[msg("Claim exceeds the epoch's remaining total")]
+    RewardEpochExhausted,
 }

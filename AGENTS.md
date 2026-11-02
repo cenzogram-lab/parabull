@@ -62,11 +62,54 @@ reading only.
   - **Admin only:** `update_global_params` and `propose_admin`. The new admin
     must call `accept_admin` themselves (two-step transfer; proposing
     `Pubkey::default()` cancels).
+- **Emergency pause (locked decision).** `set_paused(bool)` (admin only).
+  - **Blocked while paused:** `request_launch`, `create`, `buy`/`sell`,
+    `prepare_buyback`/`buyback_and_burn` and `publish_reward_epoch`.
+  - **Still allowed:** ticket refunds, `sweep_fees`, escrow top-up and
+    release, graduation, `collect_lp_fees` and `claim_holder_reward`. Users'
+    funds are never trapped.
+  - There is no "emergency withdraw" instruction. Funds only ever move to
+    fixed destinations.
+- **$PARABULL buyback & burn.** Two crank-only instructions, sent in one
+  transaction:
+  1. `prepare_buyback(amount)` moves SOL out of `BuybackVault` (a direct
+     lamport move with no CPI; the vault must stay rent-exempt) into the
+     system-owned `["buyback-authority"]` PDA.
+  2. `buyback_and_burn(min_amount_out)` is CPIs only: wrap the SOL, swap on
+     the CPMM pool in `Global.parabull_pool` (`swap_base_input`, with
+     `min_amount_out > 0` required and re-checked against the measured
+     amount received), burn everything received, then close the temporary
+     accounts (rent back to the crank).
+
+  `Global.parabull_mint` and `Global.parabull_pool` are set through
+  `update_global_params`. The $PARABULL mint may use either token program.
+- **Holder rewards.** These are Merkle epochs with a claimed-bitmap, not
+  per-claim receipt accounts, so rent stays at about 0.09 SOL per 80k
+  holders instead of about 0.001 SOL per claim.
+  - `publish_reward_epoch(root, total, num_leaves, snapshot_slot)` (crank
+    only) commits part of `HolderRewardVault`. It's only allowed if the
+    vault covers rent, every outstanding (published but unclaimed) reward,
+    and the new total.
+  - `claim_holder_reward(epoch, index, amount, proof)` can be called by
+    anyone. It pays one leaf, once, to the system-owned wallet named in the
+    leaf, and the vault stays rent-exempt.
+  - The crank pushes payouts by putting many claims in one transaction;
+    holders can also pull their own.
+  - At most `MAX_REWARD_LEAVES` (80,000) leaves per epoch. Use more epochs
+    for larger snapshots.
+  - **Leaf/tree format (the backend must match it exactly):** leaf =
+    `sha256(0x00 || index u32 LE || claimant 32B || amount u64 LE)`; node =
+    `sha256(0x01 || min(a,b) || max(a,b))`; on a level with an odd number of
+    nodes, the last node is carried up unchanged. `src/merkle.rs`
+    `MerkleTree` is the reference builder.
+  - The snapshot must list only system-owned wallets. Exclude pool vaults,
+    program-owned accounts and burn addresses.
 - **Admin parameters.** `update_global_params` takes a `GlobalUpdate` where
   every field is optional (`None` = unchanged): `dex_target_lamports`,
   `buyback_bps`, `holder_bps`, `migration_reserve_lamports`,
   `trading_open_delay_slots`, `cpmm_program`, `cpmm_amm_config`,
-  `lp_lock_program`, `lp_lock_authority`. The merged result is validated
+  `lp_lock_program`, `lp_lock_authority`, `parabull_mint`, `parabull_pool`.
+  The merged result is validated
   with the same rules as `initialize` and either applies in full or not at
   all. `dex_target_updated_at` changes only when the target does.
 - **Post-graduation LP fees.** `collect_lp_fees(fee_lp_amount)` (crank only)
@@ -76,9 +119,11 @@ reading only.
   - **SOL side:** unwrapped; fills the token's escrow first (if it's still
     open), then goes straight to `BuybackVault` / `HolderRewardVault` by the
     global split, with the remainder to the treasury.
-  - **Launched-token side:** held in the fee-key vault's token account.
+  - **Launched-token side:** burned immediately (Token-2022 burn signed by
+    the fee-key vault), and the temporary token account is closed. The
+    protocol never holds launched tokens (locked decision).
 
-  The temporary WSOL account's rent goes back to the crank.
+  Both temporary accounts' rent goes back to the crank.
   Post-graduation instructions derive pool accounts from the curve's
   recorded `raydium_pool`, not from the current `cpmm_amm_config`, so an
   AmmConfig change never strands pools that already graduated.
@@ -118,7 +163,8 @@ reading only.
 | `programs/parabull/src/launch.rs` | Pure launch-flow rules (metadata, expiry, refunds, settlement, registry claims) |
 | `programs/parabull/src/trade.rs` | Pure buy/sell state transitions (open-slot check, slippage, fee split, graduation) |
 | `programs/parabull/src/flywheel.rs` | Pure escrow top-up/release and fee-sweep rules |
-| `programs/parabull/src/raydium.rs` | Raydium CPMM / Burn & Earn IDs, seeds, PDA derivation, instruction builders |
+| `programs/parabull/src/raydium.rs` | Raydium CPMM / Burn & Earn IDs, seeds, PDA derivation, instruction builders (initialize, swap_base_input, lock, collect) |
+| `programs/parabull/src/merkle.rs` | Holder-reward Merkle leaf/node hashing, verification, and the reference tree builder |
 | `programs/parabull/tests/reference_parity.rs` | Differential tests against `reference/programs/pump` |
 | `programs/parabull/tests/common/mod.rs` | Shared solana-program-test harness (`Env`, instruction builders) |
 | `programs/parabull/tests/launch_flow.rs` | Runtime tests: request_launch / refund_ticket / create |
@@ -126,6 +172,9 @@ reading only.
 | `programs/parabull/tests/migration_flow.rs` | Runtime tests: migration, escrow, sweeps |
 | `programs/parabull/tests/fee_collection.rs` | Runtime tests: collect_lp_fees routing |
 | `programs/parabull/tests/admin_flow.rs` | Runtime tests: update_global_params and the two-step admin transfer |
+| `programs/parabull/tests/pause_flow.rs` | Runtime tests: set_paused (what's blocked and what stays open) |
+| `programs/parabull/tests/buyback_flow.rs` | Runtime tests: buyback swap + burn, slippage, vault rent, access |
+| `programs/parabull/tests/rewards_flow.rs` | Runtime tests: Merkle epochs, pull/push claims, double-claim, solvency |
 | `programs/parabull/tests/common/raydium_mock.rs` | Native Raydium CPMM / lock mocks at the mainnet IDs; they re-derive and check every account |
 | `reference/` | Byte-matching pump.fun reconstructions. Read-only |
 

@@ -11,6 +11,7 @@ pub mod flywheel;
 pub mod instructions;
 pub mod launch;
 pub mod math;
+pub mod merkle;
 pub mod raydium;
 pub mod state;
 pub mod trade;
@@ -102,6 +103,39 @@ pub mod parabull {
     /// Nominee: accept the admin role.
     pub fn accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
         instructions::admin::accept_handler(ctx)
+    }
+
+    /// Admin: emergency pause (launches, trading, buybacks, new reward epochs).
+    pub fn set_paused(ctx: Context<AdminOnly>, paused: bool) -> Result<()> {
+        instructions::admin::set_paused_handler(ctx, paused)
+    }
+
+    /// Crank: stage `amount` lamports from BuybackVault for `buyback_and_burn`
+    /// (send both in one transaction).
+    pub fn prepare_buyback(ctx: Context<PrepareBuyback>, amount: u64) -> Result<()> {
+        instructions::buyback::prepare_handler(ctx, amount)
+    }
+
+    /// Crank: swap the staged SOL for $PARABULL on Raydium CPMM (enforcing
+    /// `min_amount_out`) and burn everything received.
+    pub fn buyback_and_burn(ctx: Context<BuybackAndBurn>, min_amount_out: u64) -> Result<()> {
+        instructions::buyback::buyback_handler(ctx, min_amount_out)
+    }
+
+    /// Crank: commit `total_lamports` of the holder vault to a snapshot Merkle root.
+    pub fn publish_reward_epoch(
+        ctx: Context<PublishRewardEpoch>,
+        merkle_root: [u8; 32],
+        total_lamports: u64,
+        num_leaves: u32,
+        snapshot_slot: u64,
+    ) -> Result<()> {
+        instructions::rewards::publish_handler(ctx, merkle_root, total_lamports, num_leaves, snapshot_slot)
+    }
+
+    /// Anyone: pay leaf `index` of `epoch` to its claimant (push or pull).
+    pub fn claim_holder_reward(ctx: Context<ClaimHolderReward>, epoch: u64, index: u32, amount: u64, proof: Vec<[u8; 32]>) -> Result<()> {
+        instructions::rewards::claim_handler(ctx, epoch, index, amount, proof)
     }
 
     /// Crank: harvest post-graduation LP fees via the fee-key NFT and route the

@@ -60,6 +60,7 @@ async fn harvest_fills_escrow_first_then_pays_vaults() {
     let token_before = env.token_amount_at(&token_vault).await.unwrap();
     let fee_lp = locked_lp(&mut env, &mint).await * 3 / 100;
     let b0 = balances(&mut env, &curve).await;
+    let supply_before = env.mint_supply(&mint).await;
 
     let crank = env.crank.insecure_clone();
     let ix = env.collect_lp_fees_ix(&crank.pubkey(), &mint, &c0.raydium_pool, &nft, fee_lp);
@@ -80,16 +81,16 @@ async fn harvest_fills_escrow_first_then_pays_vaults() {
     assert_eq!(b1.treasury - b0.treasury, treasury_part);
 
     let vault = fee_key_vault();
-    let token_ata_rent = env.lamports(&ata(&vault, &mint)).await;
-    assert_eq!(b0.crank - b1.crank, token_ata_rent, "crank only funds the persistent token account; WSOL rent refunded");
-    assert_eq!(env.token_balance(&vault, &mint).await, tokens, "token side held by the fee-key vault");
+    assert_eq!(b1.crank, b0.crank, "both temporary accounts' rent refunded to the crank");
+    assert_eq!(supply_before - env.mint_supply(&mint).await, tokens, "token side burned: supply reduced");
+    assert!(env.account(&ata(&vault, &mint)).await.is_none(), "token account closed; protocol holds no launched tokens");
     assert_eq!(env.lamports(&vault).await, 0, "vault PDA keeps no SOL");
     let wsol_ata = anchor_spl::associated_token::get_associated_token_address_with_program_id(&vault, &WSOL_MINT, &SPL_TOKEN);
     assert!(env.account(&wsol_ata).await.is_none(), "temporary WSOL account closed");
 
     let c1: BondingCurve = env.anchor(&curve).await;
     assert_eq!(c1.escrow_accrued, target);
-    assert_eq!((c1.lp_fees_sol_collected, c1.lp_fees_tokens_collected), (sol, tokens));
+    assert_eq!((c1.lp_fees_sol_collected, c1.lp_fees_tokens_burned), (sol, tokens));
     let bv: BuybackVault = env.anchor(&pda(&[SEED_BUYBACK_VAULT])).await;
     let hv: HolderRewardVault = env.anchor(&pda(&[SEED_HOLDER_VAULT])).await;
     assert_eq!((bv.total_deposited_lamports, hv.total_deposited_lamports), (buyback, holder));

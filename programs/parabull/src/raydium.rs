@@ -37,6 +37,7 @@ pub const IX_LOCK_CP_LIQUIDITY: [u8; 8] = [216, 157, 29, 78, 38, 51, 31, 26];
 /// Burn & Earn `collect_cp_fees(fee_lp_amount: u64)`. The SDK calls this
 /// `collectCpFee`; the on-chain name was confirmed via the discriminator.
 pub const IX_LOCK_COLLECT_CP_FEES: [u8; 8] = [8, 30, 51, 199, 209, 184, 247, 133];
+pub const IX_CPMM_SWAP_BASE_INPUT: [u8; 8] = [143, 190, 90, 218, 196, 30, 51, 222];
 pub const MEMO_PROGRAM_ID: Pubkey = pubkey!("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 
 const TOKEN_PROGRAM: Pubkey = anchor_spl::token::ID;
@@ -287,6 +288,54 @@ impl LockCpLiquidity {
     }
 }
 
+/// CPMM `swap_base_input(amount_in, minimum_amount_out)`. Account order from
+/// raydium-cp-swap `instructions/swap_base_input.rs` (matches the SDK).
+pub struct CpmmSwapBaseInput {
+    pub program: Pubkey,
+    pub payer: Pubkey,
+    pub authority: Pubkey,
+    pub amm_config: Pubkey,
+    pub pool_state: Pubkey,
+    pub input_token_account: Pubkey,
+    pub output_token_account: Pubkey,
+    pub input_vault: Pubkey,
+    pub output_vault: Pubkey,
+    pub input_token_program: Pubkey,
+    pub output_token_program: Pubkey,
+    pub input_token_mint: Pubkey,
+    pub output_token_mint: Pubkey,
+    pub observation_state: Pubkey,
+    pub amount_in: u64,
+    pub minimum_amount_out: u64,
+}
+
+impl CpmmSwapBaseInput {
+    pub fn instruction(&self) -> Instruction {
+        let mut data = IX_CPMM_SWAP_BASE_INPUT.to_vec();
+        data.extend_from_slice(&self.amount_in.to_le_bytes());
+        data.extend_from_slice(&self.minimum_amount_out.to_le_bytes());
+        Instruction {
+            program_id: self.program,
+            accounts: vec![
+                AccountMeta::new_readonly(self.payer, true),
+                AccountMeta::new_readonly(self.authority, false),
+                AccountMeta::new_readonly(self.amm_config, false),
+                AccountMeta::new(self.pool_state, false),
+                AccountMeta::new(self.input_token_account, false),
+                AccountMeta::new(self.output_token_account, false),
+                AccountMeta::new(self.input_vault, false),
+                AccountMeta::new(self.output_vault, false),
+                AccountMeta::new_readonly(self.input_token_program, false),
+                AccountMeta::new_readonly(self.output_token_program, false),
+                AccountMeta::new_readonly(self.input_token_mint, false),
+                AccountMeta::new_readonly(self.output_token_mint, false),
+                AccountMeta::new(self.observation_state, false),
+            ],
+            data,
+        }
+    }
+}
+
 /// Burn & Earn `collect_cp_fees`: withdraws the fee share of the locked LP
 /// from the pool and pays both tokens to the recipient accounts. Account
 /// order from raydium-sdk-v2 `collectCpFeeInstruction`.
@@ -351,6 +400,7 @@ mod tests {
         assert_eq!(hash(b"global:initialize").to_bytes()[..8], IX_CPMM_INITIALIZE);
         assert_eq!(hash(b"global:lock_cp_liquidity").to_bytes()[..8], IX_LOCK_CP_LIQUIDITY);
         assert_eq!(hash(b"global:collect_cp_fees").to_bytes()[..8], IX_LOCK_COLLECT_CP_FEES);
+        assert_eq!(hash(b"global:swap_base_input").to_bytes()[..8], IX_CPMM_SWAP_BASE_INPUT);
     }
 
     #[test]

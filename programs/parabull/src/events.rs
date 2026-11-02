@@ -157,10 +157,48 @@ pub struct LpFeesCollected {
     pub fee_lp_amount: u64,
     /// Measured SOL actually received (unwrapped from WSOL).
     pub sol_collected: u64,
-    /// Measured launched-token amount received; held by the fee-key vault.
-    pub tokens_collected: u64,
+    /// Measured launched-token amount received, burned in the same instruction.
+    pub tokens_burned: u64,
     pub to_escrow: u64,
     pub to_buyback_vault: u64,
     pub to_holder_vault: u64,
     pub to_treasury: u64,
+}
+
+#[event]
+pub struct PauseToggled {
+    pub admin: Pubkey,
+    pub paused: bool,
+}
+
+#[event]
+pub struct BuybackStaged {
+    pub amount: u64,
+    pub vault_remaining: u64,
+}
+
+#[event]
+pub struct BuybackBurned {
+    pub parabull_mint: Pubkey,
+    pub pool: Pubkey,
+    pub sol_in: u64,
+    pub tokens_burned: u64,
+    pub min_amount_out: u64,
+}
+
+#[event]
+pub struct RewardEpochPublished {
+    pub epoch: u64,
+    pub merkle_root: [u8; 32],
+    pub total_lamports: u64,
+    pub num_leaves: u32,
+    pub snapshot_slot: u64,
+}
+
+#[event]
+pub struct HolderRewardClaimed {
+    pub epoch: u64,
+    pub index: u32,
+    pub claimant: Pubkey,
+    pub amount: u64,
 }

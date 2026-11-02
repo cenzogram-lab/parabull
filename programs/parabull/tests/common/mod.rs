@@ -103,6 +103,7 @@ impl Env {
             lp_lock_authority: raydium_mock::LOCK_AUTH,
             migration_reserve_lamports: DEFAULT_MIGRATION_RESERVE_LAMPORTS,
             pending_admin: Pubkey::default(),
+            parabull_pool: Pubkey::default(),
             _reserved: [0; 32],
         };
         let mut global = global;
@@ -674,5 +675,166 @@ impl Env {
         let ix = self.lock_lp_ix(&crank.pubkey(), &mint, &nft.pubkey());
         self.send(&[ix], &[&crank, &nft]).await.unwrap();
         (mint, curve, nft.pubkey())
+    }
+}
+
+// ---- Pause / buyback / holder-reward helpers ------------------------------------
+
+/// Token account with a balance (WSOL accounts get matching native lamports).
+pub fn packed_token_account_with(mint: Pubkey, owner: Pubkey, program: Pubkey, amount: u64) -> Account {
+    use anchor_lang::solana_program::program_pack::Pack;
+    use anchor_spl::token::spl_token::state::Account as TA;
+    let mut acc = packed_token_account(mint, owner, program);
+    let mut t = TA::unpack_from_slice(&acc.data).unwrap();
+    t.amount = amount;
+    t.pack_into_slice(&mut acc.data);
+    if mint == WSOL_MINT {
+        acc.lamports += amount;
+    }
+    acc
+}
+
+pub fn packed_mint_with_supply(decimals: u8, program: Pubkey, supply: u64) -> Account {
+    use anchor_lang::solana_program::program_pack::Pack;
+    use anchor_spl::token::spl_token::state::Mint as M;
+    let mut acc = packed_mint(None, decimals, program);
+    let mut m = M::unpack_from_slice(&acc.data).unwrap();
+    m.supply = supply;
+    m.pack_into_slice(&mut acc.data);
+    acc
+}
+
+pub fn buyback_authority() -> Pubkey {
+    pda(&[SEED_BUYBACK_AUTHORITY])
+}
+
+pub struct ParabullPool {
+    pub mint: Pubkey,
+    pub pool: Pubkey,
+    pub wsol_vault: Pubkey,
+    pub parabull_vault: Pubkey,
+}
+
+impl Env {
+    /// Create a Token-2022 $PARABULL mint and a seeded WSOL/$PARABULL CPMM pool
+    /// (mock), and point Global at them via `update_global_params`.
+    pub async fn setup_parabull_pool(&mut self, wsol_liquidity: u64, parabull_liquidity: u64) -> ParabullPool {
+        let mint = Pubkey::new_unique();
+        self.ctx.set_account(&mint, &packed_mint_with_supply(6, TOKEN_2022, parabull_liquidity).into());
+        let order = parabull::raydium::sort_pool_mints(&mint, &WSOL_MINT).unwrap();
+        let k = parabull::raydium::cpmm_accounts(&raydium_mock::CPMM_ID, &AMM_CONFIG, &order, &Pubkey::default());
+        let (wsol_vault, parabull_vault) = if order.mint_is_token_0 { (k.token_1_vault, k.token_0_vault) } else { (k.token_0_vault, k.token_1_vault) };
+        self.ctx.set_account(&wsol_vault, &packed_token_account_with(WSOL_MINT, k.authority, SPL_TOKEN, wsol_liquidity).into());
+        self.ctx.set_account(&parabull_vault, &packed_token_account_with(mint, k.authority, TOKEN_2022, parabull_liquidity).into());
+        let mut pool_data = vec![0; 64];
+        pool_data[..8].copy_from_slice(raydium_mock::POOL_MARKER);
+        let owned = |data: Vec<u8>| Account { lamports: SOL, data, owner: raydium_mock::CPMM_ID, executable: false, rent_epoch: 0 };
+        self.ctx.set_account(&k.pool_state, &owned(pool_data).into());
+        self.ctx.set_account(&k.observation_state, &owned(vec![0; 8]).into());
+
+        let admin = self.admin.insecure_clone();
+        let update = parabull::state::GlobalUpdate { parabull_mint: Some(mint), parabull_pool: Some(k.pool_state), ..Default::default() };
+        let ix = self.update_params_ix(&admin.pubkey(), update);
+        self.send(&[ix], &[&admin]).await.unwrap();
+        ParabullPool { mint, pool: k.pool_state, wsol_vault, parabull_vault }
+    }
+
+    /// Add lamports to a program-owned vault (simulates swept fees).
+    pub async fn fund_account(&mut self, key: &Pubkey, lamports: u64) {
+        let mut acc = self.account(key).await.unwrap();
+        acc.lamports += lamports;
+        self.ctx.set_account(key, &acc.into());
+    }
+
+    pub fn set_paused_ix(&self, signer: &Pubkey, paused: bool) -> Instruction {
+        Instruction {
+            program_id: parabull::ID,
+            accounts: parabull::accounts::AdminOnly { admin: *signer, global: global_pda() }.to_account_metas(None),
+            data: parabull::instruction::SetPaused { paused }.data(),
+        }
+    }
+
+    pub fn prepare_buyback_ix(&self, crank: &Pubkey, amount: u64) -> Instruction {
+        Instruction {
+            program_id: parabull::ID,
+            accounts: parabull::accounts::PrepareBuyback {
+                crank: *crank,
+                global: global_pda(),
+                buyback_vault: pda(&[SEED_BUYBACK_VAULT]),
+                buyback_authority: buyback_authority(),
+            }
+            .to_account_metas(None),
+            data: parabull::instruction::PrepareBuyback { amount }.data(),
+        }
+    }
+
+    pub fn buyback_and_burn_ix(&self, crank: &Pubkey, p: &ParabullPool, min_amount_out: u64) -> Instruction {
+        let order = parabull::raydium::sort_pool_mints(&p.mint, &WSOL_MINT).unwrap();
+        let k = parabull::raydium::cpmm_pool_accounts(&raydium_mock::CPMM_ID, &p.pool, &order, &buyback_authority());
+        let auth = buyback_authority();
+        Instruction {
+            program_id: parabull::ID,
+            accounts: parabull::accounts::BuybackAndBurn {
+                crank: *crank,
+                global: global_pda(),
+                buyback_vault: pda(&[SEED_BUYBACK_VAULT]),
+                buyback_authority: auth,
+                parabull_mint: p.mint,
+                parabull_token_program: TOKEN_2022,
+                authority_parabull_account: ata(&auth, &p.mint),
+                wsol_mint: WSOL_MINT,
+                authority_wsol_account: anchor_spl::associated_token::get_associated_token_address_with_program_id(&auth, &WSOL_MINT, &SPL_TOKEN),
+                cpmm_program: raydium_mock::CPMM_ID,
+                cpmm_authority: k.authority,
+                amm_config: AMM_CONFIG,
+                pool_state: p.pool,
+                wsol_vault: p.wsol_vault,
+                parabull_vault: p.parabull_vault,
+                observation_state: k.observation_state,
+                token_program: SPL_TOKEN,
+                associated_token_program: ATA_PROGRAM,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: parabull::instruction::BuybackAndBurn { min_amount_out }.data(),
+        }
+    }
+
+    pub fn reward_epoch_pda(epoch: u64) -> Pubkey {
+        pda(&[SEED_REWARD_EPOCH, &epoch.to_le_bytes()])
+    }
+
+    pub async fn publish_epoch_ix(&mut self, crank: &Pubkey, root: [u8; 32], total: u64, num_leaves: u32) -> Instruction {
+        let v: parabull::state::HolderRewardVault = self.anchor(&pda(&[SEED_HOLDER_VAULT])).await;
+        Instruction {
+            program_id: parabull::ID,
+            accounts: parabull::accounts::PublishRewardEpoch {
+                crank: *crank,
+                global: global_pda(),
+                holder_vault: pda(&[SEED_HOLDER_VAULT]),
+                reward_epoch: Self::reward_epoch_pda(v.next_epoch),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: parabull::instruction::PublishRewardEpoch { merkle_root: root, total_lamports: total, num_leaves, snapshot_slot: 123 }.data(),
+        }
+    }
+
+    pub fn claim_ix(&self, epoch: u64, claimant: &Pubkey, index: u32, amount: u64, proof: Vec<[u8; 32]>) -> Instruction {
+        Instruction {
+            program_id: parabull::ID,
+            accounts: parabull::accounts::ClaimHolderReward {
+                holder_vault: pda(&[SEED_HOLDER_VAULT]),
+                reward_epoch: Self::reward_epoch_pda(epoch),
+                claimant: *claimant,
+            }
+            .to_account_metas(None),
+            data: parabull::instruction::ClaimHolderReward { epoch, index, amount, proof }.data(),
+        }
+    }
+
+    pub async fn mint_supply(&mut self, mint: &Pubkey) -> u64 {
+        let acc = self.account(mint).await.unwrap();
+        StateWithExtensions::<SplMint>::unpack(&acc.data).unwrap().base.supply
     }
 }

@@ -55,6 +55,9 @@ pub fn mock_cpmm(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> 
     if data[..8] == MOCK_WITHDRAW {
         return mock_cpmm_withdraw(program_id, accounts, data);
     }
+    if data[..8] == [143, 190, 90, 218, 196, 30, 51, 222] {
+        return mock_cpmm_swap_base_input(program_id, accounts, data);
+    }
     assert_eq!(data.len(), 32, "cpmm: data = disc + 3 x u64");
     assert_eq!(&data[..8], &[175, 175, 109, 31, 13, 152, 155, 237], "cpmm: initialize discriminator");
     let (a0, a1, _open_time) = (u64_at(data, 8), u64_at(data, 16), u64_at(data, 24));
@@ -256,5 +259,43 @@ fn mock_collect_cp_fees(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u
         .collect();
     let ix = anchor_lang::solana_program::instruction::Instruction { program_id: CPMM_ID, accounts: metas, data };
     invoke(&ix, &[cpmm_auth.clone(), v0.clone(), v1.clone(), mint0.clone(), mint1.clone(), rec0.clone(), rec1.clone(), prog_of(mint0), prog_of(mint1), cpmm_prog.clone()])?;
+    Ok(())
+}
+
+/// Real CPMM's `ExceededSlippage` is returned as a custom error; the mock uses this code.
+pub const MOCK_SLIPPAGE_ERROR: u32 = 6005;
+
+/// `swap_base_input`: constant product without fees, `out = r_out * in / (r_in + in)`.
+fn mock_cpmm_swap_base_input(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
+    assert_eq!(data.len(), 24, "swap: disc + 2 x u64");
+    let (amount_in, min_out) = (u64_at(data, 8), u64_at(data, 16));
+    assert_eq!(accounts.len(), 13, "swap: 13 accounts");
+    let [payer, authority, amm_config, pool, user_in, user_out, vault_in, vault_out, prog_in, prog_out, mint_in, mint_out, obs] = &accounts[..13] else {
+        unreachable!()
+    };
+    assert!(payer.is_signer, "swap: payer signs");
+    let pda = |seeds: &[&[u8]]| Pubkey::find_program_address(seeds, program_id);
+    let (auth_key, bump) = pda(&[b"vault_and_lp_mint_auth_seed"]);
+    assert_eq!(*authority.key, auth_key, "swap: authority");
+    assert_eq!(*amm_config.owner, CPMM_ID, "swap: amm_config");
+    assert!(pool.data.borrow().starts_with(POOL_MARKER), "swap: pool exists");
+    assert_eq!(*vault_in.key, pda(&[b"pool_vault", pool.key.as_ref(), mint_in.key.as_ref()]).0, "swap: input vault");
+    assert_eq!(*vault_out.key, pda(&[b"pool_vault", pool.key.as_ref(), mint_out.key.as_ref()]).0, "swap: output vault");
+    assert_eq!(*obs.key, pda(&[b"observation", pool.key.as_ref()]).0, "swap: observation");
+    assert_eq!(prog_in.key, mint_in.owner, "swap: input token program");
+    assert_eq!(prog_out.key, mint_out.owner, "swap: output token program");
+    for (acct, mint) in [(user_in, mint_in), (user_out, mint_out)] {
+        let t = token_account(acct);
+        assert_eq!((t.mint, t.owner), (*mint.key, *payer.key), "swap: user accounts owned by payer");
+    }
+    let (r_in, r_out) = (token_account(vault_in).amount, token_account(vault_out).amount);
+    let out = (u128::from(r_out) * u128::from(amount_in) / (u128::from(r_in) + u128::from(amount_in))) as u64;
+    if out < min_out {
+        return Err(anchor_lang::solana_program::program_error::ProgramError::Custom(MOCK_SLIPPAGE_ERROR));
+    }
+    let ix = spl_token_2022::instruction::transfer_checked(prog_in.key, user_in.key, mint_in.key, vault_in.key, payer.key, &[], amount_in, decimals(mint_in))?;
+    invoke(&ix, &[user_in.clone(), mint_in.clone(), vault_in.clone(), payer.clone(), prog_in.clone()])?;
+    let ix = spl_token_2022::instruction::transfer_checked(prog_out.key, vault_out.key, mint_out.key, user_out.key, authority.key, &[], out, decimals(mint_out))?;
+    invoke_signed(&ix, &[vault_out.clone(), mint_out.clone(), user_out.clone(), authority.clone(), prog_out.clone()], &[&[b"vault_and_lp_mint_auth_seed", &[bump]]])?;
     Ok(())
 }

@@ -23,7 +23,11 @@ A Solana meme launchpad built on Anchor 0.31.1:
 | DexScreener escrow `top_up_dex_escrow` / `release_dex_escrow`, `sweep_fees` | Done |
 | `update_global_params`, two-step admin transfer | Done |
 | `collect_lp_fees` (Burn & Earn fee key: escrow first, then buyback / holder vaults) | Done (tested against Raydium mocks) |
-| $PARABULL buyback/burn, holder-reward epochs, pause control | Not started |
+| `set_paused` emergency control | Done |
+| Collected meme tokens burned inside `collect_lp_fees` | Done |
+| $PARABULL `prepare_buyback` + `buyback_and_burn` (CPMM swap, slippage floor, burn) | Done (tested against Raydium mocks) |
+| Holder rewards: `publish_reward_epoch` / `claim_holder_reward` (Merkle + bitmap, push or pull) | Done |
+| Devnet run against real Raydium programs, backend snapshot/crank services | Not started |
 
 ## Development
 

@@ -15,6 +15,9 @@ pub const SEED_REWARD_EPOCH: &[u8] = b"reward-epoch";
 pub const SEED_MIGRATION_AUTHORITY: &[u8] = b"migration-authority";
 /// Holds every Burn & Earn fee-key NFT so post-graduation LP fees stay claimable.
 pub const SEED_FEE_KEY_VAULT: &[u8] = b"fee-key-vault";
+/// System-owned PDA that holds staged buyback SOL and signs the $PARABULL
+/// swap + burn (a data account like BuybackVault can't pay via the system program).
+pub const SEED_BUYBACK_AUTHORITY: &[u8] = b"buyback-authority";
 
 // ---- Protocol bounds -------------------------------------------------------
 pub const BPS_DENOMINATOR: u64 = 10_000;
@@ -32,6 +35,9 @@ pub const MIN_LAUNCH_RENT_BUFFER_LAMPORTS: u64 = 15_000_000;
 /// The Raydium pool may open at most this far below the curve's final price
 /// (guards against a migration reserve that eats into pool liquidity).
 pub const MAX_MIGRATION_PRICE_DISCOUNT_BPS: u64 = 500;
+/// Max leaves per holder-reward epoch: the claimed-bitmap must fit in a
+/// 10 KiB account created by CPI. Larger snapshots span several epochs.
+pub const MAX_REWARD_LEAVES: u32 = 80_000;
 
 // ---- Defaults (used by deploy scripts and tests) ---------------------------
 pub const DEFAULT_PLATFORM_FEE_BPS: u16 = 100;

@@ -4,7 +4,7 @@ use anchor_lang::prelude::*;
 
 use crate::constants::SEED_GLOBAL;
 use crate::error::ParabullError;
-use crate::events::{AdminTransferProposed, AdminTransferred, GlobalParamsUpdated};
+use crate::events::{AdminTransferProposed, AdminTransferred, GlobalParamsUpdated, PauseToggled};
 use crate::state::{Global, GlobalUpdate};
 
 #[derive(Accounts)]
@@ -23,6 +23,16 @@ pub fn update_handler(ctx: Context<AdminOnly>, update: GlobalUpdate) -> Result<(
     let now = Clock::get()?.unix_timestamp;
     ctx.accounts.global.apply_update(&update, now)?;
     emit!(GlobalParamsUpdated { admin: ctx.accounts.admin.key(), update, timestamp: now });
+    Ok(())
+}
+
+/// Emergency switch. While paused: no new launches (`request_launch`,
+/// `create`), no curve trading, no $PARABULL buybacks, no new reward epochs.
+/// Still open: ticket refunds, fee sweeps, escrow top-up/release, graduation,
+/// LP-fee collection and holder-reward claims (users' funds never trapped).
+pub fn set_paused_handler(ctx: Context<AdminOnly>, paused: bool) -> Result<()> {
+    ctx.accounts.global.paused = paused;
+    emit!(PauseToggled { admin: ctx.accounts.admin.key(), paused });
     Ok(())
 }
 
