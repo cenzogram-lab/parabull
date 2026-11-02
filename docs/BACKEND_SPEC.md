@@ -25,6 +25,18 @@ Conventions:
 
 ## 1. Launch worker: `LaunchTicket` → `create` after a random 3–15 s
 
+Minimal implementation: `scripts/launch_worker.ts` (`npm run worker`), with
+the testable logic (`decide`, request-transaction decoding, metadata and
+tweet checks, the delay) in `scripts/src/launchWorker.ts`. It keeps jobs in
+memory rather than the durable table in §1.3, and checks the tweet's
+`$TICKER` and age but not its author unless given the linked account ID.
+
+The ticket stores only `metadata_hash`, not the plaintext name, symbol and
+URI. The worker recovers them by decoding the user's `request_launch`
+instruction (from the `LaunchRequested` log's signature, or
+`getSignaturesForAddress(ticket)`) and refunds the ticket if they don't
+reproduce `metadata_hash`.
+
 ### 1.1 Trigger
 
 - Subscribe to the program's logs with `logsSubscribe({ mentions: [programId] })`
@@ -103,8 +115,14 @@ const runAt = Date.now() + delayMs;
 - **Retries:** if the blockhash expires, rebuild and re-sign with **the same
   mint keypair** until `expires_at - 30`. If the mint account already exists,
   or the ticket is closed, an earlier send landed: treat that as success.
-- Reference implementation: `scripts/test_launch_and_trade.ts` (without the
-  delay).
+- Reference implementation: `scripts/launch_worker.ts`. On a terminal
+  Anchor error (`TickerLocked`, `NameLocked`, `TweetLocked`,
+  `MetadataMismatch`, ...) it refunds the ticket instead of retrying.
+- **Settlement:** the payer's flat 0.23 SOL includes the ticket rent. `create`
+  repays the launch authority exactly the rent it fronted, out of the 0.03 SOL
+  allocation, and closes the ticket to the treasury (fee plus unspent
+  allocation). The launch authority's balance is therefore unchanged by a
+  launch apart from transaction fees.
 
 ---
 
@@ -225,7 +243,8 @@ established tokens, in a BK-tree (or multi-index hashing for scale).
 | `lookalike_name` | Same Unicode-confusable skeleton (UTS #39) as another name or ticker, or ticker Levenshtein distance ≤ 1 (tickers of 4+ characters), or normalized-name Levenshtein distance ≤ 2 |
 
 On-chain registries already catch exact normalized ticker and name matches
-(ASCII, case- and whitespace-insensitive), so this layer only needs to catch
+(names keep only ASCII letters and digits, lowercased, so case, spaces and
+punctuation don't matter), so this layer only needs to catch
 what they can't: confusable Unicode, near-misses and images.
 
 ### 3.3 Policy and output

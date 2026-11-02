@@ -9,6 +9,7 @@
     "deploy:init": "tsx deploy_and_init.ts",
     "smoke": "tsx test_launch_and_trade.ts",
     "crank": "tsx crank_worker.ts",
+    "worker": "tsx launch_worker.ts",
     "test": "tsx --test src/*.test.ts",
     "typecheck": "tsc --noEmit -p .",
     "snapshot": "tsx src/snapshot.ts"

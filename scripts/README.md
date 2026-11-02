@@ -54,9 +54,33 @@ CLUSTER=devnet npm run smoke
 CLUSTER=devnet npm run crank -- --once
 ```
 
+```bash
+# 5. Launch worker: turns LaunchTickets into coins after a random 3-15 s.
+CLUSTER=devnet SKIP_METADATA_FETCH=1 npm run worker
+```
+
+### Devnet test curve
+
+The mainnet curve graduates at about 85 SOL. To test graduation, Raydium
+migration and the LP lock on devnet with faucet SOL, initialise `Global` with
+a small curve (this only applies when `Global` doesn't exist yet):
+
+```bash
+CLUSTER=devnet CURVE_PRESET=small CURVE_TARGET_SOL=2 npm run deploy:init
+```
+
+`deploy:init` prints the graduation preview (raise, migration SOL, pool
+tokens, opening-price check) and refuses parameters that would fail the 5%
+pool-price check or a migration reserve below the CPMM `create_pool_fee` plus
+rent. Variables: `CURVE_PRESET` (`mainnet` default, or `small`; `small` is
+refused on mainnet-beta), `CURVE_TARGET_SOL`, `MIGRATION_RESERVE_LAMPORTS`
+(default 0.25 SOL), or all four of `INITIAL_VIRTUAL_TOKEN_RESERVES`,
+`INITIAL_VIRTUAL_SOL_RESERVES`, `INITIAL_REAL_TOKEN_RESERVES`,
+`TOKEN_TOTAL_SUPPLY` for a fully custom curve.
+
 The same steps are available from the repository root with `make`: `make keys`,
 `make build`, `make build-sbf`, `make test`, `make scripts-check`,
-`make deploy`, `make init`, `make smoke`, `make crank` (`CLUSTER=devnet` by
+`make deploy`, `make init`, `make smoke`, `make crank`, `make worker` (`CLUSTER=devnet` by
 default). `npm run build:program` (from `scripts/`) runs `anchor build`.
 
 The first SBF build is where stack-frame and compute-unit problems will show
@@ -68,13 +92,14 @@ the instruction it names.
 | --- | --- |
 | `deploy_and_init.ts` | Checks that the program is deployed with `ADMIN_KEYPAIR` as upgrade authority, that the Raydium programs are executable, and that the AmmConfig is owned by the configured CPMM program. Then initialises `Global`. It does nothing if `Global` already exists. On devnet it creates a test Token-2022 `$PARABULL` mint unless `PARABULL_MINT` is set. |
 | `test_launch_and_trade.ts` | Funds a throwaway user, then runs `request_launch` and `create` (signed by the launch authority and a new mint keypair). It shows a buy inside the slot delay being rejected, then buys and sells with slippage limits from `src/curve.ts`. |
+| `launch_worker.ts` | Launch worker (`docs/BACKEND_SPEC.md` §1). Listens for `LaunchRequested` events (plus a `POLL_MS` poll of open tickets), recovers name/symbol/URI from the user's `request_launch` transaction and checks them against the ticket's commitment, pre-checks pause and the ticker/name/tweet locks, optionally fetches the metadata URI and checks the tweet with the X API, then waits a CSPRNG-uniform 3–15 s and sends `create` with a fresh in-memory mint keypair. Rejected tickets are refunded at once with `refund_ticket`. `--once` runs one poll and exits. |
 | `crank_worker.ts` | Reference crank: graduation (3 transactions), escrow release, fee sweeps, LP-fee collection, buyback and burn with a quoted `min_amount_out`, reward-epoch expiry, optional DexScreener-target refresh (`--sol-usd`), and optional holder-reward publishing (`--publish-rewards`). |
 | `src/snapshot.ts` (`npm run snapshot [-- --publish]`) | Takes a $PARABULL holder snapshot and turns it into reward epochs. It writes `snapshots/epoch-<n>.draft.json` on a dry run, or publishes and writes `snapshots/epoch-<n>.json` (root, total, and every leaf with its amount, balance and proof) for the claim UI. |
 | `src/lpFees.ts` | Fetches the claimable Burn & Earn LP fee for one locked position from Raydium's lock-position API. |
 
-Backend services that aren't built as scripts here (the launch worker's
-random 3–15 s delay and tweet verification, the 20-slot bundle-risk
-indexer, and image/lookalike flags) are specified in
+Backend services that aren't built as scripts here (the 20-slot bundle-risk
+indexer and image/lookalike flags, plus the durable job table and X account
+linking the launch worker would need in production) are specified in
 [`docs/BACKEND_SPEC.md`](../docs/BACKEND_SPEC.md).
 
 ## LP-fee collection
@@ -129,7 +154,11 @@ Environment variables: `CLUSTER` (`devnet` / `mainnet-beta` / `localnet`),
 `LAUNCH_AUTHORITY_KEYPAIR`, `CRANK_KEYPAIR` (both default to the admin on
 devnet), `TREASURY`, `PARABULL_MINT`, `SOL_USD`, and `RAYDIUM_CPMM_PROGRAM` /
 `RAYDIUM_AMM_CONFIG` / `RAYDIUM_POOL_FEE_RECEIVER` / `RAYDIUM_LOCK_PROGRAM` /
-`RAYDIUM_LOCK_AUTHORITY` to override the addresses in `src/config.ts`.
+`RAYDIUM_LOCK_AUTHORITY` to override the addresses in `src/config.ts`. The
+launch worker also reads `POLL_MS`, `SKIP_METADATA_FETCH=1`,
+`X_BEARER_TOKEN` (tweet check, skipped when unset) and `DISABLE_DELAY=1`
+(localnet only; refused on mainnet-beta). The curve variables are listed under
+"Devnet test curve" above.
 
 ## Raydium addresses
 
