@@ -1,0 +1,27 @@
+{
+  "name": "parabull-scripts",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Devnet deployment, smoke-test and crank scripts for the Parabull program",
+  "type": "commonjs",
+  "scripts": {
+    "build:program": "cd .. && anchor build",
+    "deploy:init": "tsx deploy_and_init.ts",
+    "smoke": "tsx test_launch_and_trade.ts",
+    "crank": "tsx crank_worker.ts",
+    "test": "tsx --test src/*.test.ts",
+    "typecheck": "tsc --noEmit -p .",
+    "snapshot": "tsx src/snapshot.ts"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "0.31.1",
+    "@solana/spl-token": "0.4.15",
+    "@solana/web3.js": "1.99.0"
+  },
+  "devDependencies": {
+    "@types/bn.js": "5.2.0",
+    "@types/node": "22.20.5",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}

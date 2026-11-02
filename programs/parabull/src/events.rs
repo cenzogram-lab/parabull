@@ -1,0 +1,223 @@
+use anchor_lang::prelude::*;
+
+#[event]
+pub struct LaunchRequested {
+    pub ticket: Pubkey,
+    pub payer: Pubkey,
+    pub nonce: u64,
+    pub ticker: String,
+    pub name_hash: [u8; 32],
+    pub metadata_hash: [u8; 32],
+    pub deposit_lamports: u64,
+    pub expires_at: i64,
+    pub tweet_id_hash: Option<[u8; 32]>,
+}
+
+#[event]
+pub struct TicketRefunded {
+    pub ticket: Pubkey,
+    pub payer: Pubkey,
+    pub refunded_by: Pubkey,
+    pub lamports: u64,
+}
+
+#[event]
+pub struct TokenCreated {
+    pub mint: Pubkey,
+    pub bonding_curve: Pubkey,
+    pub creator: Pubkey,
+    pub ticket: Pubkey,
+    pub name: String,
+    pub symbol: String,
+    pub uri: String,
+    pub created_slot: u64,
+    pub trading_open_slot: u64,
+    pub launch_timestamp: i64,
+    pub virtual_token_reserves: u64,
+    pub virtual_sol_reserves: u64,
+    pub real_token_reserves: u64,
+    pub token_total_supply: u64,
+    pub launch_fee_lamports: u64,
+    /// Announcement tweet locked for this launch, if any.
+    pub tweet_id_hash: Option<[u8; 32]>,
+}
+
+#[event]
+pub struct TradeEvent {
+    pub mint: Pubkey,
+    pub user: Pubkey,
+    pub is_buy: bool,
+    pub token_amount: u64,
+    /// Buy: lamports added to reserves. Sell: lamports removed from reserves.
+    pub sol_amount: u64,
+    pub fee: u64,
+    pub fee_to_escrow: u64,
+    pub fee_to_buyback: u64,
+    pub fee_to_holders: u64,
+    pub fee_to_treasury: u64,
+    pub virtual_token_reserves: u64,
+    pub virtual_sol_reserves: u64,
+    pub real_token_reserves: u64,
+    pub real_sol_reserves: u64,
+    pub slot: u64,
+    pub timestamp: i64,
+}
+
+/// The last real token was bought; the curve is locked until Raydium migration.
+#[event]
+pub struct GraduationReady {
+    pub mint: Pubkey,
+    pub bonding_curve: Pubkey,
+    pub real_sol_reserves: u64,
+    pub virtual_token_reserves: u64,
+    pub virtual_sol_reserves: u64,
+    pub escrow_accrued: u64,
+    pub escrow_funded: bool,
+    pub slot: u64,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct MigrationPrepared {
+    pub mint: Pubkey,
+    pub migration_authority: Pubkey,
+    pub sol_to_pool: u64,
+    pub sol_reserve: u64,
+    pub tokens_to_pool: u64,
+    /// Unsolicited tokens found in the curve's token account, burned.
+    pub surplus_tokens_burned: u64,
+    pub slot: u64,
+}
+
+#[event]
+pub struct MigratedToRaydium {
+    pub mint: Pubkey,
+    pub pool: Pubkey,
+    pub lp_mint: Pubkey,
+    pub token_0: Pubkey,
+    pub token_1: Pubkey,
+    pub tokens_to_pool: u64,
+    pub sol_to_pool: u64,
+    /// Unsolicited tokens found in the migration authority's account, burned.
+    pub surplus_tokens_burned: u64,
+    /// Unsolicited WSOL in the migration authority's account; follows the
+    /// unspent reserve to the treasury in `lock_migrated_lp`.
+    pub surplus_wsol: u64,
+    pub slot: u64,
+}
+
+#[event]
+pub struct LiquidityLocked {
+    pub mint: Pubkey,
+    pub pool: Pubkey,
+    pub lp_amount: u64,
+    pub fee_nft_mint: Pubkey,
+    pub fee_nft_owner: Pubkey,
+    pub reserve_refunded_to_treasury: u64,
+}
+
+#[event]
+pub struct DexEscrowToppedUp {
+    pub mint: Pubkey,
+    pub payer: Pubkey,
+    pub accepted: u64,
+    pub escrow_accrued: u64,
+    pub target: u64,
+}
+
+#[event]
+pub struct DexEscrowReleased {
+    pub mint: Pubkey,
+    pub treasury: Pubkey,
+    pub amount: u64,
+    pub excess_to_buyback: u64,
+}
+
+#[event]
+pub struct FeesSwept {
+    pub mint: Pubkey,
+    pub to_buyback_vault: u64,
+    pub to_holder_vault: u64,
+    pub to_treasury: u64,
+}
+
+#[event]
+pub struct GlobalParamsUpdated {
+    pub admin: Pubkey,
+    pub update: crate::state::GlobalUpdate,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct AdminTransferProposed {
+    pub admin: Pubkey,
+    pub pending_admin: Pubkey,
+}
+
+#[event]
+pub struct AdminTransferred {
+    pub previous_admin: Pubkey,
+    pub new_admin: Pubkey,
+}
+
+#[event]
+pub struct LpFeesCollected {
+    pub mint: Pubkey,
+    pub pool: Pubkey,
+    pub fee_lp_amount: u64,
+    /// Measured SOL actually received (unwrapped from WSOL).
+    pub sol_collected: u64,
+    /// Measured launched-token amount received, burned in the same instruction.
+    pub tokens_burned: u64,
+    pub to_escrow: u64,
+    pub to_buyback_vault: u64,
+    pub to_holder_vault: u64,
+    pub to_treasury: u64,
+}
+
+#[event]
+pub struct PauseToggled {
+    pub admin: Pubkey,
+    pub paused: bool,
+}
+
+#[event]
+pub struct BuybackStaged {
+    pub amount: u64,
+    pub vault_remaining: u64,
+}
+
+#[event]
+pub struct BuybackBurned {
+    pub parabull_mint: Pubkey,
+    pub pool: Pubkey,
+    pub sol_in: u64,
+    pub tokens_burned: u64,
+    pub min_amount_out: u64,
+}
+
+#[event]
+pub struct RewardEpochPublished {
+    pub epoch: u64,
+    pub merkle_root: [u8; 32],
+    pub total_lamports: u64,
+    pub num_leaves: u32,
+    pub snapshot_slot: u64,
+    pub expires_at: i64,
+}
+
+#[event]
+pub struct EpochExpired {
+    pub epoch_index: u64,
+    /// Unclaimed lamports released back to the vault's available balance.
+    pub reclaimed_lamports: u64,
+    pub expired_by: Pubkey,
+}
+
+#[event]
+pub struct HolderRewardClaimed {
+    pub epoch: u64,
+    pub index: u32,
+    pub claimant: Pubkey,
+    pub amount: u64,
+}

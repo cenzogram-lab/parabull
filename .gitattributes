@@ -1,2 +1,2 @@
 * text=auto eol=lf
-programs/**/vendor/** -whitespace
+reference/programs/**/vendor/** -whitespace
