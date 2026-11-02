@@ -441,10 +441,12 @@ pub struct LaunchTicket {
     pub bump: u8,
     pub payer: Pubkey,
     pub nonce: u64,
-    /// Total lamports deposited on top of the ticket's own rent.
+    /// Everything the user paid: the flat deposit, *including* this ticket's
+    /// own rent (the ticket holds exactly this many lamports).
     pub deposit_lamports: u64,
-    /// Protocol fee quoted at request time; the rest of the deposit covers
-    /// rent + fees paid by the launch authority during `create`.
+    /// Protocol fee quoted at request time. The rest of the deposit repays
+    /// the rent the launch authority fronts in `create`; anything unspent
+    /// goes to the treasury.
     pub launch_fee_lamports: u64,
     pub created_at: i64,
     pub expires_at: i64,
@@ -577,25 +579,18 @@ pub fn normalize_ticker(input: &str) -> Result<Ticker> {
     Ok(Ticker { bytes, len: s.len() as u8 })
 }
 
-/// sha256 of the name after trimming, collapsing whitespace runs to one space
-/// and lowercasing ASCII. Fuzzy/lookalike matching is the indexer's job.
+/// sha256 of the name reduced to its lowercase ASCII letters and digits, so
+/// case, spaces and symbols don't matter: "Pepe Coin", "PepeCoin" and
+/// "P.E.P.E-coin" all lock the same entry. A name with no ASCII letters or
+/// digits at all (e.g. only emoji) falls back to its trimmed raw bytes; that
+/// can't collide with a stripped name, which always has at least one ASCII
+/// alphanumeric byte. Unicode lookalikes are the off-chain indexer's job.
 pub fn normalize_name_hash(input: &str) -> Result<[u8; 32]> {
     let raw = input.trim();
     require!(!raw.is_empty() && raw.len() <= MAX_NAME_LEN, ParabullError::InvalidName);
-    let mut norm = Vec::with_capacity(raw.len());
-    let mut prev_space = false;
-    for b in raw.bytes() {
-        if b.is_ascii_whitespace() {
-            if !prev_space {
-                norm.push(b' ');
-            }
-            prev_space = true;
-        } else {
-            norm.push(b.to_ascii_lowercase());
-            prev_space = false;
-        }
-    }
-    Ok(hashv(&[&norm]).to_bytes())
+    let stripped: Vec<u8> = raw.bytes().filter(u8::is_ascii_alphanumeric).map(|b| b.to_ascii_lowercase()).collect();
+    let key: &[u8] = if stripped.is_empty() { raw.as_bytes() } else { &stripped };
+    Ok(hashv(&[key]).to_bytes())
 }
 
 pub fn validate_uri(uri: &str) -> Result<()> {
@@ -966,12 +961,24 @@ mod tests {
         }
     }
 
+    fn hex(h: [u8; 32]) -> String {
+        h.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// Vectors computed independently in Python; also pinned in
+    /// scripts/src/launch.test.ts.
     #[test]
-    fn name_normalisation_collapses_case_and_whitespace() {
-        let a = normalize_name_hash("Pepe  The\tFrog").unwrap();
-        let b = normalize_name_hash(" pepe the frog ").unwrap();
-        assert_eq!(a, b);
-        assert_ne!(a, normalize_name_hash("pepe the frogs").unwrap());
+    fn name_normalisation_strips_case_spaces_and_symbols() {
+        const PEPECOIN: &str = "cfab0255bde5c58424108384d65d8f8c26d669d50e9a025681c64f5530be395f";
+        for name in ["Pepe Coin", "PepeCoin", "P.E.P.E-coin", "  pepe_COIN!! ", "PEPE   coin"] {
+            assert_eq!(hex(normalize_name_hash(name).unwrap()), PEPECOIN, "{name:?}");
+        }
+        assert_ne!(normalize_name_hash("pepe coins").unwrap(), normalize_name_hash("pepe coin").unwrap());
+        assert_ne!(normalize_name_hash("pepe coin 2").unwrap(), normalize_name_hash("pepe coin").unwrap());
+        // No ASCII letters/digits: raw-bytes fallback.
+        assert_eq!(hex(normalize_name_hash("🐸🐸").unwrap()), "8e96e8715e0348cfd35b9fefecef9476eebae0863fd595acfbcd89241c6b4a68");
+        assert_eq!(hex(normalize_name_hash("$$$").unwrap()), "4935926371d1a35cec5c938bd7bd1ccb50bfe845c89e8f6ebfb0709c1b8bd22c");
+        assert_ne!(normalize_name_hash("$$$").unwrap(), normalize_name_hash("%%%").unwrap(), "fallbacks stay distinct");
         assert!(normalize_name_hash("   ").is_err());
         assert!(normalize_name_hash(&"x".repeat(MAX_NAME_LEN + 1)).is_err());
     }
@@ -1059,6 +1066,15 @@ mod tests {
         assert!(!reward_epoch_fundable(u64::MAX, u64::MAX, 1, 0), "overflow is not fundable");
         assert_eq!(vault_spendable(1_000, 100), 900);
         assert_eq!(vault_spendable(50, 100), 0);
+    }
+
+    /// Pinned in scripts/src/launch.test.ts (computed independently in Python).
+    #[test]
+    fn metadata_commitment_pinned_vector() {
+        assert_eq!(
+            hex(metadata_commitment("Pepe Coin", "PEPE", "https://arweave.net/pepe.json")),
+            "598b8e6319c891e3fc368180564bbd19d787832fac8dc27d3ddcc72590050708"
+        );
     }
 
     #[test]

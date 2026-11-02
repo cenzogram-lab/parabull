@@ -6,8 +6,10 @@ reading only.
 
 ## Product rules (locked decisions)
 
-- **Blind launches.** A user deposits about 0.23 SOL into a `LaunchTicket` PDA
-  (0.2 SOL protocol fee plus rent). The backend creates the coin, co-signing
+- **Blind launches.** A user pays a flat 0.23 SOL all-in into a `LaunchTicket`
+  PDA (0.2 SOL protocol fee plus a 0.03 SOL operational allocation; the
+  ticket's own rent comes out of the 0.23, so the ticket holds exactly
+  `deposit_lamports`). The backend creates the coin, co-signing
   as `Global.launch_authority`, and generates the mint keypair server-side.
   Nobody can trade before `trading_open_slot` (creation slot plus a delay).
   The creator's first buy is an ordinary buy after the market opens. A ticket
@@ -15,9 +17,13 @@ reading only.
 - **Launch flow rules.** `request_launch` records the launch fee in effect at
   request time and a hash of the exact name, symbol and URI. `symbol` must
   already be the canonical ticker. `create` must run before the ticket
-  expires and must match that hash. 0.2 SOL goes to the treasury and the rest
-  of the deposit repays the launch authority for the rent it fronted; the
-  ticket's own rent goes back to the payer. After `create` the mint has a
+  expires and must match that hash. From the ticket's lamports, `create`
+  repays the launch authority exactly the rent it fronted (mint, curve, curve
+  ATA, and only the registries it newly created), capped at the 0.03 SOL
+  allocation. A registry's repayment is capped at its rent-exempt minimum,
+  because registry PDAs can be pre-funded by anyone; the ticket then closes to the **treasury**, which receives the
+  fee plus whatever of the allocation is unspent (`TokenCreated.rent_reimbursed`
+  / `treasury_received`). The payer gets nothing back from a successful launch. After `create` the mint has a
   fixed supply, no mint or freeze authority, and metadata nobody can change.
   `refund_ticket` always sends funds to the payer. The payer can call it
   after expiry; the launch authority can call it at any time (to reject a
@@ -33,7 +39,11 @@ reading only.
   `curve lamports >= rent + real_sol_reserves + all fee buckets`.
 - **Anti-vamp registry.** `["registry", TICKER]` and `["name", sha256(name)]`
   PDAs lock a ticker or name for 3 days (`Global.registry_lock_seconds`).
-  Tickers are 1-10 ASCII letters or digits, stored uppercase. Lookalike
+  Tickers are 1-10 ASCII letters or digits, stored uppercase. Names are
+  normalised by keeping only ASCII letters and digits, lowercased, so
+  `Pepe Coin`, `PepeCoin` and `P.E.P.E-coin` share one lock; a name with no
+  ASCII alphanumerics (e.g. emoji only) hashes its trimmed raw bytes instead.
+  `state.rs` and `scripts/src/launch.ts` pin the same test vectors. Lookalike
   detection happens in the off-chain indexer, not on-chain.
 - **Announcement-tweet lock.**
   - `request_launch(..., tweet_id: Option<u64>)` takes the tweet's numeric
@@ -47,7 +57,14 @@ reading only.
   - Checking that the creator actually authored the tweet is off-chain
     (`docs/BACKEND_SPEC.md` §1.2).
 - **Off-chain parity** (random 3–15 s create delay, 20-slot bundle check,
-  image and lookalike flags): specified in `docs/BACKEND_SPEC.md`.
+  image and lookalike flags): specified in `docs/BACKEND_SPEC.md`. The launch
+  worker (§1) is implemented in `scripts/launch_worker.ts`, with its pure
+  logic in `scripts/src/launchWorker.ts`.
+- **Devnet test curve.** `deploy_and_init.ts` accepts `CURVE_PRESET=small`
+  (graduates at `CURVE_TARGET_SOL`, default 2 SOL) or all four explicit
+  `INITIAL_*` / `TOKEN_TOTAL_SUPPLY` overrides; `scripts/src/curveParams.ts`
+  solves the supply so the pool opens at the curve's final price. The small
+  preset is refused on mainnet-beta.
 - **Fees.** The platform fee is 1% (hard-capped by `MAX_PLATFORM_FEE_BPS`).
   Creators get 0%. Each trade's fee is split into counters on the token's own
   `BondingCurve`, never written to a shared vault in the trade path:

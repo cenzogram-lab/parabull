@@ -38,6 +38,10 @@ pub struct TokenCreated {
     pub real_token_reserves: u64,
     pub token_total_supply: u64,
     pub launch_fee_lamports: u64,
+    /// Rent the launch authority fronted for this create, repaid from the ticket.
+    pub rent_reimbursed: u64,
+    /// Launch fee plus any unspent operational allocation.
+    pub treasury_received: u64,
     /// Announcement tweet locked for this launch, if any.
     pub tweet_id_hash: Option<[u8; 32]>,
 }

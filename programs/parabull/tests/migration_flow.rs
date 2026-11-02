@@ -440,3 +440,40 @@ async fn sweep_moves_flywheel_buckets_to_vaults_and_keeps_escrow() {
     env.buy(&trader, &mint, M, u64::MAX).await.unwrap();
     assert_curve_backed(&mut env, &curve).await;
 }
+
+/// The devnet test curve from scripts/src/curveParams.ts `smallCurve(2 SOL,
+/// 0.25 SOL)` (values pinned in curveParams.test.ts, cross-checked in Python):
+/// graduates at ~2 SOL and passes the on-chain 5% opening-price check.
+#[tokio::test]
+async fn small_devnet_curve_graduates_and_migrates() {
+    const VS0: u64 = 705_837_852;
+    const SUPPLY: u64 = 974_125_259_823_200;
+    let mut env = Env::with_global(|g| {
+        g.initial_virtual_sol_reserves = VS0;
+        g.token_total_supply = SUPPLY;
+    })
+    .await;
+    let creator = env.funded_user().await;
+    let mint = env.launch_token(&creator, 1, "Pepe Coin", "PEPE").await;
+    let curve = curve_pda(&mint);
+    let c: BondingCurve = env.anchor(&curve).await;
+    env.warp_to(c.trading_open_slot).await;
+    let whale = env.user_with(5 * SOL).await;
+    env.buy(&whale, &mint, u64::MAX, u64::MAX).await.unwrap();
+    let c: BondingCurve = env.anchor(&curve).await;
+    assert!(c.complete);
+    assert_eq!(c.real_sol_reserves, 2_000_000_002, "graduates at ~2 SOL");
+
+    env.seed_cpmm_pool_accounts(&mint);
+    let crank = env.crank.pubkey();
+    let ixs = [env.prepare_migration_ix(&crank, &mint), env.migrate_raydium_ix(&crank, &mint)];
+    crank_send(&mut env, &ixs, &[]).await.unwrap();
+    let nft = Keypair::new();
+    let ix = env.lock_lp_ix(&crank, &mint, &nft.pubkey());
+    crank_send(&mut env, &[ix], &[&nft]).await.unwrap();
+
+    let c: BondingCurve = env.anchor(&curve).await;
+    assert_eq!(c.stage(), MigrationStage::LpLocked);
+    assert_eq!(c.migration_sol, 2_000_000_002 - DEFAULT_MIGRATION_RESERVE_LAMPORTS);
+    assert_eq!(c.migration_tokens, SUPPLY - DEFAULT_INITIAL_REAL_TOKEN_RESERVES);
+}

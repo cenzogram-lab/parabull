@@ -19,21 +19,38 @@ use crate::constants::*;
 use crate::error::ParabullError;
 use crate::events::TokenCreated;
 use crate::launch::{check_metadata_matches, check_ticket_live, check_tweet_registry_presence, registry_claimable, settle_ticket};
+
+/// Lamports the launch authority fronted for an account created by its own
+/// fresh keypair (the mint) or derived from it (curve, curve ATA). Nobody can
+/// know those addresses before `create` lands, so nobody can pre-fund them.
+fn fronted_fresh(info: &AccountInfo) -> u64 {
+    info.lamports()
+}
+
+/// Rent fronted for a registry PDA (0 for one that already existed and is
+/// merely re-claimed). Registry seeds are public, so anyone can pre-fund one,
+/// and Anchor's `init` then tops it up only to the rent-exempt minimum.
+/// Repayment is capped at that minimum so a donation is never paid to the
+/// launch authority out of the treasury's share.
+fn fronted_registry(info: &AccountInfo, newly_created: bool, rent: &Rent) -> u64 {
+    if newly_created { info.lamports().min(rent.minimum_balance(info.data_len())) } else { 0 }
+}
 use crate::state::{BondingCurve, Global, LaunchTicket, NameRegistry, TickerRegistry, TweetRegistry};
 
 #[derive(Accounts)]
 pub struct Create<'info> {
-    /// Backend signer; pays rent up front and is reimbursed from the ticket.
+    /// Backend signer; fronts the rent and is repaid exactly that from the ticket.
     #[account(mut, address = global.launch_authority @ ParabullError::Unauthorized)]
     pub launch_authority: Signer<'info>,
 
     #[account(mut, seeds = [SEED_GLOBAL], bump = global.bump)]
     pub global: Box<Account<'info, Global>>,
 
-    /// Closed to `payer` at the end of the instruction (returns ticket rent).
+    /// Closed to the treasury at the end of the instruction: after the launch
+    /// authority's rent is repaid, the fee and anything unspent go there.
     #[account(
         mut,
-        close = payer,
+        close = treasury,
         has_one = payer @ ParabullError::Unauthorized,
         seeds = [SEED_LAUNCH_TICKET, payer.key().as_ref(), &ticket.nonce.to_le_bytes()],
         bump = ticket.bump,
@@ -137,6 +154,10 @@ pub fn handler(ctx: Context<Create>, name: String, symbol: String, uri: String) 
 
     let mint_key = ctx.accounts.mint.key();
     let creator = ctx.accounts.payer.key();
+    // A registry with a default mint was created (and paid for) just now.
+    let new_ticker = ctx.accounts.ticker_registry.mint == Pubkey::default();
+    let new_name = ctx.accounts.name_registry.mint == Pubkey::default();
+    let new_tweet = ctx.accounts.tweet_registry.as_ref().is_some_and(|t| t.mint == Pubkey::default());
 
     // ---- Claim registries -------------------------------------------------
     {
@@ -172,14 +193,28 @@ pub fn handler(ctx: Context<Create>, name: String, symbol: String, uri: String) 
     initialize_metadata(&ctx, &name, &symbol, &uri, signer)?;
     mint_supply_and_revoke(&ctx, signer)?;
 
-    // ---- Settle the ticket deposit ----------------------------------------
-    // Direct lamport moves come after every CPI so the runtime never sees an
-    // unbalanced caller state when invoking another program.
-    let settlement = settle_ticket(ctx.accounts.ticket.deposit_lamports, ctx.accounts.ticket.launch_fee_lamports)?;
+    // ---- Settle the ticket -------------------------------------------------
+    // Repay exactly the rent the launch authority fronted here (the mint incl.
+    // its metadata top-up, the curve, its token account, and any registry
+    // created now); `close = treasury` then sends the launch fee and every
+    // unspent lamport to the treasury. Direct lamport moves come after every
+    // CPI so the runtime never sees an unbalanced caller state.
+    let settlement = {
+        let a = &ctx.accounts;
+        let r = Rent::get()?;
+        let mut rent = fronted_fresh(&a.mint.to_account_info())
+            .checked_add(fronted_fresh(&a.bonding_curve.to_account_info()))
+            .and_then(|v| v.checked_add(fronted_fresh(&a.curve_token_account.to_account_info())))
+            .and_then(|v| v.checked_add(fronted_registry(&a.ticker_registry.to_account_info(), new_ticker, &r)))
+            .and_then(|v| v.checked_add(fronted_registry(&a.name_registry.to_account_info(), new_name, &r)))
+            .ok_or(ParabullError::Overflow)?;
+        if let Some(tw) = &a.tweet_registry {
+            rent = rent.checked_add(fronted_registry(&tw.to_account_info(), new_tweet, &r)).ok_or(ParabullError::Overflow)?;
+        }
+        settle_ticket(a.ticket.to_account_info().lamports(), a.ticket.launch_fee_lamports, rent)?
+    };
     {
         let a = &ctx.accounts;
-        a.ticket.sub_lamports(settlement.to_treasury)?;
-        a.treasury.add_lamports(settlement.to_treasury)?;
         a.ticket.sub_lamports(settlement.to_launch_authority)?;
         a.launch_authority.add_lamports(settlement.to_launch_authority)?;
     }
@@ -204,7 +239,9 @@ pub fn handler(ctx: Context<Create>, name: String, symbol: String, uri: String) 
         virtual_sol_reserves: c.virtual_sol_reserves,
         real_token_reserves: c.real_token_reserves,
         token_total_supply: c.token_total_supply,
-        launch_fee_lamports: settlement.to_treasury,
+        launch_fee_lamports: ctx.accounts.ticket.launch_fee_lamports,
+        rent_reimbursed: settlement.to_launch_authority,
+        treasury_received: settlement.to_treasury,
         tweet_id_hash: ctx.accounts.ticket.tweet_id_hash,
     });
     Ok(())

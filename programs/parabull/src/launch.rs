@@ -72,18 +72,28 @@ pub fn check_metadata_matches(name: &str, symbol: &str, uri: &str, committed: &[
     Ok(())
 }
 
-/// How a consumed ticket's deposit is paid out.
+/// How a consumed ticket's lamports are paid out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TicketSettlement {
-    /// Protocol launch fee.
-    pub to_treasury: u64,
-    /// Reimburses the launch authority for rent + fees it paid in `create`.
+    /// Exactly the rent the launch authority fronted in `create`, capped at
+    /// what the ticket holds beyond the launch fee.
     pub to_launch_authority: u64,
+    /// Everything else: the launch fee plus any unspent operational allocation.
+    pub to_treasury: u64,
 }
 
-pub fn settle_ticket(deposit: u64, launch_fee: u64) -> Result<TicketSettlement> {
-    let to_launch_authority = deposit.checked_sub(launch_fee).ok_or(ParabullError::LaunchFeeExceedsDeposit)?;
-    Ok(TicketSettlement { to_treasury: launch_fee, to_launch_authority })
+/// `ticket_lamports` is everything the ticket holds (the flat deposit,
+/// including the ticket's own rent).
+pub fn settle_ticket(ticket_lamports: u64, launch_fee: u64, rent_fronted: u64) -> Result<TicketSettlement> {
+    let allocation = ticket_lamports.checked_sub(launch_fee).ok_or(ParabullError::LaunchFeeExceedsDeposit)?;
+    let to_launch_authority = rent_fronted.min(allocation);
+    Ok(TicketSettlement { to_launch_authority, to_treasury: ticket_lamports - to_launch_authority })
+}
+
+/// Lamports the user moves on top of the ticket's own rent so the ticket
+/// holds exactly `deposit` in total.
+pub fn deposit_top_up(deposit: u64, ticket_rent: u64) -> Result<u64> {
+    deposit.checked_sub(ticket_rent).ok_or_else(|| error!(ParabullError::TicketDepositTooLow))
 }
 
 /// A registry PDA can be (re)claimed if it was just created (zeroed `mint`)
@@ -165,11 +175,22 @@ mod tests {
     }
 
     #[test]
-    fn ticket_settlement() {
-        let s = settle_ticket(DEFAULT_TICKET_DEPOSIT_LAMPORTS, DEFAULT_LAUNCH_FEE_LAMPORTS).unwrap();
-        assert_eq!(s, TicketSettlement { to_treasury: 200_000_000, to_launch_authority: 30_000_000 });
-        assert_eq!(settle_ticket(5, 5).unwrap().to_launch_authority, 0);
-        assert!(settle_ticket(5, 6).is_err());
+    fn ticket_settlement_reimburses_rent_and_sends_the_rest_to_treasury() {
+        // 0.230 SOL ticket, 0.2 fee, ~0.0125 SOL of rent fronted.
+        let s = settle_ticket(DEFAULT_TICKET_DEPOSIT_LAMPORTS, DEFAULT_LAUNCH_FEE_LAMPORTS, 12_500_000).unwrap();
+        assert_eq!(s, TicketSettlement { to_launch_authority: 12_500_000, to_treasury: 217_500_000 });
+        assert_eq!(s.to_launch_authority + s.to_treasury, DEFAULT_TICKET_DEPOSIT_LAMPORTS, "nothing left over");
+        // Reimbursement never eats into the launch fee.
+        let s = settle_ticket(DEFAULT_TICKET_DEPOSIT_LAMPORTS, DEFAULT_LAUNCH_FEE_LAMPORTS, 99_000_000).unwrap();
+        assert_eq!(s, TicketSettlement { to_launch_authority: 30_000_000, to_treasury: 200_000_000 });
+        assert_eq!(settle_ticket(5, 5, 1).unwrap(), TicketSettlement { to_launch_authority: 0, to_treasury: 5 });
+        assert!(settle_ticket(5, 6, 0).is_err());
+    }
+
+    #[test]
+    fn flat_deposit_includes_ticket_rent() {
+        assert_eq!(deposit_top_up(230_000_000, 2_429_040).unwrap(), 227_570_960);
+        assert!(deposit_top_up(1_000, 2_429_040).is_err());
     }
 
     #[test]

@@ -8,23 +8,35 @@ export function canonicalTicker(input: string): string {
   return s.toUpperCase();
 }
 
-/** sha256 of the name: trimmed, ASCII whitespace runs -> one space, ASCII lowercased. */
+/**
+ * Name lock key (port of state.rs `normalize_name_hash`): sha256 of the name
+ * reduced to lowercase ASCII letters/digits ("Pepe Coin" = "PepeCoin" =
+ * "P.E.P.E-coin"). A name with no ASCII letters/digits falls back to its
+ * trimmed raw UTF-8 bytes.
+ */
 export function nameHash(name: string): Buffer {
   const raw = Buffer.from(name.trim(), "utf8");
   if (raw.length === 0 || raw.length > 32) throw new Error("name must be 1-32 bytes");
-  const out: number[] = [];
-  let prevSpace = false;
-  for (const b of raw) {
-    const ws = b === 0x20 || b === 0x09 || b === 0x0a || b === 0x0c || b === 0x0d;
-    if (ws) {
-      if (!prevSpace) out.push(0x20);
-      prevSpace = true;
-    } else {
-      out.push(b >= 0x41 && b <= 0x5a ? b + 32 : b);
-      prevSpace = false;
-    }
+  const stripped = Buffer.from(
+    [...raw].filter((b) => (b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5a) || (b >= 0x61 && b <= 0x7a)).map((b) => (b >= 0x41 && b <= 0x5a ? b + 32 : b)),
+  );
+  return createHash("sha256").update(stripped.length > 0 ? stripped : raw).digest();
+}
+
+/**
+ * Port of state.rs `metadata_commitment`: sha256 over length-prefixed
+ * (u32 LE) UTF-8 name, symbol and URI. `create` only accepts metadata that
+ * matches the hash stored on the ticket.
+ */
+export function metadataCommitment(name: string, symbol: string, uri: string): Buffer {
+  const h = createHash("sha256");
+  for (const field of [name, symbol, uri]) {
+    const b = Buffer.from(field, "utf8");
+    const len = Buffer.alloc(4);
+    len.writeUInt32LE(b.length);
+    h.update(len).update(b);
   }
-  return createHash("sha256").update(Buffer.from(out)).digest();
+  return h.digest();
 }
 
 /**

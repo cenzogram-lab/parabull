@@ -4,7 +4,7 @@ use anchor_lang::system_program;
 use crate::constants::{SEED_GLOBAL, SEED_LAUNCH_TICKET};
 use crate::error::ParabullError;
 use crate::events::LaunchRequested;
-use crate::launch::{ticket_expiry, tweet_id_hash, validate_launch_metadata};
+use crate::launch::{deposit_top_up, ticket_expiry, tweet_id_hash, validate_launch_metadata};
 use crate::state::{Global, LaunchTicket};
 
 #[derive(Accounts)]
@@ -40,7 +40,10 @@ pub fn handler(ctx: Context<RequestLaunch>, nonce: u64, name: String, symbol: St
     let deposit = global.ticket_deposit_lamports;
     let launch_fee = global.launch_fee_lamports;
 
-    // Deposit sits on top of the ticket's own rent until create or refund.
+    // Flat price: the payer already funded the ticket's rent via `init`, so
+    // top it up to exactly `deposit` in total.
+    let ticket_rent = ctx.accounts.ticket.to_account_info().lamports();
+    let top_up = deposit_top_up(deposit, ticket_rent)?;
     system_program::transfer(
         CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
@@ -49,7 +52,7 @@ pub fn handler(ctx: Context<RequestLaunch>, nonce: u64, name: String, symbol: St
                 to: ctx.accounts.ticket.to_account_info(),
             },
         ),
-        deposit,
+        top_up,
     )?;
 
     let ticket = &mut ctx.accounts.ticket;

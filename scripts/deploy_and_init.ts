@@ -14,11 +14,18 @@
  * Env: CLUSTER, RPC_URL, ADMIN_KEYPAIR, LAUNCH_AUTHORITY_KEYPAIR, CRANK_KEYPAIR,
  * TREASURY, PARABULL_MINT (devnet: created if unset), RAYDIUM_* overrides,
  * SOL_USD (to derive the $299 DexScreener target; default 150).
+ *
+ * Curve (src/curveParams.ts resolveCurve):
+ *   CURVE_PRESET=small [CURVE_TARGET_SOL=2]   devnet test curve graduating at ~2 SOL
+ *   INITIAL_VIRTUAL_TOKEN_RESERVES, INITIAL_VIRTUAL_SOL_RESERVES,
+ *   INITIAL_REAL_TOKEN_RESERVES, TOKEN_TOTAL_SUPPLY   explicit values (all four)
+ *   MIGRATION_RESERVE_LAMPORTS                 default 0.25 SOL
  */
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, createMint } from "@solana/spl-token";
 import { DEXSCREENER_LISTING_USD, LAMPORTS_PER_SOL, ammConfigPda, cluster, raydium, roles } from "./src/config";
 import { bn, connect } from "./src/program";
+import { MIGRATION_RENT_ALLOWANCE_LAMPORTS, graduationPreview, resolveCurve } from "./src/curveParams";
 
 const DEFAULTS = {
   launchFeeLamports: 200_000_000n,
@@ -29,11 +36,6 @@ const DEFAULTS = {
   holderBps: 4_000,
   tradingOpenDelaySlots: 2,
   registryLockSeconds: 3 * 24 * 60 * 60,
-  initialVirtualTokenReserves: 1_073_000_000_000_000n,
-  initialVirtualSolReserves: 30_000_000_000n,
-  initialRealTokenReserves: 793_100_000_000_000n,
-  tokenTotalSupply: 1_000_000_000_000_000n,
-  migrationReserveLamports: 250_000_000n,
   rewardClaimWindowSeconds: 30 * 24 * 60 * 60,
 };
 
@@ -71,7 +73,20 @@ async function main() {
     throw new Error(`AmmConfig ${ray.ammConfig.toBase58()} does not re-derive from its stored index ${index}`);
   }
   if (cfg.data[9] !== 0) throw new Error(`AmmConfig index ${index} has pool creation disabled`);
-  console.log(`AmmConfig ok: index ${index}, trade_fee_rate=${cfg.data.readBigUInt64LE(12)} / 1e6, create_pool_fee=${cfg.data.readBigUInt64LE(36)} lamports`);
+  const createPoolFee = cfg.data.readBigUInt64LE(36);
+  console.log(`AmmConfig ok: index ${index}, trade_fee_rate=${cfg.data.readBigUInt64LE(12)} / 1e6, create_pool_fee=${createPoolFee} lamports`);
+
+  // Curve + migration reserve must work with this cluster's Raydium fees.
+  const curve = resolveCurve(process.env, cluster());
+  const preview = graduationPreview(curve.params, curve.migrationReserveLamports);
+  console.log(
+    `curve ${curve.label}: graduates at ${Number(preview.raiseLamports) / 1e9} SOL raised, ` +
+      `${Number(preview.marketCapLamports) / 1e9} SOL market cap; pool gets ${Number(preview.solToPool) / 1e9} SOL`,
+  );
+  if (!preview.priceCheckPasses) throw new Error("curve would fail the on-chain 5% opening-price check at migration");
+  if (curve.migrationReserveLamports < createPoolFee + MIGRATION_RENT_ALLOWANCE_LAMPORTS) {
+    throw new Error(`MIGRATION_RESERVE_LAMPORTS ${curve.migrationReserveLamports} < create_pool_fee ${createPoolFee} + rent allowance ${MIGRATION_RENT_ALLOWANCE_LAMPORTS}`);
+  }
 
   const globalKey = pdas.global();
   if (await connection.getAccountInfo(globalKey)) {
@@ -102,15 +117,15 @@ async function main() {
     dexTargetLamports: bn(dexTargetLamports(solUsd)),
     tradingOpenDelaySlots: bn(DEFAULTS.tradingOpenDelaySlots),
     registryLockSeconds: bn(DEFAULTS.registryLockSeconds),
-    initialVirtualTokenReserves: bn(DEFAULTS.initialVirtualTokenReserves),
-    initialVirtualSolReserves: bn(DEFAULTS.initialVirtualSolReserves),
-    initialRealTokenReserves: bn(DEFAULTS.initialRealTokenReserves),
-    tokenTotalSupply: bn(DEFAULTS.tokenTotalSupply),
+    initialVirtualTokenReserves: bn(curve.params.initialVirtualTokenReserves),
+    initialVirtualSolReserves: bn(curve.params.initialVirtualSolReserves),
+    initialRealTokenReserves: bn(curve.params.initialRealTokenReserves),
+    tokenTotalSupply: bn(curve.params.tokenTotalSupply),
     cpmmProgram: ray.cpmmProgram,
     cpmmAmmConfig: ray.ammConfig,
     lpLockProgram: ray.lockProgram,
     lpLockAuthority: ray.lockAuthority,
-    migrationReserveLamports: bn(DEFAULTS.migrationReserveLamports),
+    migrationReserveLamports: bn(curve.migrationReserveLamports),
     parabullPool: PublicKey.default, // set later via update_global_params once the pool exists
     rewardClaimWindowSeconds: bn(DEFAULTS.rewardClaimWindowSeconds),
   };
