@@ -17,17 +17,17 @@
  * BUYBACK_SLIPPAGE_BPS, POLL_MS, LP_FEE_MIN, OVERRIDE_LP_FEE_AMOUNT, and the
  * SNAPSHOT_* variables read by src/snapshot.ts.
  */
-import { Keypair, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, NATIVE_MINT, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { MEMO_PROGRAM_ID, METADATA_PROGRAM_ID, cluster, raydium, roles } from "./src/config";
+import { MEMO_PROGRAM_ID, cluster, raydium, roles } from "./src/config";
 import { fetchLpFeeAmount } from "./src/lpFees";
 import { runSnapshot } from "./src/snapshot";
+import { STAGE, graduate as graduateCurve } from "./src/graduation";
 import { applySlippage, cpmmQuoteOut } from "./src/curve";
-import { ata2022, ataSpl, cpmmAccounts, cpmmPoolAccounts, lockAccounts } from "./src/pdas";
+import { ata2022, ataSpl, cpmmPoolAccounts, lockAccounts } from "./src/pdas";
 import { ParabullProgram, big, bn, connect, isDefault, send } from "./src/program";
 import { dexTargetLamports } from "./deploy_and_init";
 
-const STAGE = { None: 0, Prepared: 1, PoolCreated: 2, LpLocked: 3 } as const;
 const SWEEP_MIN = BigInt(process.env.SWEEP_MIN_LAMPORTS ?? "50000000"); // 0.05 SOL
 const BUYBACK_MIN = BigInt(process.env.BUYBACK_MIN_LAMPORTS ?? "500000000"); // 0.5 SOL
 const BUYBACK_SLIPPAGE_BPS = BigInt(process.env.BUYBACK_SLIPPAGE_BPS ?? "100");
@@ -35,103 +35,6 @@ const BUYBACK_SLIPPAGE_BPS = BigInt(process.env.BUYBACK_SLIPPAGE_BPS ?? "100");
 type Ctx = ReturnType<typeof connect> & { crank: Keypair; admin: Keypair; ray: ReturnType<typeof raydium> };
 
 const log = (...a: unknown[]) => console.log(new Date().toISOString(), ...a);
-
-async function graduate(x: Ctx, mint: PublicKey, curve: PublicKey, stage: number) {
-  const { program, pdas, crank, ray, connection } = x;
-  const g = await program.account.global.fetch(pdas.global());
-  const auth = pdas.migrationAuthority(mint);
-
-  if (stage === STAGE.None) {
-    const ix = await program.methods
-      .prepareMigration()
-      .accountsStrict({
-        crank: crank.publicKey,
-        global: pdas.global(),
-        mint,
-        bondingCurve: curve,
-        curveTokenAccount: ata2022(mint, curve),
-        migrationAuthority: auth,
-        authorityTokenAccount: ata2022(mint, auth),
-        tokenProgram: TOKEN_2022_PROGRAM_ID,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        systemProgram: SystemProgram.programId,
-      })
-      .instruction();
-    log(`prepare_migration ${mint.toBase58()}: ${await send(connection, [ix], [crank])}`);
-    stage = STAGE.Prepared;
-  }
-
-  if (stage === STAGE.Prepared) {
-    const k = cpmmAccounts(g.cpmmProgram, g.cpmmAmmConfig, mint, auth);
-    const ix = await program.methods
-      .migrateRaydium()
-      .accountsStrict({
-        crank: crank.publicKey,
-        global: pdas.global(),
-        mint,
-        bondingCurve: curve,
-        migrationAuthority: auth,
-        authorityTokenAccount: ata2022(mint, auth),
-        authorityWsolAccount: ataSpl(NATIVE_MINT, auth),
-        wsolMint: NATIVE_MINT,
-        cpmmProgram: g.cpmmProgram,
-        ammConfig: g.cpmmAmmConfig,
-        cpmmAuthority: k.authority,
-        poolState: k.poolState,
-        lpMint: k.lpMint,
-        creatorLpToken: k.creatorLpToken,
-        token0Vault: k.token0Vault,
-        token1Vault: k.token1Vault,
-        createPoolFee: ray.poolFeeReceiver,
-        observationState: k.observationState,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        token2022Program: TOKEN_2022_PROGRAM_ID,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        systemProgram: SystemProgram.programId,
-        rent: SYSVAR_RENT_PUBKEY,
-      })
-      .instruction();
-    log(`migrate_raydium ${mint.toBase58()} -> pool ${k.poolState.toBase58()}: ${await send(connection, [ix], [crank], 600_000)}`);
-    stage = STAGE.PoolCreated;
-  }
-
-  if (stage === STAGE.PoolCreated) {
-    const c = await program.account.bondingCurve.fetch(curve);
-    const k = cpmmPoolAccounts(g.cpmmProgram, c.raydiumPool, mint, auth);
-    const nft = Keypair.generate();
-    const l = lockAccounts(g.lpLockProgram, g.lpLockAuthority, nft.publicKey, pdas.feeKeyVault(), k.lpMint);
-    const ix = await program.methods
-      .lockMigratedLp()
-      .accountsStrict({
-        crank: crank.publicKey,
-        global: pdas.global(),
-        mint,
-        bondingCurve: curve,
-        migrationAuthority: auth,
-        feeKeyVault: pdas.feeKeyVault(),
-        feeNftMint: nft.publicKey,
-        treasury: g.treasury,
-        lpLockProgram: g.lpLockProgram,
-        lpLockAuthority: g.lpLockAuthority,
-        poolState: c.raydiumPool,
-        lpMint: k.lpMint,
-        creatorLpToken: k.creatorLpToken,
-        token0Vault: k.token0Vault,
-        token1Vault: k.token1Vault,
-        feeNftAccount: l.feeNftAccount,
-        lockedLiquidity: l.lockedLiquidity,
-        lockLpVault: l.lockLpVault,
-        nftMetadata: l.nftMetadata,
-        rent: SYSVAR_RENT_PUBKEY,
-        systemProgram: SystemProgram.programId,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        metadataProgram: METADATA_PROGRAM_ID,
-      })
-      .instruction();
-    log(`lock_migrated_lp ${mint.toBase58()} (fee NFT ${nft.publicKey.toBase58()}): ${await send(connection, [ix], [crank, nft], 600_000)}`);
-  }
-}
 
 const LP_FEE_MIN = BigInt(process.env.LP_FEE_MIN ?? "1");
 
@@ -309,7 +212,7 @@ async function pass(x: Ctx, solUsd?: number, publishRewards = false) {
   for (const { publicKey: curve, account: c } of await program.account.bondingCurve.all()) {
     const mint = c.mint;
     const step = async (name: string, f: () => Promise<unknown>) => f().catch((e) => log(`${name} ${mint.toBase58()} failed:`, e?.message ?? e));
-    if (c.complete && c.migrationStage < STAGE.LpLocked) await step("graduate", () => graduate(x, mint, curve, c.migrationStage));
+    if (c.complete && c.migrationStage < STAGE.LpLocked) await step("graduate", () => graduateCurve(x, mint, curve, c.migrationStage, log));
     if (!c.escrowReleased && !g.dexTargetLamports.isZero() && c.escrowAccrued.gte(g.dexTargetLamports)) {
       await step("release_dex_escrow", () =>
         program.methods.releaseDexEscrow().accountsStrict({ global: pdas.global(), mint, bondingCurve: curve, treasury: g.treasury }).rpc(),

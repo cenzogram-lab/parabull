@@ -78,6 +78,41 @@ refused on mainnet-beta), `CURVE_TARGET_SOL`, `MIGRATION_RESERVE_LAMPORTS`
 `INITIAL_VIRTUAL_SOL_RESERVES`, `INITIAL_REAL_TOKEN_RESERVES`,
 `TOKEN_TOTAL_SUPPLY` for a fully custom curve.
 
+Then run the whole lifecycle on that curve. Each line is a separate run:
+
+```bash
+# Launch, trade, buy out the curve, migrate to Raydium and lock the LP.
+CLUSTER=devnet GRADUATE=1 npm run smoke
+```
+
+```bash
+# Same, but the launch worker does `create` (start it first in another terminal).
+CLUSTER=devnet SKIP_METADATA_FETCH=1 npm run worker
+```
+
+```bash
+CLUSTER=devnet GRADUATE=1 npm run smoke -- --no-create
+```
+
+- `GRADUATE=1` makes one buy for every remaining token. It checks that the
+  next buy fails with `CurveComplete`, then runs the crank's three graduation
+  transactions (`src/graduation.ts`, the same code as `crank_worker.ts`). It
+  finishes by checking that the pool is owned by the CPMM program, the
+  Burn & Earn lock vault holds LP, and no LP is left with the migration
+  authority. It refuses mainnet-beta, and refuses a buy-out costing more than
+  `GRADUATE_MAX_SOL` (default 5), which catches a `Global` initialised with
+  the mainnet curve. The admin wallet tops the test user up for the buy-out,
+  so one run spends about 2.5 SOL of the admin's on a 2 SOL curve (deploying
+  the program itself costs more).
+- `--no-create` stops after `request_launch` and waits for the ticket to
+  close. It then finds the worker's mint through the ticker registry and
+  prints the worker's delay on the on-chain clock (expect about 3–15 s plus
+  confirmation time). If the worker refunded the ticket instead, it fails.
+  The default metadata URI isn't real, so either run the worker with
+  `SKIP_METADATA_FETCH=1` or set `SMOKE_URI` to metadata JSON with a reachable
+  image. Without `--no-create`, the smoke test sends `create` itself and a
+  running worker just finds the ticket closed.
+
 The same steps are available from the repository root with `make`: `make keys`,
 `make build`, `make build-sbf`, `make test`, `make scripts-check`,
 `make deploy`, `make init`, `make smoke`, `make crank`, `make worker` (`CLUSTER=devnet` by
@@ -91,7 +126,7 @@ the instruction it names.
 | Script | What it does |
 | --- | --- |
 | `deploy_and_init.ts` | Checks that the program is deployed with `ADMIN_KEYPAIR` as upgrade authority, that the Raydium programs are executable, and that the AmmConfig is owned by the configured CPMM program. Then initialises `Global`. It does nothing if `Global` already exists. On devnet it creates a test Token-2022 `$PARABULL` mint unless `PARABULL_MINT` is set. |
-| `test_launch_and_trade.ts` | Funds a throwaway user, then runs `request_launch` and `create` (signed by the launch authority and a new mint keypair). It shows a buy inside the slot delay being rejected, then buys and sells with slippage limits from `src/curve.ts`. |
+| `test_launch_and_trade.ts` | Funds a throwaway user, then runs `request_launch` and `create` (signed by the launch authority and a new mint keypair). It shows a buy inside the slot delay being rejected, then buys and sells with slippage limits from `src/curve.ts`. `--no-create` leaves `create` to the launch worker; `GRADUATE=1` then buys out the curve and graduates it (see "Devnet test curve"). |
 | `launch_worker.ts` | Launch worker (`docs/BACKEND_SPEC.md` §1). Listens for `LaunchRequested` events (plus a `POLL_MS` poll of open tickets), recovers name/symbol/URI from the user's `request_launch` transaction and checks them against the ticket's commitment, pre-checks pause and the ticker/name/tweet locks, optionally fetches the metadata URI and checks the tweet with the X API, then waits a CSPRNG-uniform 3–15 s and sends `create` with a fresh in-memory mint keypair. Rejected tickets are refunded at once with `refund_ticket`. `--once` runs one poll and exits. |
 | `crank_worker.ts` | Reference crank: graduation (3 transactions), escrow release, fee sweeps, LP-fee collection, buyback and burn with a quoted `min_amount_out`, reward-epoch expiry, optional DexScreener-target refresh (`--sol-usd`), and optional holder-reward publishing (`--publish-rewards`). |
 | `src/snapshot.ts` (`npm run snapshot [-- --publish]`) | Takes a $PARABULL holder snapshot and turns it into reward epochs. It writes `snapshots/epoch-<n>.draft.json` on a dry run, or publishes and writes `snapshots/epoch-<n>.json` (root, total, and every leaf with its amount, balance and proof) for the claim UI. |
