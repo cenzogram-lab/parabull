@@ -1,8 +1,10 @@
 import { ChevronsUpDown, Filter, GraduationCap, LayoutGrid, Lock, Rocket, Sparkles, Star, Table2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { MobileExplore } from "../components/mobile/MobileExplore";
 import { CategoryTabs, ChangePill, cx, Popover } from "../components/ui/primitives";
 import { CoinAvatar, Meter, Sparkline } from "../components/ui/visuals";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { useNow } from "../hooks/useNow";
 import { age, compact, usdCompact } from "../lib/format";
 import type { Coin } from "../lib/types";
@@ -40,6 +42,10 @@ function Th({ label, k, sort, onSort, align = "right" }: { label: string; k?: So
 }
 
 export function Explore() {
+  return useIsMobile() ? <MobileExplore /> : <DesktopExplore />;
+}
+
+function DesktopExplore() {
   const { coins } = useMarket();
   const { watchlist, toggleWatch } = useApp();
   const navigate = useNavigate();

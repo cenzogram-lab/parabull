@@ -15,7 +15,7 @@ const TOGGLES: { id: QuickInfo; label: string; icon: LucideIcon }[] = [
 
 export function InfoStrip() {
   const { quickInfo, setQuickInfo, recent } = useApp();
-  const { traders, coins, byMint, positions, liveTrades } = useMarket();
+  const { traders, coins, byMint, positions, liveTrades, following } = useMarket();
 
   let items: ReactNode[] = [];
   if (quickInfo === "traders") {
@@ -47,9 +47,8 @@ export function InfoStrip() {
         );
       });
   } else if (quickInfo === "following") {
-    const followed = new Set(traders.slice(0, 8).map((t) => t.handle));
     items = liveTrades
-      .filter((t) => followed.has(t.handle))
+      .filter((t) => following.has(t.handle))
       .slice(0, 14)
       .map((t) => {
         const c = byMint.get(t.mint);
@@ -62,7 +61,7 @@ export function InfoStrip() {
           </Link>
         );
       });
-    if (items.length === 0) items = traders.slice(0, 8).map((t) => <span key={t.handle} className="whitespace-nowrap text-muted">@{t.handle} is quiet</span>);
+    if (items.length === 0) items = traders.filter((t) => following.has(t.handle)).map((t) => <span key={t.handle} className="whitespace-nowrap text-muted">@{t.handle} is quiet</span>);
   } else {
     const list = (recent.length ? recent.map((m) => byMint.get(m)).filter(Boolean) : coins.slice(0, 8)) as typeof coins;
     items = list.map((c) => (
@@ -78,7 +77,7 @@ export function InfoStrip() {
   const live = items.length > 6;
 
   return (
-    <div className="flex h-10 shrink-0 items-center gap-3 border-b border-line bg-canvas px-4 text-[13px]">
+    <div className="hidden md:flex h-10 shrink-0 items-center gap-3 border-b border-line bg-canvas px-4 text-[13px]">
       <div className="flex items-center gap-0.5" role="tablist" aria-label="Quick info">
         {TOGGLES.map(({ id, label, icon: Icon }) => (
           <button key={id} role="tab" aria-selected={quickInfo === id} title={label} aria-label={label} onClick={() => setQuickInfo(id)} className={cx("flex h-7 w-7 items-center justify-center rounded-md", quickInfo === id ? "tab-active" : "tab")}>

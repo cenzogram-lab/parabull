@@ -38,6 +38,17 @@
   textarea::placeholder {
     @apply text-muted;
   }
+  /* Mobile: 16px text in fields (iOS zooms into anything smaller on focus); font-size utilities still win. */
+  @media (max-width: 767.98px) {
+    html {
+      -webkit-tap-highlight-color: transparent;
+    }
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
 }
 
 @layer components {
@@ -134,6 +145,31 @@
   .num {
     font-variant-numeric: tabular-nums;
   }
+
+  /* Mobile (below md): every control is at least a 44x44 touch target. */
+  @media (max-width: 767.98px) {
+    .btn,
+    .btn-gold,
+    .btn-copper,
+    .btn-ghost,
+    .chip,
+    .tab,
+    .tab-active {
+      min-width: 44px;
+      min-height: 44px;
+      justify-content: center;
+    }
+    .input,
+    .input-shell {
+      min-height: 44px;
+    }
+    .btn-icon {
+      width: 44px;
+      height: 44px;
+      min-width: 44px;
+      min-height: 44px;
+    }
+  }
 }
 
 @layer utilities {
@@ -206,4 +242,50 @@
 }
 .wallet-adapter-modal-button-close {
   background: #231d19 !important;
+}
+/* Phones: the picker's wallet rows and close button get 44px targets (the rule above sets 36px buttons everywhere). */
+@media (max-width: 767.98px) {
+  .wallet-adapter-modal-list .wallet-adapter-button {
+    height: 48px !important;
+    line-height: 48px !important;
+  }
+  /* A 14px icon plus 15px a side: 44x44. */
+  .wallet-adapter-modal-button-close {
+    padding: 15px !important;
+  }
+}
+
+/*
+ * Mobile touch target: `.touch-target` grows the hit area to at least 44x44
+ * around the element's center without changing how it looks. Position
+ * utilities (absolute, fixed, sticky) override the `relative` here. It can't
+ * reach past an ancestor (or the element itself) with overflow: hidden.
+ */
+@media (max-width: 767.98px) {
+  :where(.touch-target) {
+    position: relative;
+  }
+  .touch-target::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+
+  /*
+   * A true JetBrains Mono 700 (Latin) for the bold mono figures on the
+   * mobile board ("MC $30K"). It's declared here, not in main.tsx, so desktop
+   * keeps matching its semibold mono labels to the 500 face as before.
+   */
+  @font-face {
+    font-family: "JetBrains Mono";
+    font-style: normal;
+    font-display: swap;
+    font-weight: 700;
+    src: url("../node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
 }

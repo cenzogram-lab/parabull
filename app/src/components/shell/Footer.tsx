@@ -6,7 +6,8 @@ import { XLogo } from "../brand/Wordmark";
 export function Footer() {
   const { solUsd } = useMarket();
   return (
-    <footer className="flex h-10 shrink-0 items-center gap-6 border-t border-line bg-canvas px-5 text-[12.5px] text-muted">
+    // Grows by the bottom safe area, so a phone in landscape keeps the links clear of the home indicator (env() is 0 in desktop browsers).
+    <footer className="hidden md:flex h-[calc(2.5rem+env(safe-area-inset-bottom))] shrink-0 items-center gap-6 border-t border-line bg-canvas px-5 pb-[env(safe-area-inset-bottom)] text-[12.5px] text-muted">
       <span>© 2026 Parabull</span>
       <span className="num">SOL ${solUsd.toFixed(2)}</span>
       <span className="text-muted/80">

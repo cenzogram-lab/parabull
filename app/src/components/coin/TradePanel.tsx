@@ -1,6 +1,6 @@
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { PublicKey } from "@solana/web3.js";
-import { ArrowDownUp, ExternalLink, Info, Loader2, Settings2, ShieldCheck, Zap } from "lucide-react";
+import { ArrowDownUp, CircleAlert, ExternalLink, Info, Loader2, Settings2, ShieldCheck, Zap } from "lucide-react";
 import { useMemo, useState } from "react";
 import { explorer, isDemo } from "../../config";
 import { useParabullProgram } from "../../hooks/useParabullProgram";
@@ -8,7 +8,7 @@ import { compact, pct, sol, tokens as fmtTokens, usd, usdCompact } from "../../l
 import { PROTOCOL } from "../../lib/protocol";
 import type { Coin } from "../../lib/types";
 import { useApp } from "../../state/AppState";
-import { useMarket } from "../../state/Market";
+import { raydiumSell, useMarket } from "../../state/Market";
 import { cx, Popover } from "../ui/primitives";
 import { RatioBar } from "../ui/visuals";
 
@@ -16,17 +16,24 @@ const BUY_PRESETS = [0.1, 0.5, 1, 5];
 const SELL_PRESETS = [25, 50, 100];
 const FEE_BPS = PROTOCOL.platformFeeBps;
 
-export function TradePanel({ coin }: { coin: Coin }) {
+/**
+ * Buy / Sell ticket. The mobile trade sheet opens it on the side that was
+ * tapped (`initialSide`) without the panel frame (`framed={false}`), and
+ * closes when `onPlaced` runs after a trade goes through.
+ */
+export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced }: { coin: Coin; initialSide?: "buy" | "sell"; framed?: boolean; onPlaced?: () => void }) {
   const client = useParabullProgram();
   const { setVisible } = useWalletModal();
   const { demoTrade, positions, solUsd } = useMarket();
   const { toast, sfx } = useApp();
-  const [side, setSide] = useState<"buy" | "sell">("buy");
+  const [side, setSide] = useState<"buy" | "sell">(initialSide);
   const [unit, setUnit] = useState<"SOL" | "USD">("SOL");
   const [amount, setAmount] = useState("0.5");
   const [sellPct, setSellPct] = useState(50);
   const [slippage, setSlippage] = useState(2);
   const [busy, setBusy] = useState(false);
+  // Shown inline in the mobile sheet, whose backdrop sits above the toasts.
+  const [failed, setFailed] = useState<string | null>(null);
   const held = positions[coin.mint]?.tokens ?? 0n;
   const slippageBps = BigInt(Math.round(slippage * 100));
 
@@ -39,8 +46,8 @@ export function TradePanel({ coin }: { coin: Coin }) {
 
   const buyQ = useMemo(() => (side === "buy" && !coin.migrated ? client.quoteBuyWithSol(coin.reserves, lamports, FEE_BPS, slippageBps) : null), [side, coin, lamports, slippageBps, client]);
   const sellQ = useMemo(() => (side === "sell" && !coin.migrated ? client.quoteSellTokens(coin.reserves, sellTokens, FEE_BPS, slippageBps) : null), [side, coin, sellTokens, slippageBps, client]);
-  // Graduated coins trade on Raydium; the estimate uses the pool price.
-  const poolEstimate = coin.migrated ? (side === "buy" ? (Number(lamports) / 1e9) * solUsd * 0.99 / coin.priceUsd : (Number(sellTokens) / 1e6) * coin.priceUsd * 0.99) : 0;
+  // Graduated coins trade on Raydium; the estimate uses the pool price, and a sale is quoted as it will book (raydiumSell).
+  const poolEstimate = coin.migrated ? (side === "buy" ? (Number(lamports) / 1e9) * solUsd * 0.99 / coin.priceUsd : raydiumSell(coin, Number(sellTokens) / 1e6).usd) : 0;
 
   const canTrade = side === "buy" ? lamports > 0n && (coin.migrated || buyQ !== null) : sellTokens > 0n && (coin.migrated || sellQ !== null);
 
@@ -51,26 +58,33 @@ export function TradePanel({ coin }: { coin: Coin }) {
       return;
     }
     setBusy(true);
+    setFailed(null);
+    let placed = false;
     try {
       if (isDemo) {
         const t = demoTrade(coin.mint, side, side === "buy" ? lamports : sellTokens, slippageBps);
         if (!t) throw new Error("Quote no longer fits the curve");
         sfx(side);
         toast({ tone: "good", title: `${side === "buy" ? "Bought" : "Sold"} ${compact(t.tokens)} $${coin.ticker}`, body: `${t.sol.toFixed(3)} SOL · demo trade, nothing was sent on-chain` });
+        placed = true;
       } else if (side === "buy" && buyQ) {
         const sig = await client.buy(new PublicKey(coin.mint), buyQ.tokens, buyQ.maxCost);
         sfx("buy");
         toast({ tone: "good", title: `Bought ${fmtTokens(buyQ.tokens)} $${coin.ticker}`, body: explorer("tx", sig) });
+        placed = true;
       } else if (side === "sell" && sellQ) {
         const sig = await client.sell(new PublicKey(coin.mint), sellQ.tokens, sellQ.minOut);
         sfx("sell");
         toast({ tone: "good", title: `Sold ${fmtTokens(sellQ.tokens)} $${coin.ticker}`, body: explorer("tx", sig) });
+        placed = true;
       }
     } catch (e) {
       toast({ tone: "bad", title: "Trade failed", body: (e as Error).message });
+      setFailed((e as Error).message);
     } finally {
       setBusy(false);
     }
+    if (placed) onPlaced?.();
   }
 
   const receive =
@@ -87,10 +101,10 @@ export function TradePanel({ coin }: { coin: Coin }) {
           : "-";
 
   return (
-    <div className="panel p-4">
+    <div className={framed ? "panel p-4" : undefined}>
       <div className="grid grid-cols-2 gap-1 rounded-xl border border-line bg-canvas-2 p-1" role="tablist" aria-label="Side">
         {(["buy", "sell"] as const).map((s) => (
-          <button key={s} role="tab" aria-selected={side === s} onClick={() => setSide(s)} className={cx("h-9 rounded-lg text-sm font-bold capitalize transition-colors", side === s ? (s === "buy" ? "metal-gold text-canvas" : "bg-candle-down text-cream shadow-[inset_0_0_0_1px_#B5503A]") : "text-muted hover:text-cream")}>
+          <button key={s} role="tab" aria-selected={side === s} onClick={() => setSide(s)} className={cx("h-9 rounded-lg text-sm font-bold capitalize transition-colors max-md:h-11 max-md:text-[15px]", side === s ? (s === "buy" ? "metal-gold text-canvas" : "bg-candle-down text-cream shadow-[inset_0_0_0_1px_#B5503A]") : "text-muted hover:text-cream")}>
             {s}
           </button>
         ))}
@@ -98,7 +112,7 @@ export function TradePanel({ coin }: { coin: Coin }) {
 
       <div className="mt-4 flex items-center justify-between text-xs text-muted">
         {side === "buy" ? (
-          <button onClick={() => setUnit((u) => (u === "SOL" ? "USD" : "SOL"))} className="inline-flex items-center gap-1 font-semibold text-cream hover:text-gold">
+          <button onClick={() => setUnit((u) => (u === "SOL" ? "USD" : "SOL"))} className="inline-flex items-center gap-1 font-semibold text-cream hover:text-gold max-md:h-11 max-md:text-[13px]">
             <ArrowDownUp className="h-3.5 w-3.5" /> Switch to {unit === "SOL" ? "USD" : "SOL"}
           </button>
         ) : (
@@ -108,7 +122,7 @@ export function TradePanel({ coin }: { coin: Coin }) {
         )}
         <Popover
           trigger={() => (
-            <button className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 font-semibold text-cream hover:border-line-accent">
+            <button className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 font-semibold text-cream hover:border-line-accent max-md:h-11 max-md:rounded-lg max-md:px-3 max-md:text-[13px]">
               <Settings2 className="h-3.5 w-3.5 text-copper" /> Slippage {slippage}%
             </button>
           )}
@@ -136,7 +150,7 @@ export function TradePanel({ coin }: { coin: Coin }) {
 
       {side === "buy" ? (
         <label className="input-shell mt-2 h-14 gap-2 rounded-xl px-3">
-          <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} className="num w-full bg-transparent text-2xl font-semibold text-cream outline-none" aria-label={`Amount in ${unit}`} />
+          <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} className="num w-full bg-transparent text-2xl font-semibold text-cream outline-none max-md:h-full" aria-label={`Amount in ${unit}`} />
           <span className="rounded-md bg-surface-2 px-2 py-1 text-xs font-bold text-cream">{unit}</span>
         </label>
       ) : (
@@ -191,6 +205,11 @@ export function TradePanel({ coin }: { coin: Coin }) {
         </p>
       )}
 
+      {!framed && failed && (
+        <p role="alert" className="mt-3 flex gap-2 rounded-lg border border-ember/40 bg-candle-down/20 p-2 text-xs text-ember">
+          <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden /> Trade failed: {failed}
+        </p>
+      )}
       <button onClick={place} disabled={busy || !canTrade} className="btn-gold mt-4 h-12 w-full text-[15px]">
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
         {!isDemo && !client.connected ? "Connect wallet to trade" : !isDemo && coin.migrated ? "Trade on Raydium" : "Place Trade"}
@@ -212,7 +231,7 @@ export function TradeStats({ coin }: { coin: Coin }) {
       <h3 className="text-[13px] font-semibold">Stats & audit · 24h</h3>
       <div className="mt-3">
         <RatioBar a={coin.buyVolUsd} b={coin.sellVolUsd} aLabel="Buy volume" bLabel="Sell volume" />
-        <div className="mt-2 flex justify-between text-xs">
+        <div className="mt-2 flex justify-between text-xs max-md:flex-wrap max-md:gap-x-3 max-md:gap-y-1">
           <span className="flex items-center gap-1.5 text-muted">
             <span className="h-2 w-2 rounded-full bg-gold" /> Buys <span className="num text-cream">{coin.buys24h.toLocaleString("en-US")}</span> · <span className="num text-cream">{usdCompact(coin.buyVolUsd)}</span>
           </span>

@@ -8,7 +8,7 @@ import { useMarket } from "../../state/Market";
 import { cx } from "../ui/primitives";
 
 export function SearchPalette() {
-  const { searchOpen, setSearchOpen } = useApp();
+  const { searchOpen, setSearchOpen, addSearchHistory } = useApp();
   const { coins, traders } = useMarket();
   const navigate = useNavigate();
   const [q, setQ] = useState("");
@@ -26,12 +26,14 @@ export function SearchPalette() {
   useEffect(() => {
     if (!searchOpen) setQ("");
   }, [searchOpen]);
+  // Desktop only: App doesn't mount it below md, where ⌘K goes to the /search page instead.
   if (!mounted) return null;
 
   const go = (i: number) => {
     const r = results[i];
     if (!r) return;
     setSearchOpen(false);
+    if (r.kind === "coin") addSearchHistory(r.c.mint);
     navigate(r.kind === "coin" ? `/coin/${r.c.mint}` : "/leaderboard");
   };
 

@@ -5,9 +5,11 @@ import { XLogo } from "../components/brand/Wordmark";
 import { CoinCallouts, EscrowGauge, HoldersTable, MigrationGauge, TradesTable } from "../components/coin/CoinWidgets";
 import { PriceChart } from "../components/coin/PriceChart";
 import { TradePanel, TradeStats } from "../components/coin/TradePanel";
+import { MobileTradeTerminal } from "../components/mobile/MobileTradeTerminal";
 import { ChangePill, cx, StageBadge, UnderlineTabs } from "../components/ui/primitives";
 import { CoinAvatar } from "../components/ui/visuals";
 import { explorer } from "../config";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { useNow } from "../hooks/useNow";
 import { age, compact, countdown, shortAddr, usdCompact } from "../lib/format";
 import type { Coin } from "../lib/types";
@@ -60,18 +62,32 @@ export function CoinPage() {
   const { byMint, solUsd } = useMarket();
   const { markViewed, watchlist, toggleWatch } = useApp();
   const now = useNow();
+  const isMobile = useIsMobile();
   const coin = byMint.get(mint);
   const [tab, setTab] = useState<"Holders" | "Trades" | "Callouts">("Trades");
   useEffect(() => {
     if (coin) markViewed(coin.mint);
   }, [coin?.mint]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  if (!coin && isMobile)
+    return (
+      <div className="flex flex-col items-center gap-4 px-4 py-16 text-center">
+        <h1 className="text-lg font-semibold">Coin not found</h1>
+        <p className="text-[13.5px] text-muted">No coin on Parabull has this address.</p>
+        <Link to="/explore" className="btn-gold h-11 px-5">
+          Explore coins
+        </Link>
+      </div>
+    );
   if (!coin)
     return (
       <div className="p-10 text-center text-muted">
         Coin not found. <Link to="/explore" className="text-gold">Explore coins</Link>
       </div>
     );
+
+  // Keyed by coin, so another coin starts on a fresh terminal (tab, expanded lists, chart).
+  if (isMobile) return <MobileTradeTerminal key={coin.mint} coin={coin} />;
 
   const watched = watchlist.has(coin.mint);
   return (

@@ -4,8 +4,10 @@ import { Link } from "react-router-dom";
 import { BullMark } from "../components/brand/BullMark";
 import { XLogo } from "../components/brand/Wordmark";
 import { ActiveLocks, CalloutCard, CoinCard, CoinRow } from "../components/coin/CoinViews";
+import { MobileBoard } from "../components/mobile/MobileBoard";
 import { ChangePill, cx, HotBadge, Panel, PanelHeader, Segmented, UnderlineTabs, Verified } from "../components/ui/primitives";
 import { CoinAvatar, Meter, Sparkline, TraderAvatar } from "../components/ui/visuals";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { useNow } from "../hooks/useNow";
 import { age, compact, price, usdCompact, usdSigned } from "../lib/format";
 import { GRADUATION_RAISE_LAMPORTS } from "../lib/protocol";
@@ -15,7 +17,9 @@ import { useApp } from "../state/AppState";
 import { kingOf, useMarket } from "../state/Market";
 
 export function Board() {
+  const isMobile = useIsMobile();
   const { layout } = useApp();
+  if (isMobile) return <MobileBoard />;
   return layout === "pro" ? <TerminalBoard /> : <ClassicBoard />;
 }
 
@@ -252,11 +256,10 @@ function TerminalBoard() {
 }
 
 function ClassicBoard() {
-  const { coins, callouts, traders, byMint } = useMarket();
+  const { coins, callouts, traders, byMint, following } = useMarket();
   const [feed, setFeed] = useState<"For you" | "Following">("For you");
   const [side, setSide] = useState<"Movers" | "Trending">("Movers");
   const [newOpen, setNewOpen] = useState(false);
-  const following = new Set(traders.slice(0, 8).map((t) => t.handle));
   const posts = feed === "For you" ? callouts : callouts.filter((c) => following.has(c.handle));
   const newest = [...coins].sort((a, b) => b.createdAt - a.createdAt).slice(0, 6);
   const right = side === "Movers" ? [...coins].sort((a, b) => b.change1h - a.change1h) : [...coins].sort((a, b) => b.vol24hUsd - a.vol24hUsd);

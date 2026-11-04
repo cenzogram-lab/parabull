@@ -30,7 +30,21 @@ interface AppState {
   dismissToast: (id: number) => void;
   searchOpen: boolean;
   setSearchOpen: (open: boolean) => void;
+  /** Mints picked from search, newest first (max 12, persisted). */
+  searchHistory: string[];
+  addSearchHistory: (mint: string) => void;
+  removeSearchHistory: (mint: string) => void;
+  clearSearchHistory: () => void;
+  /** Edit the recently viewed list (`recent`). */
+  removeRecent: (mint: string) => void;
+  clearRecent: () => void;
+  /** Holder-reward epochs a wallet (base58) has claimed this visit, shared by the claim panel, notifications and Portfolio; every wallet starts with #4 and #5, as the claim panel always has. */
+  claimedFor: (wallet: string) => ReadonlySet<number>;
+  markClaimed: (wallet: string, epoch: number) => void;
 }
+
+/** What every wallet starts with: the claim panel has always shown epochs #4 and #5 as claimed. */
+const STARTING_CLAIMS: ReadonlySet<number> = new Set([4, 5]);
 
 const Ctx = createContext<AppState | null>(null);
 
@@ -42,6 +56,11 @@ function load<T>(key: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+/** A persisted list of mints; anything malformed in storage reads as empty. */
+function loadMints(key: string): string[] {
+  const v = load<unknown>(key, []);
+  return Array.isArray(v) ? v.filter((m): m is string => typeof m === "string").slice(0, 12) : [];
 }
 function save(key: string, value: unknown) {
   try {
@@ -56,10 +75,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState<boolean>(() => load("collapsed", true));
   const [muted, setMuted] = useState<boolean>(() => load("muted", true));
   const [quickInfo, setQuickInfo] = useState<QuickInfo>("traders");
-  const [recent, setRecent] = useState<string[]>(() => load("recent", []));
+  const [recent, setRecent] = useState<string[]>(() => loadMints("recent"));
   const [watch, setWatch] = useState<string[]>(() => load("watchlist", []));
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchHistory, setSearchHistory] = useState<string[]>(() => loadMints("searchHistory"));
+  const [claims, setClaims] = useState<ReadonlyMap<string, ReadonlySet<number>>>(() => new Map());
   const nextId = useRef(1);
 
   useEffect(() => save("layout", layout), [layout]);
@@ -67,6 +88,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => save("muted", muted), [muted]);
   useEffect(() => save("recent", recent), [recent]);
   useEffect(() => save("watchlist", watch), [watch]);
+  useEffect(() => save("searchHistory", searchHistory), [searchHistory]);
 
   const dismissToast = useCallback((id: number) => setToasts((ts) => ts.filter((t) => t.id !== id)), []);
   const toast = useCallback(
@@ -78,6 +100,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [dismissToast],
   );
   const sfx = useCallback((kind: "buy" | "sell" | "launch") => !muted && playSfx(kind), [muted]);
+  const addSearchHistory = useCallback((mint: string) => setSearchHistory((h) => [mint, ...h.filter((m) => m !== mint)].slice(0, 12)), []);
+  const removeSearchHistory = useCallback((mint: string) => setSearchHistory((h) => h.filter((m) => m !== mint)), []);
+  const clearSearchHistory = useCallback(() => setSearchHistory([]), []);
+  const removeRecent = useCallback((mint: string) => setRecent((r) => r.filter((m) => m !== mint)), []);
+  const clearRecent = useCallback(() => setRecent([]), []);
+  const claimedFor = useCallback((wallet: string) => claims.get(wallet) ?? STARTING_CLAIMS, [claims]);
+  const markClaimed = useCallback((wallet: string, epoch: number) => setClaims((m) => new Map(m).set(wallet, new Set(m.get(wallet) ?? STARTING_CLAIMS).add(epoch))), []);
 
   const value = useMemo<AppState>(
     () => ({
@@ -99,8 +128,16 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       dismissToast,
       searchOpen,
       setSearchOpen,
+      searchHistory,
+      addSearchHistory,
+      removeSearchHistory,
+      clearSearchHistory,
+      removeRecent,
+      clearRecent,
+      claimedFor,
+      markClaimed,
     }),
-    [layout, collapsed, muted, sfx, quickInfo, recent, watch, toasts, toast, dismissToast, searchOpen],
+    [layout, collapsed, muted, sfx, quickInfo, recent, watch, toasts, toast, dismissToast, searchOpen, searchHistory, addSearchHistory, removeSearchHistory, clearSearchHistory, removeRecent, clearRecent, claimedFor, markClaimed],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
