@@ -34,13 +34,15 @@ function EpochRow({ e, now }: { e: RewardEpoch; now: number }) {
       <span className="shrink-0 text-right">
         <span className="num block text-[13.5px] font-semibold leading-5 text-cream">{sol(BigInt(e.you.amount), 4)}</span>
         <span className="num flex items-center justify-end gap-1 text-[11.5px] leading-4 text-muted">
-          {open ? (
+          {!open ? (
+            "Expired"
+          ) : e.claimed ? (
+            "Claimed"
+          ) : (
             <>
               <Clock className="h-3 w-3" aria-hidden />
               {daysLeft(e.expiresAt, now)}d left
             </>
-          ) : (
-            "Expired"
           )}
         </span>
       </span>
@@ -103,7 +105,7 @@ export function RewardsPanel({ summary, solUsd }: { summary: RewardSummary | und
         <EmptyNote>This wallet wasn't in any holder snapshot yet. Hold $PARABULL through a weekly snapshot to earn a share of the fees.</EmptyNote>
       )}
       <p className="mt-3 text-[11.5px] leading-4 text-muted">
-        {isDemo ? "Demo epochs: real Merkle trees over simulated $PARABULL holders. " : ""}Each proof is checked in your browser against the epoch's root before you claim.
+        {isDemo ? "Demo epochs: real Merkle trees over simulated $PARABULL holders. " : "Demo epochs until the indexer API is connected. "}Each proof is checked in your browser against the epoch's root before you claim.
       </p>
     </div>
   );

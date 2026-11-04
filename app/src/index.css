@@ -243,6 +243,17 @@
 .wallet-adapter-modal-button-close {
   background: #231d19 !important;
 }
+/* Phones: the picker's wallet rows and close button get 44px targets (the rule above sets 36px buttons everywhere). */
+@media (max-width: 767.98px) {
+  .wallet-adapter-modal-list .wallet-adapter-button {
+    height: 48px !important;
+    line-height: 48px !important;
+  }
+  /* A 14px icon plus 15px a side: 44x44. */
+  .wallet-adapter-modal-button-close {
+    padding: 15px !important;
+  }
+}
 
 /*
  * Mobile touch target: `.touch-target` grows the hit area to at least 44x44

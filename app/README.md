@@ -50,8 +50,9 @@ render, so there's no flash), and shared components change only through
   sheet, a detailed/compact row toggle (saved as `parabull:mobileRows`), and
   one card per coin with volume (V), market cap (MC), SOL raised toward the
   85 SOL graduation (F) with a mini bar, trades (TX) and the launch-lock
-  badges. While you touch or scroll, rows keep their order; the live demo's
-  re-ranking lands once the list is still.
+  badges. While you touch or scroll, rows keep their order (a coin that
+  stops qualifying keeps its place too); the live demo's re-ranking lands
+  once the list is still.
 - **Leaderboard.** Traders / Squads / Rewards, an info card that opens the
   best callouts, the top-4 podium, 1D / 1W / 1M with a Profit / Volume sort,
   your pinned rank (it links to the portfolio) and the ranking with Follow
@@ -68,17 +69,28 @@ render, so there's no flash), and shared components change only through
   `BottomSheet` (`src/components/mobile/MobileUi.tsx`, with the tab rows,
   44px icon buttons, Follow toggle and section headers). Toasts show under
   the header, above any sheet.
-- **Navigation (both layouts).** A page you open starts at the top; Back
-  and Forward keep their scroll position, and the launch modal leaves the
-  page under it alone.
+- **Navigation.** On a phone a page you open starts at the top, and links
+  to `/parabull-token#claim` land on the claim panel; desktop keeps the
+  router's scroll behavior, as before. Back and Forward keep their scroll
+  position, and the launch modal leaves the page under it alone.
+- **Landscape.** On a screen under 480px tall the tab rows and the Buy /
+  Sell and Deposit / Receive bars stay in the page instead of pinning. A
+  notched phone in landscape gets the desktop layout, padded clear of the
+  notch.
 
 **Demo data on the phone screens:** the portfolio's cash starts at 1.84 SOL
-and follows your demo trades; the six holdings, their cost, the trade notes,
-closed positions, replies, equity curve and leaderboard ranks are seeded.
-The 24h change compares today with what you held a day ago, so a demo buy
-only counts for how its price has moved since. Follows (the eight top
-traders to start) are shared by the leaderboard, callouts, the Following
-feed and notifications, for the visit only.
+and follows your demo trades (they aren't capped at it, so a bigger buy
+takes it below zero); the six holdings, their cost, the trade notes, closed
+positions (what you sell this visit is added on top), replies, equity curve
+and leaderboard ranks are seeded. The desktop info strip's Open positions
+keep their original flat cost (+61.3% each), so their PnL differs from the
+portfolio's. The 24h change compares today with what you held a day ago: a
+holding in a coin launched within the last day counts from what you paid,
+and a demo buy only counts for how its price has moved since. On the
+leaderboard your Rewards figure is what your reward epochs paid in the
+period, and a figure that would make the listed ranking places you in it.
+Follows (the eight top traders to start) and claimed reward epochs are
+shared by every view that shows them, for the visit only.
 
 Check a change with `npm run build`, then `npm run audit:mobile` (no
 sideways scrolling, every touch target at least 44x44px, no console errors,
@@ -110,9 +122,12 @@ Set these in `app/.env.local` (see `src/config.ts`):
   registries (lock pre-check).
 
 **Still demo data in both modes:** coin lists, candles, trades, holders,
-leaderboards, streams and protocol totals. These need the indexer API in
+leaderboards, streams, protocol totals and the portfolio (balance,
+positions, PnL, closed positions and reward epochs, even for a connected
+wallet). These need the indexer API in
 [`docs/BACKEND_SPEC.md`](../docs/BACKEND_SPEC.md); the UI labels them
-(header pill and footer).
+(header pill and footer; on a phone, the footnote, a Demo tag by the
+header's balance and the portfolio's Demo chip).
 
 ## Where the logic comes from
 

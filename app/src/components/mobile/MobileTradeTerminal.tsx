@@ -4,7 +4,7 @@
  * chart, the curve and listing gauges, 24h stats, then Trades / Holders /
  * Callouts, and the Buy / Sell bar that opens the trade sheet.
  */
-import { Check, Copy, ExternalLink, Globe, Lock, Send, Star } from "lucide-react";
+import { Check, CircleAlert, Copy, ExternalLink, Globe, Lock, Send, Star } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { explorer } from "../../config";
 import { useNow } from "../../hooks/useNow";
@@ -56,32 +56,45 @@ function Blurb({ text }: { text: string }) {
   );
 }
 
-/** Contract address pill: tap to copy; it confirms in place for a moment. */
+/**
+ * Contract address pill: tap to copy; it confirms in place for a moment, and only once the clipboard took it. If it
+ * didn't (blocked, or no clipboard on a plain-http origin), it says so and a toast shows the full address instead.
+ */
 function CaPill({ mint }: { mint: string }) {
-  const [done, setDone] = useState(false);
+  const { toast } = useApp();
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   const timer = useRef(0);
   useEffect(() => () => window.clearTimeout(timer.current), []);
-  const copy = () => {
-    void navigator.clipboard?.writeText(mint).catch(() => undefined);
-    setDone(true);
+  const copy = async () => {
+    let ok = false;
+    try {
+      // Throws too when navigator.clipboard is missing.
+      await navigator.clipboard.writeText(mint);
+      ok = true;
+    } catch {
+      toast({ tone: "info", title: "Couldn't copy the contract address", body: mint });
+    }
+    setState(ok ? "copied" : "failed");
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setDone(false), 1400);
+    timer.current = window.setTimeout(() => setState("idle"), ok ? 1400 : 2400);
   };
   return (
     <button
       type="button"
       onClick={copy}
-      aria-label={done ? "Contract address copied" : `Copy contract address ${mint}`}
+      aria-label={state === "copied" ? "Contract address copied" : state === "failed" ? "Couldn't copy the contract address" : `Copy contract address ${mint}`}
       className="flex h-11 min-w-0 flex-1 items-center justify-between gap-2 rounded-full border border-line bg-canvas-2 pl-4 pr-3.5 font-mono text-[12.5px] transition-colors duration-100 ease-out active:border-line-accent"
     >
-      {done ? (
+      {state === "copied" ? (
         <span className="font-sans text-[13px] font-semibold text-gold">Copied</span>
+      ) : state === "failed" ? (
+        <span className="truncate font-sans text-[13px] font-semibold text-ember">Couldn't copy</span>
       ) : (
         <span className="min-w-0 truncate">
           <span className="text-muted">CA</span> <span className="text-cream">{shortAddr(mint, 5)}</span>
         </span>
       )}
-      {done ? <Check className="h-4 w-4 shrink-0 text-gold" aria-hidden /> : <Copy className="h-4 w-4 shrink-0 text-muted" aria-hidden />}
+      {state === "copied" ? <Check className="h-4 w-4 shrink-0 text-gold" aria-hidden /> : state === "failed" ? <CircleAlert className="h-4 w-4 shrink-0 text-ember" aria-hidden /> : <Copy className="h-4 w-4 shrink-0 text-muted" aria-hidden />}
     </button>
   );
 }
@@ -204,7 +217,7 @@ export function MobileTradeTerminal({ coin }: { coin: Coin }) {
         </section>
 
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line">
-          <Metric label="Market cap" value={usdCompact(coin.mcapUsd)} sub={`${compact(coin.mcapUsd / solUsd)} SOL`} change={<ChangePill value={coin.change24h} size="xs" />} />
+          <Metric label="Market cap" value={usdCompact(coin.mcapUsd)} sub={`${compact(coin.mcapUsd / solUsd)} SOL`} change={<ChangePill value={coin.change24h} size="xs" soft />} />
           <Metric label="24h volume" value={usdCompact(coin.vol24hUsd)} sub={`${(coin.buys24h + coin.sells24h).toLocaleString("en-US")} trades`} />
           <Metric label="Holders" value={coin.holders.toLocaleString("en-US")} sub={`${coin.traders24h.toLocaleString("en-US")} traders today`} />
           <Metric label="All-time high" value={usdCompact(coin.athUsd)} sub={`${((coin.mcapUsd / coin.athUsd) * 100).toFixed(0)}% of ATH`} />

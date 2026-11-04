@@ -38,6 +38,9 @@ interface AppState {
   /** Edit the recently viewed list (`recent`). */
   removeRecent: (mint: string) => void;
   clearRecent: () => void;
+  /** Holder-reward epochs claimed this visit (the demo wallet starts with #4 and #5), shared by the claim panel, notifications and Portfolio. */
+  claimedEpochs: ReadonlySet<number>;
+  markClaimed: (epoch: number) => void;
 }
 
 const Ctx = createContext<AppState | null>(null);
@@ -69,11 +72,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState<boolean>(() => load("collapsed", true));
   const [muted, setMuted] = useState<boolean>(() => load("muted", true));
   const [quickInfo, setQuickInfo] = useState<QuickInfo>("traders");
-  const [recent, setRecent] = useState<string[]>(() => load("recent", []));
+  const [recent, setRecent] = useState<string[]>(() => loadMints("recent"));
   const [watch, setWatch] = useState<string[]>(() => load("watchlist", []));
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchHistory, setSearchHistory] = useState<string[]>(() => loadMints("searchHistory"));
+  const [claimedEpochs, setClaimedEpochs] = useState<ReadonlySet<number>>(() => new Set([4, 5]));
   const nextId = useRef(1);
 
   useEffect(() => save("layout", layout), [layout]);
@@ -98,6 +102,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const clearSearchHistory = useCallback(() => setSearchHistory([]), []);
   const removeRecent = useCallback((mint: string) => setRecent((r) => r.filter((m) => m !== mint)), []);
   const clearRecent = useCallback(() => setRecent([]), []);
+  const markClaimed = useCallback((epoch: number) => setClaimedEpochs((s) => new Set(s).add(epoch)), []);
 
   const value = useMemo<AppState>(
     () => ({
@@ -125,8 +130,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       clearSearchHistory,
       removeRecent,
       clearRecent,
+      claimedEpochs,
+      markClaimed,
     }),
-    [layout, collapsed, muted, sfx, quickInfo, recent, watch, toasts, toast, dismissToast, searchOpen, searchHistory, addSearchHistory, removeSearchHistory, clearSearchHistory, removeRecent, clearRecent],
+    [layout, collapsed, muted, sfx, quickInfo, recent, watch, toasts, toast, dismissToast, searchOpen, searchHistory, addSearchHistory, removeSearchHistory, clearSearchHistory, removeRecent, clearRecent, claimedEpochs, markClaimed],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -48,35 +48,38 @@ function useMobileSearchRoute(isMobile: boolean) {
 }
 
 /**
- * A page you navigate to starts at the top: the router keeps the window's scroll offset, so a coin opened from deep in a
- * long list would land mid-page. Back and Forward (POP, the first load included) keep the position the browser restores,
- * opening the launch modal leaves the page under it alone, a new query on the same page (search's ?q=) doesn't move it,
- * and a #hash is left to its page (the $PARABULL claim panel). Out here, not inside the routes: `<Routes location>` makes
- * every navigation report POP to the components it renders.
+ * On a phone, a page you navigate to starts at the top: the router keeps the window's scroll offset, so a coin opened
+ * from deep in a long list would land mid-page. Back and Forward (POP, the first load included) keep the position the
+ * browser restores, opening the launch modal leaves the page under it alone, a new query on the same page (search's ?q=)
+ * doesn't move it, and a #hash is left to its page (the $PARABULL claim panel). Desktop keeps the router's behavior.
+ * Out here, not inside the routes: `<Routes location>` makes every navigation report POP to the components it renders.
  */
-function useScrollToTop(location: Location, background: Location | undefined) {
+function useScrollToTop(location: Location, background: Location | undefined, isMobile: boolean) {
   const type = useNavigationType();
   const lastPath = useRef(location.pathname);
   useLayoutEffect(() => {
     const from = lastPath.current;
     lastPath.current = location.pathname;
-    if (type === NavigationType.Pop || background || location.hash || from === location.pathname) return;
+    if (!isMobile || type === NavigationType.Pop || background || location.hash || from === location.pathname) return;
     window.scrollTo(0, 0);
-  }, [location, type, background]);
+  }, [location, type, background, isMobile]);
 }
 
 /**
  * Desktop (md and up): dock, header, info strip and footer around the page.
  * Below md they're hidden and the mobile header, floating nav and create
  * button take over; main's bottom padding keeps content clear of the nav
- * (and of the create button where it shows).
+ * (and of the create button where it shows). The side padding keeps the
+ * layout clear of a notch: viewport-fit=cover lets the page run under it,
+ * and a notched phone in landscape gets the desktop layout (env() is 0 in
+ * desktop browsers).
  */
 function Shell() {
   const { pathname } = useLocation();
   const isMobile = useIsMobile();
   useMobileSearchRoute(isMobile);
   return (
-    <div className="flex min-h-screen bg-canvas">
+    <div className="flex min-h-screen bg-canvas pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
       <Dock />
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileHeader />
@@ -101,7 +104,8 @@ function Shell() {
 function AppRoutes() {
   const location = useLocation();
   const background = (location.state as { background?: Location } | null)?.background;
-  useScrollToTop(location, background);
+  const isMobile = useIsMobile();
+  useScrollToTop(location, background, isMobile);
   return (
     <>
       <Routes location={background ?? location}>

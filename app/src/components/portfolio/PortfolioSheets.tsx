@@ -26,7 +26,7 @@ function Sheet({ open, onClose, title, children }: { open: boolean; onClose: () 
       </BottomSheet>
     );
   return (
-    <Modal open={open} onClose={onClose} label={title} className="max-w-md">
+    <Modal open={open} onClose={onClose} label={title} className="max-w-md" manageFocus>
       <div className="px-6 pb-6 pt-5">
         <h2 className="pr-10 text-[17px] font-semibold leading-7 text-cream">{title}</h2>
         <div className="mt-4">{children}</div>
@@ -47,11 +47,12 @@ function Tile({ label, value, foot }: { label: string; value: ReactNode; foot?: 
   );
 }
 
-const DemoNote = ({ children }: { children: string }) => (isDemo ? <p className="mt-3 text-center text-[11.5px] leading-4 text-muted">{children}</p> : null);
+// The portfolio is seeded in both modes (chain mode has no indexer yet), so its figures always say so.
+const DemoNote = ({ children }: { children: string }) => <p className="mt-3 text-center text-[11.5px] leading-4 text-muted">{children}</p>;
 
 /** Win rate, realized and unrealized PnL, open positions, the best coin and the trade count. */
 export function StatsSheet({ open, onClose, p }: { open: boolean; onClose: () => void; p: Portfolio }) {
-  const { byMint, liveTrades } = useMarket();
+  const { byMint, demoTradeCount } = useMarket();
   const stats = useMemo(() => {
     const wins = p.closed.filter((c) => c.pnlUsd > 0).length;
     const realized = p.closed.reduce((n, c) => n + c.pnlUsd, 0);
@@ -67,7 +68,7 @@ export function StatsSheet({ open, onClose, p }: { open: boolean; onClose: () =>
     return { wins, realized, unrealized, best };
   }, [p.closed, p.holdings, byMint]);
   // A seeded history plus the demo trades you made this visit.
-  const trades = profileCounts(p.address).trades + liveTrades.filter((t) => t.handle === "you").length;
+  const trades = profileCounts(p.address).trades + demoTradeCount;
   const closedCount = p.closed.length;
   const best = stats.best;
 
@@ -101,12 +102,12 @@ export function StatsSheet({ open, onClose, p }: { open: boolean; onClose: () =>
           <span className="shrink-0 text-right">
             <span className={cx("num block text-[15px] font-semibold leading-5", tone(best.pnl))}>{usdSigned(best.pnl)}</span>
             <span className="mt-0.5 flex justify-end">
-              <ChangePill value={best.pnlPct} size="xs" />
+              <ChangePill value={best.pnlPct} size="xs" soft />
             </span>
           </span>
         </Link>
       )}
-      <DemoNote>Demo stats from the simulated market and your demo trades.</DemoNote>
+      <DemoNote>{isDemo ? "Demo stats from the simulated market and your demo trades." : "Demo stats from the simulated market, until the indexer API is connected."}</DemoNote>
     </Sheet>
   );
 }
@@ -148,10 +149,12 @@ export function BalanceSheet({ open, onClose, p }: { open: boolean; onClose: () 
         <Line label="Net equity" value={usd(p.equityUsd)} strong />
       </div>
       <div className="mt-4">
-        <SplitBar holdings={holdingsUsd} cash={p.cashUsd} />
+        {/* An overdrawn demo balance (below zero) shows as no cash. */}
+        <SplitBar holdings={holdingsUsd} cash={Math.max(0, p.cashUsd)} />
       </div>
       <p className="mt-3 text-[12.5px] leading-[18px] text-muted">
-        SOL is valued at <span className="num text-cream">${solUsd.toFixed(2)}</span>.{isDemo ? " Demo cash: your demo buys spend it and sells pay into it." : ""}
+        SOL is valued at <span className="num text-cream">${solUsd.toFixed(2)}</span>.
+        {isDemo ? " Demo cash: your demo buys spend it and sells pay into it; a buy bigger than it takes it below zero." : " These are demo figures, not your wallet's balance, until the indexer API is connected."}
       </p>
     </Sheet>
   );
@@ -207,7 +210,9 @@ export function ReceiveSheet({ open, onClose, address, connected, onCopy, onConn
             type="button"
             onClick={() => {
               onClose();
-              onConnect();
+              // After the sheet has let go of the page's scroll lock: the wallet modal saves the body's overflow as it
+              // opens and puts it back when it closes, so opening it in the same commit would restore "hidden".
+              window.setTimeout(onConnect, 0);
             }}
             className="btn-gold mt-3 h-11 w-full rounded-xl text-[14.5px]"
           >
@@ -222,9 +227,10 @@ export function ReceiveSheet({ open, onClose, address, connected, onCopy, onConn
 
 /** The connected wallet, with copy, change and disconnect; or what the demo wallet is, with Connect. */
 export function WalletSheet({ open, onClose, address, connected, walletName, walletIcon, onCopy, onConnect, onDisconnect }: { open: boolean; onClose: () => void; address: string; connected: boolean; walletName?: string; walletIcon?: string; onCopy: () => Promise<boolean>; onConnect: () => void; onDisconnect: () => void }) {
+  // As in ReceiveSheet: the follow-up (the wallet modal) runs once the sheet has released the scroll lock.
   const then = (f: () => void) => () => {
     onClose();
-    f();
+    window.setTimeout(f, 0);
   };
   return (
     <Sheet open={open} onClose={onClose} title="Wallet">

@@ -269,7 +269,8 @@ export function Podium({ entries, label, word, onOpen, className }: { entries: E
               <span className="truncate text-[16px] font-semibold leading-5 text-cream">{first.name}</span>
               {first.verified && <BadgeCheck className="h-4 w-4 shrink-0 text-gold" aria-hidden />}
             </span>
-            <span className={cx("mt-0.5 block truncate text-[26px] font-semibold leading-8 tracking-tight", valueTone(first))}>{fmtUsd(first.value, first.money)}</span>
+            {/* One size down under 340px, so a six-figure value keeps its K. */}
+            <span className={cx("mt-0.5 block truncate text-[24px] font-semibold leading-8 tracking-tight min-[340px]:text-[26px]", valueTone(first))}>{fmtUsd(first.value, first.money)}</span>
             <span className="block truncate text-[12px] leading-4 text-muted">{first.detail}</span>
           </span>
         </span>

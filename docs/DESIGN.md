@@ -167,7 +167,9 @@ views switch with `useIsMobile()`.
   - **Left capsule:** a 32px round avatar with a copper ring, the equity in
     cream, and the 24h PnL badge (see Gains and losses). The wallet's own
     avatar uses the bronze identicon pairs only (gold, rose-bronze, amber,
-    copper), since it sits in the header on every page.
+    copper), since it sits in the header on every page. In chain mode a
+    small rose-bronze "Demo" tag follows the equity: the portfolio is still
+    demo data there.
   - **Right:** the Deposit pill (`bg-gold`, `hover:bg-bronze`, obsidian
     `text-xs font-bold`, `rounded-full px-3.5 py-1.5`, `active:scale-95`,
     100ms) and the 44px notification bell.
@@ -204,6 +206,10 @@ views switch with `useIsMobile()`.
   link or button; its secondary action (a Follow toggle) sits beside it, and
   decorative icons inside it are `aria-hidden`. Only inline links inside a
   sentence may sit in a `[data-touch-exempt]` element.
+- Below 380px the ranking rows' Follow pill shrinks to its icon (a plus, or a
+  check once followed; `FollowButton narrow`), so names keep their room.
+- The wallet picker (wallet-adapter) gets 48px rows and a 44px close button
+  on phones, in `index.css`.
 - `npm run audit:mobile` checks overflow, target sizes and console errors.
 
 ### Safe areas and bars
@@ -216,6 +222,11 @@ views switch with `useIsMobile()`.
   - `<main>` pads its bottom by `7rem`, or `9rem` where the create button
     shows, plus the inset;
   - sheets pad their bottom by the inset.
+- A notched phone in landscape is at least 812px wide, so it gets the
+  desktop layout, edge to edge. The shell pads its sides by
+  `env(safe-area-inset-left/right)`, the dock and footer clear the bottom
+  inset, and desktop toasts the right one. `env()` is 0 in desktop browsers,
+  so nothing moves there.
 - **Page bars:** the search field, Buy / Sell and Deposit / Receive.
   - Buy / Sell and Deposit / Receive are `sticky`, not `fixed`: they dock
     above the nav while the page scrolls and come to rest after the last
@@ -225,6 +236,10 @@ views switch with `useIsMobile()`.
     (`useKeyboardInset`); its page pads the bottom so the last row clears it.
 - Nothing is ever hidden behind the header, the nav or a bar: lists end
   above them when scrolled to the bottom.
+- **Short screens** (under 480px tall: a phone in landscape). The tab rows
+  and the Buy / Sell and Deposit / Receive bars stay in the page instead of
+  pinning, and the coin chart shrinks to `calc(100dvh - 12rem)`, so the
+  content keeps room between the header and the nav.
 
 ### Layers
 
@@ -248,10 +263,16 @@ views switch with `useIsMobile()`.
     body. It slides up from `translate-y-full` over 150ms ease-out, and the
     exit plays in reverse before it unmounts (`usePresence`).
   - Esc, a backdrop tap, the close button or dragging the handle down 80px
-    closes it. Focus moves into the sheet and back to the trigger.
+    closes it. Esc closes the top layer first: a popover open inside the
+    sheet (Slippage) or the wallet picker over it.
+  - Focus moves into the sheet and back to the trigger, unless something
+    else took it meanwhile (search's field after ⌘K).
   - It doesn't use a portal, so render it at the page root: an ancestor with
     a transform, filter or backdrop blur (the header, a sticky tab row) would
     trap its fixed overlay.
+- **`Modal`** with `manageFocus` (the phone launch modal and the Portfolio
+  dialogs) moves focus in, keeps Tab inside and gives focus back the same
+  way. The desktop launch modal doesn't opt in, so it behaves as before.
 - Colors, borders and fills change over 100ms ease-out; primary buttons press
   in with `active:scale-[0.98]` (the Deposit pill uses `scale-95`).
   `prefers-reduced-motion` collapses all of it.
@@ -264,6 +285,9 @@ views switch with `useIsMobile()`.
   Bronze-Red, `#8B3A2B`) with a down arrow (`-$56.11 ↓ 7.8%`). `#8B3A2B` is
   only ever the tint or a fill: as text it's 2.55:1 on canvas, below the
   4.5:1 minimum.
+- On cards and wells (`bg-surface`, `bg-canvas-2`) the loss tint is `/15`
+  (`ChangePill soft`): ember stays at 4.6:1 or better there, where `/30`
+  gives 4.15:1. The phone's pills on cards use it; desktop's keep `/30`.
 - Never green, and never color alone: every change has a sign and an arrow.
 
 ### Type

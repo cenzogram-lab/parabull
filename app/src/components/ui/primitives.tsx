@@ -89,12 +89,15 @@ export function UnderlineTabs<T extends string>({ options, value, onChange, size
   );
 }
 
-/** Signed change with an arrow, so direction never relies on color alone. */
-export function ChangePill({ value, size = "sm" }: { value: number; size?: "xs" | "sm" }) {
+/**
+ * Signed change with an arrow, so direction never relies on color alone. `soft` lightens the loss tint for pills on
+ * cards and wells (`bg-surface`, `bg-canvas-2`), where the /30 tint would take ember below 4.5:1.
+ */
+export function ChangePill({ value, size = "sm", soft = false }: { value: number; size?: "xs" | "sm"; soft?: boolean }) {
   const up = value >= 0;
   const Icon = up ? ArrowUp : ArrowDown;
   return (
-    <span className={cx("num inline-flex items-center gap-0.5 rounded-md font-semibold", size === "xs" ? "px-1.5 py-0.5 text-[11px]" : "px-2 py-0.5 text-xs", up ? "bg-gold/10 text-gold" : "bg-candle-down/30 text-ember")}>
+    <span className={cx("num inline-flex items-center gap-0.5 rounded-md font-semibold", size === "xs" ? "px-1.5 py-0.5 text-[11px]" : "px-2 py-0.5 text-xs", up ? "bg-gold/10 text-gold" : soft ? "bg-candle-down/15 text-ember" : "bg-candle-down/30 text-ember")}>
       <Icon className="h-3 w-3" strokeWidth={2.5} aria-hidden />
       {pct(Math.abs(value), 1, false)}
     </span>
@@ -170,7 +173,8 @@ export function Popover({ trigger, children, align = "right", className }: { tri
     <div ref={ref} className="relative">
       <div onClick={() => setOpen((o) => !o)}>{trigger(open)}</div>
       {mounted && (
-        <div className={cx("panel-raised absolute top-full z-40 mt-2 p-3", align === "right" ? "right-0 origin-top-right" : "left-0 origin-top-left", dialogClass(shown), className)}>
+        // data-popover-open: a BottomSheet around it leaves the first Esc to the popover.
+        <div data-popover-open={open ? "" : undefined} className={cx("panel-raised absolute top-full z-40 mt-2 p-3", align === "right" ? "right-0 origin-top-right" : "left-0 origin-top-left", dialogClass(shown), className)}>
           {children(() => setOpen(false))}
         </div>
       )}

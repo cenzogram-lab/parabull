@@ -3,10 +3,11 @@
  * 44px icon buttons, the Follow toggle, section headers and the bottom sheet. Everything here
  * keeps touch targets at 44x44px or larger.
  */
-import { Check, ChevronRight, Plus, X } from "lucide-react";
+import { Check, ChevronRight, Plus, Sprout, X } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { backdropClass, usePresence } from "../../hooks/usePresence";
+import { age } from "../../lib/format";
 import { cx } from "../ui/primitives";
 
 /** A tab is its value, or a value with a custom label (icon + text); icon-only labels need `ariaLabel`. */
@@ -70,7 +71,8 @@ export function MobileTabs<T extends string>({ options, value, onChange, label, 
   }, [value]);
   const mask = fade[0] || fade[1] ? `linear-gradient(90deg, ${fade[0] ? "transparent, #000 24px" : "#000"}, ${fade[1] ? "#000 calc(100% - 24px), transparent" : "#000"})` : undefined;
   return (
-    <div className={cx("flex items-center gap-1 border-b border-line", sticky && "sticky top-14 z-30 bg-canvas/95 px-4 backdrop-blur-md", className)}>
+    // On a short screen (a phone in landscape) the row stays in the page, so the header and nav leave room for content.
+    <div className={cx("flex items-center gap-1 border-b border-line", sticky && "sticky top-14 z-30 bg-canvas/95 px-4 backdrop-blur-md max-md:[@media(max-height:480px)]:static", className)}>
       <div
         ref={scroller}
         role="tablist"
@@ -160,9 +162,12 @@ export function IconButton({ label, onClick, children, className, type = "button
 /**
  * Follow toggle. `sm`: a 32px gold outline pill with a 44px hit area
  * (`touch-target`) that turns into a quiet "Following". `lg`: a full-width
- * 44px button for sheets, solid gold until followed.
+ * 44px button for sheets, solid gold until followed. `narrow` (sm only):
+ * below 380px the pill shrinks to its icon (a plus, or a check once
+ * followed), so a ranking row's name keeps its room.
  */
-export function FollowButton({ name, on, onToggle, size = "sm", className }: { name: string; on: boolean; onToggle: () => void; size?: "sm" | "lg"; className?: string }) {
+export function FollowButton({ name, on, onToggle, size = "sm", narrow = false, className }: { name: string; on: boolean; onToggle: () => void; size?: "sm" | "lg"; narrow?: boolean; className?: string }) {
+  const compact = size === "sm" && narrow;
   return (
     <button
       type="button"
@@ -173,6 +178,7 @@ export function FollowButton({ name, on, onToggle, size = "sm", className }: { n
         size === "sm"
           ? cx(
               "touch-target relative inline-flex h-8 w-16 shrink-0 items-center justify-center gap-0.5 rounded-full border text-[12px] font-semibold transition-[color,background-color,border-color,transform] duration-100 ease-out active:scale-[0.98]",
+              compact && "max-[379px]:w-8",
               on ? "border-line bg-surface-2 text-muted" : "border-gold/55 bg-gold/10 text-gold active:bg-gold/20",
             )
           : cx("h-11 w-full rounded-xl text-[14px]", on ? "btn-ghost" : "btn-gold"),
@@ -180,9 +186,25 @@ export function FollowButton({ name, on, onToggle, size = "sm", className }: { n
       )}
     >
       {size === "lg" && on && <Check className="h-4 w-4 text-gold" strokeWidth={2.5} aria-hidden />}
+      {compact && on && <Check className="h-3.5 w-3.5 min-[380px]:hidden" strokeWidth={2.5} aria-hidden />}
       {!on && <Plus className={size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4"} strokeWidth={2.5} aria-hidden />}
-      {on ? "Following" : "Follow"}
+      {/* The aria-label names the button, so the narrow icon-only pill reads the same. */}
+      {compact ? <span className="max-[379px]:hidden">{on ? "Following" : "Follow"}</span> : on ? "Following" : "Follow"}
     </button>
+  );
+}
+
+/** AgeTag's sprout and "6h ago", except that phones under 375px drop the " ago" so the ticker beside it keeps its room. */
+export function AgeLabel({ ms }: { ms: number }) {
+  return (
+    <span className="inline-flex items-center gap-0.5 whitespace-nowrap text-[12px] font-medium text-gold/90">
+      <Sprout className="h-3 w-3" aria-hidden />
+      {/* One flex item, so the gap after the sprout doesn't also widen the space before "ago". */}
+      <span>
+        {age(ms)}
+        <span className="max-[374px]:hidden"> ago</span>
+      </span>
+    </span>
   );
 }
 
@@ -241,7 +263,11 @@ export function BottomSheet({ open, onClose, title, children }: { open: boolean;
     if (!open) return;
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") return closeRef.current();
+      if (e.key === "Escape") {
+        // Esc closes the top layer first: a popover open in the sheet (Slippage) or the wallet picker over it closes on its own.
+        if (panel.current?.querySelector("[data-popover-open]") || document.querySelector(".wallet-adapter-modal")) return;
+        return closeRef.current();
+      }
       // Keep Tab inside the sheet.
       const p = panel.current;
       if (e.key !== "Tab" || !p) return;
@@ -265,7 +291,9 @@ export function BottomSheet({ open, onClose, title, children }: { open: boolean;
       cancelAnimationFrame(raf);
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = overflow;
-      trigger?.focus({ preventScroll: true });
+      // Only if focus is still ours: something that took it meanwhile (search's autofocused field after ⌘K) keeps it.
+      const active = document.activeElement;
+      if (active === document.body || (active && panel.current?.contains(active))) trigger?.focus({ preventScroll: true });
     };
   }, [open]);
 

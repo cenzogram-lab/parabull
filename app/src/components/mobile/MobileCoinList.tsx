@@ -118,14 +118,20 @@ function useTouchBusy(settleMs: number): boolean {
  */
 function useSteadyOrder(coins: Coin[], orderKey: string): Coin[] {
   const busy = useTouchBusy(1200);
-  const held = useRef<{ key: string; mints: string[] } | null>(null);
+  const held = useRef<{ key: string; mints: string[]; last: Map<string, Coin> } | null>(null);
   if (!busy || held.current?.key !== orderKey) {
-    held.current = { key: orderKey, mints: coins.map((c) => c.mint) };
+    held.current = { key: orderKey, mints: coins.map((c) => c.mint), last: new Map(coins.map((c) => [c.mint, c])) };
     return coins;
   }
-  // Coins that newly qualify wait until the list settles.
+  // Coins that newly qualify wait until the list settles; one that stops qualifying (it crossed a filter bound,
+  // graduated off a curve tab) keeps its slot, with its last figures, so the rows below it don't move up.
   const live = new Map(coins.map((c) => [c.mint, c]));
-  return held.current.mints.flatMap((m) => live.get(m) ?? []);
+  const { last } = held.current;
+  return held.current.mints.flatMap((m) => {
+    const c = live.get(m) ?? last.get(m);
+    if (c) last.set(m, c);
+    return c ? [c] : [];
+  });
 }
 
 /** The panel for the selected tab (`label`, such as "Movers coins"): the cards, or an empty state. `orderKey` names the list (see useSteadyOrder). */

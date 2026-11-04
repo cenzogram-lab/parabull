@@ -21,11 +21,10 @@ import { useApp } from "../state/AppState";
 function ClaimPanel() {
   const client = useParabullProgram();
   const { setVisible } = useWalletModal();
-  const { toast, sfx } = useApp();
+  const { toast, sfx, claimedEpochs: claimed, markClaimed } = useApp();
   const isMobile = useIsMobile();
   const me = client.publicKey ?? DEMO_WALLET;
   const epochs = useMemo(() => [...walletEpochs(me)].reverse(), [me.toBase58()]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [claimed, setClaimed] = useState<Set<number>>(() => new Set([4, 5]));
   const [busy, setBusy] = useState<number | null>(null);
   const now = Date.now();
 
@@ -50,7 +49,7 @@ function ClaimPanel() {
         const sig = await client.claimHolderReward(e.epoch, leaf.index, BigInt(leaf.amount), proof);
         toast({ tone: "info", title: "Claim sent", body: explorer("tx", sig) });
       }
-      setClaimed((s) => new Set(s).add(e.epoch));
+      markClaimed(e.epoch);
       sfx("buy");
       toast({ tone: "good", title: `Claimed ${sol(BigInt(e.you.amount), 4)}`, body: `Epoch ${e.epoch}${isDemo ? " · demo claim, nothing sent on-chain" : ""}` });
     } catch (err) {
@@ -272,15 +271,16 @@ export function TokenHub() {
   const { hash, key } = useLocation();
   const [parabullMint, setParabullMint] = useState<string | null>(null);
   const [allDays, setAllDays] = useState(false);
-  // Router navigation doesn't scroll to a hash, so do it for links to #claim (Holder rewards, notifications), clear of the sticky header.
+  // Router navigation doesn't scroll to a hash, so on a phone do it for links to #claim (Holder rewards, notifications,
+  // Portfolio), clear of the sticky header. Desktop keeps the behavior it had.
   useEffect(() => {
-    if (hash !== "#claim") return;
+    if (!isMobile || hash !== "#claim") return;
     const id = requestAnimationFrame(() => {
       const el = document.getElementById("claim");
       if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 72 });
     });
     return () => cancelAnimationFrame(id);
-  }, [hash, key]);
+  }, [hash, key, isMobile]);
   useEffect(() => {
     if (isDemo) return;
     client
@@ -330,7 +330,8 @@ export function TokenHub() {
             <a href={parabullMint ? `https://raydium.io/swap/?inputMint=sol&outputMint=${parabullMint}` : "https://raydium.io/swap/"} target="_blank" rel="noreferrer" className="btn-gold h-12 px-7 text-[15px] max-md:flex-1 max-md:px-4">
               Trade $PARABULL <ArrowRight className="h-4 w-4" />
             </a>
-            <button onClick={share} className="btn-ghost h-12 px-6 text-[15px] max-md:px-5">
+            {/* Shares on a phone; the desktop button stays as it was. */}
+            <button onClick={isMobile ? share : undefined} className="btn-ghost h-12 px-6 text-[15px] max-md:px-5">
               Share <Share2 className="h-4 w-4" />
             </button>
           </div>

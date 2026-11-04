@@ -132,7 +132,8 @@ export function PriceChart({ coin }: { coin: Coin }) {
           </span>
         </span>
       </div>
-      <div className="relative h-[420px] max-md:h-[300px]">
+      {/* On a short phone screen (landscape) the chart fits between the header and the nav. */}
+      <div className="relative h-[420px] max-md:h-[300px] max-md:[@media(max-height:480px)]:h-[calc(100dvh-12rem)]">
         {shown && (
           <div className="pointer-events-none absolute left-3 top-2 z-10 flex flex-wrap items-baseline gap-x-3 text-[11.5px]">
             <span className="text-base font-semibold text-cream">{fmt(shown.close)}</span>

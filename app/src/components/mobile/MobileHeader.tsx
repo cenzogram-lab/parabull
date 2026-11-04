@@ -1,9 +1,8 @@
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import type { PublicKey } from "@solana/web3.js";
 import { ArrowDown, ArrowUp, Bell, Crown, Gift, Lock, Megaphone, Sprout, TrendingDown, TrendingUp, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { isDemo } from "../../config";
 import { useIsMobile } from "../../hooks/useMediaQuery";
 import { age, pct, sol, usd, usdCompact, usdSigned } from "../../lib/format";
@@ -38,10 +37,7 @@ function PnlBadge({ usdChange, pctChange }: { usdChange: number; pctChange: numb
 }
 
 /** The newest holder-reward epoch the wallet can still claim (null if none). */
-const claimableEpoch = (wallet: PublicKey) =>
-  walletEpochs(wallet)
-    .filter((e) => e.you && !e.expired)
-    .pop() ?? null;
+const claimableEpoch = (epochs: readonly DemoEpoch[], claimed: ReadonlySet<number>) => epochs.filter((e) => e.you && !e.expired && !claimed.has(e.epoch)).pop() ?? null;
 
 /** Sticky mobile header (below md): portfolio capsule on the left, Deposit and notifications on the right. */
 export function MobileHeader() {
@@ -49,17 +45,20 @@ export function MobileHeader() {
   const isMobile = useIsMobile();
   const { publicKey } = useWallet();
   const { setVisible } = useWalletModal();
-  const { toast } = useApp();
+  const { toast, claimedEpochs } = useApp();
+  const { key } = useLocation();
   const [sheet, setSheet] = useState(false);
   const [seen, setSeen] = useState(false);
+  // The sheet belongs to the page it opened over: a navigation (Back, ⌘K, a link) or a switch to the desktop layout closes it.
+  useEffect(() => setSheet(false), [key, isMobile]);
   // Building the demo reward epochs (real Merkle trees) takes ~150ms, so do it
   // when the browser is idle rather than as the sheet opens; undefined = not yet.
-  const [epoch, setEpoch] = useState<DemoEpoch | null>();
+  const [epochs, setEpochs] = useState<readonly DemoEpoch[]>();
   const wallet = publicKey ?? DEMO_WALLET;
   useEffect(() => {
     if (!isMobile) return;
-    setEpoch(undefined);
-    const run = () => setEpoch(claimableEpoch(wallet));
+    setEpochs(undefined);
+    const run = () => setEpochs(walletEpochs(wallet));
     // Safari has no requestIdleCallback.
     if (typeof window.requestIdleCallback === "function") {
       const id = window.requestIdleCallback(run, { timeout: 4000 });
@@ -68,6 +67,8 @@ export function MobileHeader() {
     const t = window.setTimeout(run, 1200);
     return () => window.clearTimeout(t);
   }, [isMobile, wallet]);
+  // Claims made on the $PARABULL page count at once.
+  const epoch = epochs && claimableEpoch(epochs, claimedEpochs);
 
   const deposit = async () => {
     if (!publicKey) return setVisible(true);
@@ -83,10 +84,14 @@ export function MobileHeader() {
   return (
     <>
       <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center justify-between gap-2 border-b border-line bg-canvas/90 px-4 backdrop-blur-md md:hidden">
-        <Link to="/portfolio" aria-label={`Portfolio: ${usd(p.equityUsd)}, ${usdSigned(p.change24hUsd)} today`} className="flex min-w-0 items-center gap-2.5 rounded-full py-1 pr-2 transition-opacity duration-100 ease-out active:opacity-80">
+        <Link to="/portfolio" aria-label={`${isDemo ? "Portfolio" : "Demo portfolio"}: ${usd(p.equityUsd)}, ${usdSigned(p.change24hUsd)} today`} className="flex min-w-0 items-center gap-2.5 rounded-full py-1 pr-2 transition-opacity duration-100 ease-out active:opacity-80">
           <img src={p.avatar} alt="" width={32} height={32} className="h-8 w-8 shrink-0 rounded-full ring-[1.5px] ring-copper/80 ring-offset-1 ring-offset-canvas" />
           <span className="flex min-w-0 flex-col items-start">
-            <span className="num max-w-full truncate text-[15px] font-semibold leading-5 text-cream">{usd(p.equityUsd)}</span>
+            <span className="num max-w-full truncate text-[15px] font-semibold leading-5 text-cream">
+              {usd(p.equityUsd)}
+              {/* Chain mode still shows the seeded portfolio (there's no indexer yet), even for a connected wallet: say so by the figure. */}
+              {!isDemo && <span className="ml-1.5 inline-block rounded border border-line px-1 align-[2px] text-[9px] font-bold uppercase leading-[13px] tracking-wide text-rosebronze">Demo</span>}
+            </span>
             <PnlBadge usdChange={p.change24hUsd} pctChange={p.change24hPct} />
           </span>
         </Link>
@@ -164,7 +169,8 @@ function NotificationList({ epoch, onPick }: { epoch: DemoEpoch | null | undefin
           </li>
         ))}
       </ul>
-      {isDemo && <p className="mt-2 text-center text-[11.5px] text-muted">Demo data: notifications come from the simulated market.</p>}
+      {/* In both modes: chain mode's lists and positions are still demo data. */}
+      <p className="mt-2 text-center text-[11.5px] text-muted">Demo data: notifications come from the simulated market.</p>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { ChartNoAxesColumn, Copy, FlaskConical, Wallet } from "lucide-react";
 import { useMemo } from "react";
+import { isDemo } from "../../config";
 import { shortAddr } from "../../lib/format";
 import type { Portfolio } from "../../state/usePortfolio";
 import { IconButton } from "../mobile/MobileUi";
@@ -55,10 +56,11 @@ export function PortfolioProfile({ p, connected, walletName, walletIcon, onCopy,
           <span className="font-mono" title={p.address}>
             {shortAddr(p.address, 4)}
           </span>
-          {!connected && (
+          {/* Chain mode still shows the seeded portfolio for a connected wallet (there's no indexer yet), so it says so. */}
+          {(!connected || !isDemo) && (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-line px-2 text-[11px] font-medium leading-[18px]">
               <FlaskConical className="h-3 w-3 text-rosebronze" aria-hidden />
-              Demo wallet
+              {connected ? "Demo portfolio" : "Demo wallet"}
             </span>
           )}
         </p>

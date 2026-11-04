@@ -4,14 +4,14 @@
  * and the Trending chips, plus the matching that ranks search results.
  * A row's remove button sits beside its link, never inside it.
  */
-import { Sprout, TrendingUp, X } from "lucide-react";
+import { TrendingUp, X } from "lucide-react";
 import type { MouseEvent } from "react";
 import { Link } from "react-router-dom";
 import { age, pct, shortAddr, usdCompact } from "../../lib/format";
 import type { Coin, Trader } from "../../lib/types";
 import { ChangePill, cx } from "../ui/primitives";
 import { TraderAvatar } from "../ui/visuals";
-import { IconButton } from "./MobileUi";
+import { AgeLabel, IconButton } from "./MobileUi";
 
 /** What a query is compared with: trimmed, lowercase, without a leading `$` (tickers) or `@` (handles). */
 export const normalizeQuery = (q: string) =>
@@ -93,20 +93,6 @@ function Highlight({ text, query }: { text: string; query: string }) {
 
 const signedUsd = (n: number) => `${n >= 0 ? "+" : "-"}${usdCompact(Math.abs(n))}`;
 
-/** AgeTag's sprout and "6h ago", except that phones under 375px drop the " ago" so the ticker keeps its room. */
-function Age({ ms }: { ms: number }) {
-  return (
-    <span className="inline-flex items-center gap-0.5 whitespace-nowrap text-[12px] font-medium text-gold/90">
-      <Sprout className="h-3 w-3" aria-hidden />
-      {/* One flex item, so the gap after the sprout doesn't also widen the space before "ago". */}
-      <span>
-        {age(ms)}
-        <span className="max-[374px]:hidden"> ago</span>
-      </span>
-    </span>
-  );
-}
-
 /** Spoken version of a coin row, since the arrow icons and abbreviations don't read aloud well. */
 function coinLabel(coin: Coin, now: number, figures: boolean) {
   const parts = [`${coin.name} ($${coin.ticker})`];
@@ -186,7 +172,7 @@ export function CoinSearchRow({
               <span className="shrink-0 font-mono text-[11.5px] text-rosebronze">{shortAddr(coin.mint, 5)}</span>
             ) : (
               <span className="flex shrink-0">
-                <Age ms={now - coin.createdAt} />
+                <AgeLabel ms={now - coin.createdAt} />
               </span>
             )}
           </span>
@@ -195,7 +181,8 @@ export function CoinSearchRow({
           <span className="flex shrink-0 flex-col items-end gap-1">
             <span className="num text-[15px] font-bold leading-5 text-cream">{usdCompact(coin.mcapUsd)}</span>
             <span className="flex leading-4">
-              <ChangePill value={coin.change24h} />
+              {/* The softer loss tint keeps ember at 4.5:1 over the row's ember wash. */}
+              <ChangePill value={coin.change24h} soft={wash} />
             </span>
           </span>
         )}

@@ -22,7 +22,7 @@ const ITEMS: Item[] = [
 
 /** Floating bottom dock (below md): five 48px targets, the active one in gold with a soft glow. */
 export function MobileNav() {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   return (
     <nav
       aria-label="Main"
@@ -30,10 +30,14 @@ export function MobileNav() {
     >
       {ITEMS.map(({ to, label, icon: Icon, match, fill }) => {
         const active = match(pathname);
+        // Search while on /search (say /search?q=bu, after Back from a result) goes back to the field: the same entry,
+        // query kept, replaced rather than stacked, so Close search and Back leave in one step.
+        const here = to === "/search" && pathname === "/search";
         return (
           <Link
             key={to}
-            to={to}
+            to={here ? { pathname, search } : to}
+            replace={here}
             aria-label={label}
             aria-current={active ? "page" : undefined}
             className={cx(

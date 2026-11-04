@@ -14,7 +14,8 @@ import { GRADUATION_RAISE_LAMPORTS } from "../../lib/protocol";
 import type { Coin } from "../../lib/types";
 import { progressOf } from "../../mock/coins";
 import { XLogo } from "../brand/Wordmark";
-import { AgeTag, ChangePill, StageBadge } from "../ui/primitives";
+import { ChangePill, StageBadge } from "../ui/primitives";
+import { AgeLabel } from "./MobileUi";
 
 /** The curve's graduation raise, about 85 SOL. */
 const GRADUATION_SOL = Math.round(Number(GRADUATION_RAISE_LAMPORTS) / 1e9);
@@ -146,20 +147,21 @@ export function MobileCoinRow({ coin, density = "detailed" }: { coin: Coin; dens
           </span>
         </div>
         <div className="flex items-center gap-2">
+          {/* Under 375px the age drops its " ago", and under 340px the social icons go, so the ticker keeps its room. */}
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted">
             <span className="min-w-0 truncate font-medium">${coin.ticker}</span>
             <span className="flex shrink-0 leading-4">
-              <AgeTag ms={ago} />
+              <AgeLabel ms={now - coin.createdAt} />
             </span>
             {coin.socials.x && (
-              <span aria-hidden className="shrink-0">
+              <span aria-hidden className="shrink-0 max-[339px]:hidden">
                 <XLogo className="h-3 w-3" />
               </span>
             )}
-            {coin.socials.website && <Globe className="h-3 w-3 shrink-0" aria-hidden />}
+            {coin.socials.website && <Globe className="h-3 w-3 shrink-0 max-[339px]:hidden" aria-hidden />}
           </span>
           <span className="flex shrink-0 leading-4">
-            <ChangePill value={coin.change24h} size="xs" />
+            <ChangePill value={coin.change24h} size="xs" soft />
           </span>
         </div>
         {detailed && (

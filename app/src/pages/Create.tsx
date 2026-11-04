@@ -8,6 +8,7 @@ import { CoinRow } from "../components/coin/CoinViews";
 import { Modal } from "../components/ui/overlay";
 import { cx } from "../components/ui/primitives";
 import { CONFIG, explorer, isDemo } from "../config";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { useNow } from "../hooks/useNow";
 import { OVERLAY_MS } from "../hooks/usePresence";
 import { useParabullProgram } from "../hooks/useParabullProgram";
@@ -449,6 +450,7 @@ function LaunchProgress({ phase, onReset, onView }: { phase: Exclude<Phase, { st
 
 export function CreateModal() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [open, setOpen] = useState(true);
   // Let the 150ms exit transition play before leaving the route.
   const close = () => {
@@ -456,7 +458,8 @@ export function CreateModal() {
     window.setTimeout(() => navigate(-1), OVERLAY_MS);
   };
   return (
-    <Modal open={open} onClose={close} label="Start a coin" className="max-w-[1100px] overflow-hidden">
+    // Full screen on a phone, over everything focus could otherwise wander to; the desktop modal keeps its behavior.
+    <Modal open={open} onClose={close} label="Start a coin" className="max-w-[1100px] overflow-hidden" manageFocus={isMobile}>
       <LaunchForm onClose={() => undefined} />
     </Modal>
   );

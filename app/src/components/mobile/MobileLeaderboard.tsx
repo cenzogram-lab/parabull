@@ -13,8 +13,9 @@ import { Rng } from "../../lib/rng";
 import type { Period } from "../../lib/types";
 import { useMarket } from "../../state/Market";
 import { usePortfolio, type Portfolio } from "../../state/usePortfolio";
+import { useRewardSummary, type RewardSummary } from "../portfolio/shared";
 import { cx } from "../ui/primitives";
-import { asideText, fmtUsd, measureWord, Podium, rankEntries, RankAvatar, REWARD_SHARE, valueTone, type Entry, type Metric, type Tab } from "./MobileLeaderboardParts";
+import { asideText, fmtUsd, measureWord, Podium, rankEntries, RankAvatar, valueTone, type Entry, type Metric, type Tab } from "./MobileLeaderboardParts";
 import { CalloutsSheet, EntrySheet, SortSheet, type Picked } from "./MobileLeaderboardSheets";
 import { FollowButton, PillTabs } from "./MobileUi";
 
@@ -22,6 +23,8 @@ const TABS = ["Traders", "Squads", "Rewards"] as const;
 const PERIODS = ["1D", "1W", "1M"] as const;
 /** How much more a week and a month trade than a day (the demo traders' scale). */
 const PERIOD_SCALE: Record<Period, number> = { "1D": 1, "1W": 4.6, "1M": 13.5 };
+/** Each period's window, for the holder rewards your epochs paid in it. */
+const PERIOD_MS: Record<Period, number> = { "1D": 86_400_000, "1W": 7 * 86_400_000, "1M": 30 * 86_400_000 };
 /** Eyebrow on the #1 plaque, per board and sort. */
 const HERO_LABEL: Record<Tab, Record<Metric, string>> = {
   Traders: { Profit: "Top trader", Volume: "Top volume" },
@@ -36,15 +39,27 @@ interface Standing {
   money: boolean;
 }
 
+/** Where `value` would place among a board's entries; below the last of them, a (seeded) rank further down. */
+function rankOn(entries: Entry[], value: number, seeded: number): number {
+  const last = entries[entries.length - 1];
+  return last && value >= last.value ? entries.filter((e) => e.value > value).length + 1 : Math.max(entries.length + 1, seeded);
+}
+
 /**
  * The wallet's own line on a board (demo). Profit comes from the portfolio:
  * 1D is its 24h change, 1W and 1M the equity curve's change over the window.
- * Volume, squad figures, rewards and every rank are seeded from the address,
- * so they hold still between visits.
+ * Rewards are what the wallet's holder-reward epochs paid in the period
+ * (null until they're built). Volume and squad figures are seeded from the
+ * address. A figure that would make the listed ranking places you in it;
+ * otherwise the rank is seeded too, so it holds still between visits.
  */
-function standing(p: Pick<Portfolio, "address" | "equityUsd" | "change24hUsd" | "history">, tab: Tab, metric: Metric, period: Period): Standing {
+function standing(p: Pick<Portfolio, "address" | "equityUsd" | "change24hUsd" | "history">, tab: Tab, metric: Metric, period: Period, entries: Entry[], rewards: RewardSummary | undefined, solUsd: number, now: number): Standing | null {
   const rng = (what: string) => new Rng(`leaderboard:you:${p.address}:${what}`);
-  if (tab === "Rewards") return { rank: rng(`rank:rewards:${period}`).int(2_400, 9_800), rankLabel: "Your rank", value: rng("rewards").logRange(24, 180) * REWARD_SHARE[period], money: true };
+  if (tab === "Rewards") {
+    if (!rewards) return null;
+    const value = rewards.epochs.filter((e) => e.verified && e.publishedAt > now - PERIOD_MS[period]).reduce((n, e) => n + (Number(e.you.amount) / 1e9) * solUsd, 0);
+    return { rank: rankOn(entries, value, rng(`rank:rewards:${period}`).int(2_400, 9_800)), rankLabel: "Your rank", value, money: true };
+  }
   let value: number;
   if (metric === "Volume") value = rng("volume").range(1.6, 3.4) * Math.max(p.equityUsd, 60) * PERIOD_SCALE[period];
   else if (period === "1D") value = p.change24hUsd;
@@ -52,14 +67,18 @@ function standing(p: Pick<Portfolio, "address" | "equityUsd" | "change24hUsd" | 
     const h = p.history(period);
     value = h.length > 1 ? h[h.length - 1].v - h[0].v : 0;
   }
-  if (tab === "Squads") return { rank: rng(`rank:squads:${metric}:${period}`).int(140, 620), rankLabel: "Your squad rank", value: value * rng(`squad:${metric}`).range(3.5, 6.5), money: metric === "Profit" };
+  if (tab === "Squads") {
+    const squad = value * rng(`squad:${metric}`).range(3.5, 6.5);
+    return { rank: rankOn(entries, squad, rng(`rank:squads:${metric}:${period}`).int(140, 620)), rankLabel: "Your squad rank", value: squad, money: metric === "Profit" };
+  }
   const r = rng(`rank:traders:${metric}:${period}`);
-  return { rank: metric === "Volume" ? r.int(9_000, 32_000) : value >= 0 ? r.int(12_000, 24_000) : r.int(24_000, 46_000), rankLabel: "Your rank", value, money: metric === "Profit" };
+  return { rank: rankOn(entries, value, metric === "Volume" ? r.int(9_000, 32_000) : value >= 0 ? r.int(12_000, 24_000) : r.int(24_000, 46_000)), rankLabel: "Your rank", value, money: metric === "Profit" };
 }
 
 export function MobileLeaderboard() {
-  const { traders, squads, following, toggleFollow } = useMarket();
+  const { traders, squads, following, toggleFollow, solUsd } = useMarket();
   const portfolio = usePortfolio();
+  const [now] = useState(() => Date.now());
   const [tab, setTab] = useState<Tab>("Traders");
   const [period, setPeriod] = useState<Period>("1D");
   const [metric, setMetric] = useState<Metric>("Profit");
@@ -71,7 +90,11 @@ export function MobileLeaderboard() {
 
   const entries = useMemo(() => rankEntries(tab, period, metric, traders, squads), [tab, period, metric, traders, squads]);
   const { address, equityUsd, change24hUsd, history } = portfolio;
-  const you = useMemo(() => standing({ address, equityUsd, change24hUsd, history }, tab, metric, period), [address, equityUsd, change24hUsd, history, tab, metric, period]);
+  const rewards = useRewardSummary(address, tab === "Rewards");
+  const you = useMemo(
+    () => standing({ address, equityUsd, change24hUsd, history }, tab, metric, period, entries, rewards, solUsd, now),
+    [address, equityUsd, change24hUsd, history, tab, metric, period, entries, rewards, solUsd, now],
+  );
   const word = measureWord(tab, metric);
 
   const openEntry = useCallback(
@@ -133,15 +156,16 @@ export function MobileLeaderboard() {
   );
 }
 
-/** Your own standing on the current board, pinned above the ranking; opens the portfolio. */
-function PinnedRank({ p, you, label, className }: { p: Portfolio; you: Standing; label: string; className?: string }) {
-  const rank = `#${you.rank.toLocaleString("en-US")}`;
+/** Your own standing on the current board, pinned above the ranking; opens the portfolio. `you` is null while it loads (your reward epochs). */
+function PinnedRank({ p, you, label, className }: { p: Portfolio; you: Standing | null; label: string; className?: string }) {
+  const rank = you ? `#${you.rank.toLocaleString("en-US")}` : "";
   // Under $100K the figure is printed in full, like the header's PnL.
-  const value = Math.abs(you.value) < 1e5 ? (you.money ? usdSigned(you.value) : usd(you.value)) : fmtUsd(you.value, you.money);
+  const value = !you ? "" : Math.abs(you.value) < 1e5 ? (you.money ? usdSigned(you.value) : usd(you.value)) : fmtUsd(you.value, you.money);
   return (
     <Link
       to="/portfolio"
-      aria-label={`${you.rankLabel} ${rank}, ${label} ${value}. Open your portfolio`}
+      aria-busy={!you || undefined}
+      aria-label={you ? `${you.rankLabel} ${rank}, ${label} ${value}. Open your portfolio` : `Your rank: loading. Open your portfolio`}
       className={cx("panel-raised relative flex min-h-16 items-center gap-3 overflow-hidden border-gold/45 py-2.5 pl-3 pr-2 transition-colors duration-100 ease-out active:bg-surface-3", className)}
     >
       <span aria-hidden className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-gold/70 to-transparent" />
@@ -152,12 +176,18 @@ function PinnedRank({ p, you, label, className }: { p: Portfolio; you: Standing;
       <span aria-hidden className="min-w-0 flex-1">
         <span className="block truncate text-[15px] font-semibold leading-5 text-cream">{p.handle}</span>
         <span className="block truncate text-[12.5px] leading-[18px] text-muted">
-          {you.rankLabel} <span className="num font-semibold text-cream">{rank}</span>
+          {you ? (
+            <>
+              {you.rankLabel} <span className="num font-semibold text-cream">{rank}</span>
+            </>
+          ) : (
+            "Your rank"
+          )}
         </span>
       </span>
       <span aria-hidden className="shrink-0 text-right">
         <span className="block text-[10px] font-semibold uppercase leading-4 tracking-[0.08em] text-muted">{label}</span>
-        <span className={cx("num block text-[15px] font-semibold leading-5", valueTone(you))}>{value}</span>
+        {you ? <span className={cx("num block text-[15px] font-semibold leading-5", valueTone(you))}>{value}</span> : <span className="ml-auto block h-5 w-16 animate-pulse rounded bg-surface-3" />}
       </span>
       <ChevronRight className="h-4 w-4 shrink-0 text-muted" aria-hidden />
     </Link>
@@ -189,7 +219,8 @@ function RankRow({ e, rank, word, following, onFollow, onOpen }: { e: Entry; ran
           </span>
         </span>
       </span>
-      <FollowButton name={e.name} on={following} onToggle={() => onFollow(e.key)} />
+      {/* Below 380px Follow shrinks to its icon, so names keep their room on narrow phones (the figures need their 80px: "+$474.20K"). */}
+      <FollowButton name={e.name} on={following} onToggle={() => onFollow(e.key)} narrow />
       <span aria-hidden className="pointer-events-none relative w-20 shrink-0 text-right">
         <span className={cx("num block truncate text-[13.5px] font-semibold leading-5", valueTone(e))}>{fmtUsd(e.value, e.money)}</span>
         {e.aside && <span className={cx("num block truncate text-[11px] leading-4", e.aside.kind === "profit" ? valueTone({ money: true, value: e.aside.value }) : "text-muted")}>{asideText(e.aside)}</span>}

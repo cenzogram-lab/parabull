@@ -87,7 +87,7 @@ function HoldingCard({ h, now }: { h: Holding; now: number }) {
           <div aria-hidden className="mt-1.5 flex items-center gap-2">
             <span className="num min-w-0 flex-1 truncate text-[12.5px] leading-[18px] text-muted">{amount}</span>
             <span className={cx("num shrink-0 text-[12.5px] font-semibold leading-[18px]", tone(h.pnlUsd))}>{usdSigned(h.pnlUsd)}</span>
-            <ChangePill value={h.pnlPct} size="xs" />
+            <ChangePill value={h.pnlPct} size="xs" soft />
           </div>
         </div>
       </div>
@@ -151,7 +151,7 @@ function ClosedRow({ c, coin }: { c: ClosedPosition; coin: Coin }) {
             <span className="num min-w-0 flex-1 truncate text-[12.5px] leading-[18px] text-muted">
               {usd(c.entryUsd)} <span className="text-muted/70">→</span> <span className="text-cream/90">{usd(c.exitUsd)}</span>
             </span>
-            <ChangePill value={c.pnlPct} size="xs" />
+            <ChangePill value={c.pnlPct} size="xs" soft />
           </span>
           <span className="num mt-0.5 block truncate text-[11.5px] leading-4 text-muted">
             {amount} · closed {date}
@@ -183,8 +183,9 @@ export function ClosedPanel({ closed }: { closed: ClosedPosition[] }) {
         </p>
       </div>
       <ul aria-label="Closed positions, newest first" className="mt-2 flex flex-col gap-2.5">
-        {rows.map((r) => (
-          <ClosedRow key={r.c.mint} c={r.c} coin={r.coin} />
+        {/* A coin can be sold more than once (your demo sells come first). */}
+        {rows.map((r, i) => (
+          <ClosedRow key={`${r.c.mint}:${r.c.closedAt}:${i}`} c={r.c} coin={r.coin} />
         ))}
       </ul>
     </div>
@@ -245,7 +246,7 @@ function CalloutCard({ c, coin, p, now }: { c: Callout; coin: Coin; p: Portfolio
               Called at {usdCompact(c.calledAtMcap)} <span className="text-muted/70">→</span> <span className="text-cream/90">{usdCompact(coin.mcapUsd)}</span>
             </span>
           </span>
-          <ChangePill value={move} size="xs" />
+          <ChangePill value={move} size="xs" soft />
           <ChevronRight className="h-4 w-4 shrink-0 text-muted" aria-hidden />
         </Link>
         <div className="mt-2.5 flex items-center gap-4 text-[12px] leading-4 text-muted">

@@ -117,7 +117,7 @@ function BestCoin({ coin }: { coin: Coin }) {
         </span>
         <span className="flex shrink-0 flex-col items-end gap-0.5">
           <span className="num text-[13px] font-semibold leading-5 text-cream">MC {usdCompact(coin.mcapUsd)}</span>
-          <ChangePill value={coin.change24h} size="xs" />
+          <ChangePill value={coin.change24h} size="xs" soft />
         </span>
         <ChevronRight className="h-4 w-4 shrink-0 text-muted" aria-hidden />
       </Link>
