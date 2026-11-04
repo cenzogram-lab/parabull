@@ -232,6 +232,7 @@ reading only.
 | `docs/BACKEND_SPEC.md` | Off-chain services: launch worker (random delay, tweet verification), bundle-risk indexer, similarity flags |
 | `docs/DESIGN.md` | Bronze/copper design system: tokens, contrast, materials, typography, brand mark, data-viz rules |
 | `app/` | Web app (React + Vite + Tailwind). See `app/README.md` for routes, modes, and what's wired to the program vs demo data |
+| `services/twitter-sentinel/` | X sentinel: posts a coin's curve milestones and answers cashtag mentions of its account; settings come from the creator's signed request. Separate package, never bundled into `app/`. See its README |
 | `reference/` | Byte-matching pump.fun reconstructions. Read-only |
 
 ## Cluster addresses (Raydium)

@@ -2,6 +2,7 @@ import { Check, Copy, ExternalLink, Globe, Lock, Send, Star } from "lucide-react
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { XLogo } from "../components/brand/Wordmark";
+import { XAutomationButton } from "../components/coin/XAutomationModal";
 import { CoinCallouts, EscrowGauge, HoldersTable, MigrationGauge, TradesTable } from "../components/coin/CoinWidgets";
 import { PriceChart } from "../components/coin/PriceChart";
 import { TradePanel, TradeStats } from "../components/coin/TradePanel";
@@ -131,9 +132,13 @@ export function CoinPage() {
                 </span>
               </div>
             </div>
-            <button onClick={() => toggleWatch(coin.mint)} className={cx("btn-ghost h-9 px-3", watched && "border-gold/50 text-gold")} aria-pressed={watched}>
-              <Star className={cx("h-4 w-4", watched && "fill-gold")} /> {watched ? "Watching" : "Watch"}
-            </button>
+            {/* The creator's X automation sits before Watch; for everyone else this renders nothing, so the header is unchanged. */}
+            <div className="flex shrink-0 items-center gap-2">
+              <XAutomationButton coin={coin} variant="desktop" />
+              <button onClick={() => toggleWatch(coin.mint)} className={cx("btn-ghost h-9 px-3", watched && "border-gold/50 text-gold")} aria-pressed={watched}>
+                <Star className={cx("h-4 w-4", watched && "fill-gold")} /> {watched ? "Watching" : "Watch"}
+              </button>
+            </div>
           </div>
           <div className="mt-3 border-t border-line-soft pt-3">
             <LockTimers coin={coin} />

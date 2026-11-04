@@ -6,6 +6,7 @@
  *   VITE_RPC_URL         overrides the cluster's public RPC
  *   VITE_METADATA_UPLOAD_URL  backend that pins image + metadata JSON and returns { uri }
  *   VITE_REWARDS_BASE_URL     where epoch-<n>.json snapshot artifacts are served
+ *   VITE_SENTINEL_URL         the X sentinel service (services/twitter-sentinel); unset, the X automation modal says it is off
  */
 import { clusterApiUrl } from "@solana/web3.js";
 
@@ -20,6 +21,7 @@ export const CONFIG = {
   rpcUrl: env.VITE_RPC_URL ?? (cluster === "localnet" ? "http://127.0.0.1:8899" : clusterApiUrl(cluster)),
   metadataUploadUrl: env.VITE_METADATA_UPLOAD_URL as string | undefined,
   rewardsBaseUrl: env.VITE_REWARDS_BASE_URL as string | undefined,
+  sentinelUrl: (env.VITE_SENTINEL_URL as string | undefined)?.replace(/\/$/, ""),
 };
 
 export const isDemo = CONFIG.mode === "demo";

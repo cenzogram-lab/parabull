@@ -22,6 +22,7 @@ import { CoinAvatar } from "../ui/visuals";
 import { MobileTabs } from "./MobileUi";
 import { MobileTradeBar } from "./MobileTradeBar";
 import { HolderList, TradeFeed } from "./MobileTradeLists";
+import { XAutomationButton } from "../coin/XAutomationModal";
 
 type Tab = "Trades" | "Holders" | "Callouts";
 const TABS = ["Trades", "Holders", "Callouts"] as const;
@@ -196,6 +197,7 @@ export function MobileTradeTerminal({ coin }: { coin: Coin }) {
 
           <div className="mt-3 flex gap-2">
             <CaPill mint={coin.mint} />
+            <XAutomationButton coin={coin} variant="phone" />
             <a href={explorer("token", coin.mint)} target="_blank" rel="noreferrer" className="flex h-11 shrink-0 items-center gap-1.5 rounded-full border border-line px-4 text-[13px] font-medium text-muted transition-colors duration-100 ease-out active:border-line-accent active:text-cream">
               Solscan <ExternalLink className="h-3.5 w-3.5" aria-hidden />
             </a>
