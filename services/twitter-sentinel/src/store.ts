@@ -29,12 +29,33 @@ export class Store {
 
   constructor(dir: string) {
     this.file = join(dir, "sentinel.json");
+    let raw: unknown;
     try {
-      const raw = JSON.parse(readFileSync(this.file, "utf8"));
-      this.data = { coins: raw.coins ?? {}, lastIssued: raw.lastIssued ?? {} };
+      raw = JSON.parse(readFileSync(this.file, "utf8"));
     } catch {
-      this.data = { coins: {}, lastIssued: {} };
+      raw = null;
     }
+    this.data = Store.migrate(raw);
+  }
+
+  /**
+   * Reads either file shape. The first release wrote a plain mint → record map, with each record's last request
+   * time inside it (`lastIssuedAtMs`); that is moved into `lastIssued`, so upgrading keeps every coin and its
+   * replay protection.
+   */
+  static migrate(raw: unknown): FileShape {
+    if (!raw || typeof raw !== "object") return { coins: {}, lastIssued: {} };
+    const r = raw as Record<string, unknown>;
+    if ("coins" in r || "lastIssued" in r) return { coins: (r.coins as FileShape["coins"]) ?? {}, lastIssued: (r.lastIssued as FileShape["lastIssued"]) ?? {} };
+    const coins: FileShape["coins"] = {};
+    const lastIssued: FileShape["lastIssued"] = {};
+    for (const [mint, rec] of Object.entries(r)) {
+      if (!rec || typeof rec !== "object" || !("settings" in rec)) continue;
+      const { lastIssuedAtMs, ...rest } = rec as CoinRecord & { lastIssuedAtMs?: number };
+      coins[mint] = rest;
+      if (typeof lastIssuedAtMs === "number") lastIssued[mint] = lastIssuedAtMs;
+    }
+    return { coins, lastIssued };
   }
 
   get(mint: string): CoinRecord | undefined {

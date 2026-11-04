@@ -176,3 +176,25 @@ test("decodes the program's BondingCurve and Global accounts", async () => {
   );
   assert.equal(decodeRaise(global), RAISE);
 });
+
+test("a store file from the first release loads with every coin and its last request time", async () => {
+  const { mkdtempSync, writeFileSync, readFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { Store } = await import("./store");
+  const dir = mkdtempSync(join(tmpdir(), "sentinel-legacy-"));
+  const legacy = {
+    MintAAA: { settings: DEFAULT_SETTINGS, updatedAt: "2026-11-04T12:00:00.000Z", lastIssuedAtMs: 1_700, milestonesDone: ["p25"], watchingSince: 1_000, replied: ["t1"], lastByAuthor: {}, recentReplies: [] },
+  };
+  writeFileSync(join(dir, "sentinel.json"), JSON.stringify(legacy));
+  const store = new Store(dir);
+  assert.deepEqual(store.mints(), ["MintAAA"]);
+  assert.deepEqual(store.get("MintAAA")?.milestonesDone, ["p25"]);
+  assert.equal(store.lastIssued("MintAAA"), 1_700);
+  assert.ok(!("lastIssuedAtMs" in (store.get("MintAAA") as object)));
+  // The next write keeps the coin, in the new shape.
+  store.update("MintAAA", (r) => ({ ...r!, updatedAt: "2026-11-04T13:00:00.000Z" }));
+  const saved = JSON.parse(readFileSync(join(dir, "sentinel.json"), "utf8"));
+  assert.deepEqual(Object.keys(saved.coins), ["MintAAA"]);
+  assert.equal(saved.lastIssued.MintAAA, 1_700);
+});
