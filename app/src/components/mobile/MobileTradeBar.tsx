@@ -32,8 +32,8 @@ export function MobileTradeBar({ coin }: { coin: Coin }) {
   };
   return (
     <>
-      {/* On a short screen (a phone in landscape) it stays in place after the page, so the content keeps room between the bars. */}
-      <div className="pointer-events-none sticky bottom-[calc(5rem+env(safe-area-inset-bottom))] z-40 mx-4 mt-4 grid grid-cols-2 gap-3 max-md:[@media(max-height:480px)]:relative max-md:[@media(max-height:480px)]:bottom-auto before:absolute before:-inset-x-4 before:-bottom-3 before:-top-4 before:-z-10 before:bg-[linear-gradient(to_bottom,transparent,theme(colors.canvas.DEFAULT)_16px)]">
+      {/* It docks on short screens too (a phone in landscape): it's the page's only way to trade. */}
+      <div className="pointer-events-none sticky bottom-[calc(5rem+env(safe-area-inset-bottom))] z-40 mx-4 mt-4 grid grid-cols-2 gap-3 before:absolute before:-inset-x-4 before:-bottom-3 before:-top-4 before:-z-10 before:bg-[linear-gradient(to_bottom,transparent,theme(colors.canvas.DEFAULT)_16px)]">
         <button type="button" onClick={() => start("buy")} aria-haspopup="dialog" className="btn-gold pointer-events-auto h-12 rounded-2xl text-[15px] font-bold shadow-[0_10px_28px_-8px_rgba(0,0,0,0.9)]">
           <ArrowUpRight className="h-[18px] w-[18px]" strokeWidth={2.5} aria-hidden />
           Buy

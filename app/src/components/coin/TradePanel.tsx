@@ -8,7 +8,7 @@ import { compact, pct, sol, tokens as fmtTokens, usd, usdCompact } from "../../l
 import { PROTOCOL } from "../../lib/protocol";
 import type { Coin } from "../../lib/types";
 import { useApp } from "../../state/AppState";
-import { useMarket } from "../../state/Market";
+import { raydiumSell, useMarket } from "../../state/Market";
 import { cx, Popover } from "../ui/primitives";
 import { RatioBar } from "../ui/visuals";
 
@@ -46,8 +46,8 @@ export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced 
 
   const buyQ = useMemo(() => (side === "buy" && !coin.migrated ? client.quoteBuyWithSol(coin.reserves, lamports, FEE_BPS, slippageBps) : null), [side, coin, lamports, slippageBps, client]);
   const sellQ = useMemo(() => (side === "sell" && !coin.migrated ? client.quoteSellTokens(coin.reserves, sellTokens, FEE_BPS, slippageBps) : null), [side, coin, sellTokens, slippageBps, client]);
-  // Graduated coins trade on Raydium; the estimate uses the pool price.
-  const poolEstimate = coin.migrated ? (side === "buy" ? (Number(lamports) / 1e9) * solUsd * 0.99 / coin.priceUsd : (Number(sellTokens) / 1e6) * coin.priceUsd * 0.99) : 0;
+  // Graduated coins trade on Raydium; the estimate uses the pool price, and a sale is quoted as it will book (raydiumSell).
+  const poolEstimate = coin.migrated ? (side === "buy" ? (Number(lamports) / 1e9) * solUsd * 0.99 / coin.priceUsd : raydiumSell(coin, Number(sellTokens) / 1e6).usd) : 0;
 
   const canTrade = side === "buy" ? lamports > 0n && (coin.migrated || buyQ !== null) : sellTokens > 0n && (coin.migrated || sellQ !== null);
 

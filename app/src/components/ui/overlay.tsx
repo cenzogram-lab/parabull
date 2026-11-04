@@ -9,15 +9,20 @@ const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), selec
 
 /**
  * Centered dialog; below md a full-screen sheet. With `manageFocus`, focus moves into the dialog as it opens, Tab stays
- * inside it, and focus goes back to the trigger when it closes, as in BottomSheet. It's opt-in (the phone launch modal
- * and the Portfolio dialogs), so the desktop launch modal keeps the behavior it had.
+ * inside it (or in the wallet picker over it, which Esc closes first), and focus goes back to the trigger when it
+ * closes, as in BottomSheet. It's opt-in (the phone launch modal and the Portfolio dialogs), so the desktop launch modal
+ * keeps the behavior it had.
  */
 export function Modal({ open, onClose, children, label, className, manageFocus = false }: { open: boolean; onClose: () => void; children: ReactNode; label: string; className?: string; manageFocus?: boolean }) {
   const { mounted, shown } = usePresence(open);
   const dialog = useRef<HTMLDivElement>(null);
+  const managed = useRef(manageFocus);
+  useEffect(() => {
+    managed.current = manageFocus;
+  });
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !(managed.current && document.querySelector(".wallet-adapter-modal")) && onClose();
     document.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -28,15 +33,30 @@ export function Modal({ open, onClose, children, label, className, manageFocus =
   }, [open, onClose]);
   useEffect(() => {
     if (!open || !manageFocus) return;
-    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const inside = (el: Element | null) => !!el && !!dialog.current?.contains(el);
+    // Focus already inside (the layout switched to the phone's while the dialog was open) stays where it is, and there's no trigger to return to.
+    const trigger = document.activeElement instanceof HTMLElement && !inside(document.activeElement) ? document.activeElement : null;
     const onTab = (e: KeyboardEvent) => {
       const d = dialog.current;
       if (e.key !== "Tab" || !d) return;
+      // The wallet picker over the dialog keeps Tab inside itself; it never takes focus on its own, so hand it over.
+      const picker = document.querySelector<HTMLElement>(".wallet-adapter-modal");
+      if (picker) {
+        if (!picker.contains(document.activeElement)) {
+          e.preventDefault();
+          picker.querySelector<HTMLElement>("button")?.focus();
+        }
+        return;
+      }
       const items = [...d.querySelectorAll<HTMLElement>(FOCUSABLE)];
       if (!items.length) return;
       const first = items[0];
       const last = items[items.length - 1];
-      if (e.shiftKey && (document.activeElement === first || document.activeElement === d)) {
+      // Focus that fell out of the dialog (the pressed Launch button gave way to the progress view, the picker closed) comes back in.
+      if (!inside(document.activeElement)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      } else if (e.shiftKey && (document.activeElement === first || document.activeElement === d)) {
         e.preventDefault();
         last.focus();
       } else if (!e.shiftKey && document.activeElement === last) {
@@ -45,7 +65,7 @@ export function Modal({ open, onClose, children, label, className, manageFocus =
       }
     };
     document.addEventListener("keydown", onTab);
-    const raf = requestAnimationFrame(() => dialog.current?.focus({ preventScroll: true }));
+    const raf = requestAnimationFrame(() => !inside(document.activeElement) && dialog.current?.focus({ preventScroll: true }));
     return () => {
       cancelAnimationFrame(raf);
       document.removeEventListener("keydown", onTab);
@@ -58,7 +78,15 @@ export function Modal({ open, onClose, children, label, className, manageFocus =
   return (
     <div className="fixed inset-0 z-50">
       <div className={backdropClass(shown)} aria-hidden />
-      <div className="absolute inset-0 flex items-start justify-center overflow-y-auto p-6 max-md:overscroll-contain max-md:p-0" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div
+        className="absolute inset-0 flex items-start justify-center overflow-y-auto p-6 max-md:overscroll-contain max-md:p-0"
+        onMouseDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          // A press outside closes it; with managed focus it doesn't also blur the trigger the close just focused.
+          if (manageFocus) e.preventDefault();
+          onClose();
+        }}
+      >
       {/* Below md the dialog is a full-screen sheet: no frame or margin, at least the viewport tall, clear of the notch. */}
       <div
         ref={dialog}

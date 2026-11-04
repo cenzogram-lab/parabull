@@ -74,7 +74,15 @@ export function RewardsPanel({ summary, solUsd }: { summary: RewardSummary | und
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-[13px] font-medium leading-5 text-muted">Unclaimed holder rewards</p>
-            <p className="mt-1 truncate text-[28px] font-semibold leading-8 tracking-tight text-gold">{sol(unclaimed, 4)}</p>
+            {/*
+              Chain mode still builds these epochs from simulated holders (there's no indexer yet), even for a connected
+              wallet: say so by the figure, as the header does. Where the two don't fit side by side (a 320px phone),
+              the tag drops below the figure rather than cutting it.
+            */}
+            <p className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2">
+              <span className="min-w-0 truncate text-[28px] font-semibold leading-8 tracking-tight text-gold">{sol(unclaimed, 4)}</span>
+              {!isDemo && <span className="shrink-0 rounded border border-line px-1 text-[9px] font-bold uppercase leading-[13px] tracking-wide text-rosebronze">Demo</span>}
+            </p>
             <p className="num mt-1 text-[12.5px] leading-[18px] text-muted">
               ≈ {usd(unclaimed * solUsd)} · {summary.openEpochs} open {summary.openEpochs === 1 ? "epoch" : "epochs"}
             </p>
@@ -84,7 +92,8 @@ export function RewardsPanel({ summary, solUsd }: { summary: RewardSummary | und
           </span>
         </div>
         <Link to="/parabull-token#claim" className="btn-gold mt-4 h-11 w-full rounded-xl text-[14.5px]">
-          {unclaimed > 0 ? "Claim on the $PARABULL page" : "Open the $PARABULL page"}
+          {/* In chain mode the figure is demo data, so the button doesn't offer to claim it. */}
+          {unclaimed > 0 && isDemo ? "Claim on the $PARABULL page" : "Open the $PARABULL page"}
           <ArrowRight className="h-4 w-4" strokeWidth={2.5} aria-hidden />
         </Link>
         {first && (

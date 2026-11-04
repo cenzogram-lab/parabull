@@ -71,8 +71,8 @@ export function MobileTabs<T extends string>({ options, value, onChange, label, 
   }, [value]);
   const mask = fade[0] || fade[1] ? `linear-gradient(90deg, ${fade[0] ? "transparent, #000 24px" : "#000"}, ${fade[1] ? "#000 calc(100% - 24px), transparent" : "#000"})` : undefined;
   return (
-    // On a short screen (a phone in landscape) the row stays in the page, so the header and nav leave room for content.
-    <div className={cx("flex items-center gap-1 border-b border-line", sticky && "sticky top-14 z-30 bg-canvas/95 px-4 backdrop-blur-md max-md:[@media(max-height:480px)]:static", className)}>
+    // On a phone in landscape (under 480px tall) the row stays in the page, so the header and nav leave room for content.
+    <div className={cx("flex items-center gap-1 border-b border-line", sticky && "sticky top-14 z-30 bg-canvas/95 px-4 backdrop-blur-md max-md:[@media(max-height:480px)_and_(orientation:landscape)]:static", className)}>
       <div
         ref={scroller}
         role="tablist"
@@ -241,7 +241,8 @@ const DISMISS_PX = 80;
  * Bottom sheet: slides up over a blurred backdrop (150ms, usePresence), up
  * to 85% of the viewport tall with a scrolling body, clear of the home
  * indicator. Closes on Esc, a backdrop tap, the close button, or dragging
- * the handle down. Focus moves into the sheet and back to the trigger.
+ * the handle down. Focus moves into the sheet and back to the trigger, and
+ * Tab stays inside it (or in the wallet picker over it).
  *
  * It renders in place (no portal), so keep it out of any element with a
  * transform, filter or backdrop-filter, which would become the containing
@@ -271,11 +272,24 @@ export function BottomSheet({ open, onClose, title, children }: { open: boolean;
       // Keep Tab inside the sheet.
       const p = panel.current;
       if (e.key !== "Tab" || !p) return;
+      // The wallet picker over the sheet keeps Tab inside itself; it never takes focus on its own, so hand it over.
+      const picker = document.querySelector<HTMLElement>(".wallet-adapter-modal");
+      if (picker) {
+        if (!picker.contains(document.activeElement)) {
+          e.preventDefault();
+          picker.querySelector<HTMLElement>("button")?.focus();
+        }
+        return;
+      }
       const items = [...p.querySelectorAll<HTMLElement>(FOCUSABLE)];
       if (!items.length) return;
       const first = items[0];
       const last = items[items.length - 1];
-      if (e.shiftKey && (document.activeElement === first || document.activeElement === p)) {
+      // Focus that fell out of the sheet (the picker closed) comes back in.
+      if (!p.contains(document.activeElement)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      } else if (e.shiftKey && (document.activeElement === first || document.activeElement === p)) {
         e.preventDefault();
         last.focus();
       } else if (!e.shiftKey && document.activeElement === last) {

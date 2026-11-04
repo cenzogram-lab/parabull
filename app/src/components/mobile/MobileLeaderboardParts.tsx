@@ -36,7 +36,12 @@ export interface Entry {
   aside?: { kind: "volume" | "profit"; value: number };
   trader?: Trader;
   squad?: Squad;
+  /** Your own line, placed where your figure ranks: it opens your portfolio and has no Follow. */
+  you?: boolean;
 }
+
+/** A row's context figure, short enough for a 320px phone: "$8.5K", "$728". */
+const shortUsd = (n: number) => (n >= 999_950 ? usdCompact(n) : n >= 999.5 ? `$${(n / 1e3).toFixed(1).replace(/\.0$/, "")}K` : `$${Math.round(n)}`);
 
 /** One board, best first: traders or squads by profit or volume, or traders by holder rewards. */
 export function rankEntries(tab: Tab, period: Period, metric: Metric, traders: Trader[], squads: Squad[]): Entry[] {
@@ -60,7 +65,7 @@ export function rankEntries(tab: Tab, period: Period, metric: Metric, traders: T
           const base = { key: t.handle, name: t.handle, avatar: t.avatar, verified: t.verified, trader: t };
           if (tab === "Rewards") {
             // The row's context is the longer window: the last 30 days, or the last week on the 1M board.
-            const meta = period === "1M" ? `${usdCompact(t.rewardsUsd * REWARD_SHARE["1W"])} in 7d` : `${usdCompact(t.rewardsUsd)} in 30d`;
+            const meta = period === "1M" ? `${shortUsd(t.rewardsUsd * REWARD_SHARE["1W"])}/7d` : `${shortUsd(t.rewardsUsd)}/30d`;
             return { ...base, meta, detail: [t.name, t.squad].filter(Boolean).join(" · "), value: t.rewardsUsd * REWARD_SHARE[period], money: true };
           }
           const win = `${Math.round(t.winRate * 100)}% win`;
@@ -255,7 +260,7 @@ const STEP_AVATAR: Record<number, number> = { 2: 60, 3: 52, 4: 44 };
 export function Podium({ entries, label, word, onOpen, className }: { entries: Entry[]; label: string; word: string; onOpen: (e: Entry, rank: number) => void; className?: string }) {
   const [first, ...rest] = entries.slice(0, 4);
   if (!first) return null;
-  const aria = (e: Entry, rank: number) => `Rank ${rank}, ${e.name}: ${fmtUsd(e.value, e.money)} ${word}. Details`;
+  const aria = (e: Entry, rank: number) => `Rank ${rank}, ${e.you ? "you" : e.name}: ${fmtUsd(e.value, e.money)} ${word}. ${e.you ? "Open your portfolio" : "Details"}`;
   return (
     <section aria-label="Top 4" className={cx("relative", className)}>
       <button type="button" onClick={() => onOpen(first, 1)} aria-label={aria(first, 1)} className="relative block w-full rounded-2xl p-px text-left shadow-lift transition-transform duration-100 ease-out active:scale-[0.99]" style={{ background: HERO_EDGE }}>

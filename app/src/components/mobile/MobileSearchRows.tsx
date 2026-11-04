@@ -171,7 +171,8 @@ export function CoinSearchRow({
             {byMint ? (
               <span className="shrink-0 font-mono text-[11.5px] text-rosebronze">{shortAddr(coin.mint, 5)}</span>
             ) : (
-              <span className="flex shrink-0">
+              // Under 360px a row with figures drops the age, so the ticker keeps its room.
+              <span className={cx("flex shrink-0", figures && "max-[359px]:hidden")}>
                 <AgeLabel ms={now - coin.createdAt} />
               </span>
             )}

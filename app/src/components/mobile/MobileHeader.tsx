@@ -45,7 +45,7 @@ export function MobileHeader() {
   const isMobile = useIsMobile();
   const { publicKey } = useWallet();
   const { setVisible } = useWalletModal();
-  const { toast, claimedEpochs } = useApp();
+  const { toast, claimedFor } = useApp();
   const { key } = useLocation();
   const [sheet, setSheet] = useState(false);
   const [seen, setSeen] = useState(false);
@@ -67,8 +67,8 @@ export function MobileHeader() {
     const t = window.setTimeout(run, 1200);
     return () => window.clearTimeout(t);
   }, [isMobile, wallet]);
-  // Claims made on the $PARABULL page count at once.
-  const epoch = epochs && claimableEpoch(epochs, claimedEpochs);
+  // The wallet's claims on the $PARABULL page count at once.
+  const epoch = epochs && claimableEpoch(epochs, claimedFor(wallet.toBase58()));
 
   const deposit = async () => {
     if (!publicKey) return setVisible(true);
@@ -84,13 +84,15 @@ export function MobileHeader() {
   return (
     <>
       <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center justify-between gap-2 border-b border-line bg-canvas/90 px-4 backdrop-blur-md md:hidden">
-        <Link to="/portfolio" aria-label={`${isDemo ? "Portfolio" : "Demo portfolio"}: ${usd(p.equityUsd)}, ${usdSigned(p.change24hUsd)} today`} className="flex min-w-0 items-center gap-2.5 rounded-full py-1 pr-2 transition-opacity duration-100 ease-out active:opacity-80">
+        {/* Under 330px the capsule gives up its right padding, so the figure and the Demo tag fit beside Deposit. */}
+        <Link to="/portfolio" aria-label={`${isDemo ? "Portfolio" : "Demo portfolio"}: ${usd(p.equityUsd)}, ${usdSigned(p.change24hUsd)} today`} className="flex min-w-0 items-center gap-2.5 rounded-full py-1 pr-2 transition-opacity duration-100 ease-out active:opacity-80 max-[329px]:pr-0">
           <img src={p.avatar} alt="" width={32} height={32} className="h-8 w-8 shrink-0 rounded-full ring-[1.5px] ring-copper/80 ring-offset-1 ring-offset-canvas" />
           <span className="flex min-w-0 flex-col items-start">
-            <span className="num max-w-full truncate text-[15px] font-semibold leading-5 text-cream">
-              {usd(p.equityUsd)}
+            {/* The figure truncates first: the Demo tag sits beside it, never inside the ellipsis. */}
+            <span className="flex min-w-0 max-w-full items-center gap-1.5">
+              <span className="num min-w-0 truncate text-[15px] font-semibold leading-5 text-cream">{usd(p.equityUsd)}</span>
               {/* Chain mode still shows the seeded portfolio (there's no indexer yet), even for a connected wallet: say so by the figure. */}
-              {!isDemo && <span className="ml-1.5 inline-block rounded border border-line px-1 align-[2px] text-[9px] font-bold uppercase leading-[13px] tracking-wide text-rosebronze">Demo</span>}
+              {!isDemo && <span className="shrink-0 rounded border border-line px-1 text-[9px] font-bold uppercase leading-[13px] tracking-wide text-rosebronze">Demo</span>}
             </span>
             <PnlBadge usdChange={p.change24hUsd} pctChange={p.change24hPct} />
           </span>

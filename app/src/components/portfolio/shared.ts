@@ -100,7 +100,7 @@ export function useWalletActions(address: string) {
 
 type Allocated = DemoEpoch & { you: NonNullable<DemoEpoch["you"]> };
 type Checked = Allocated & { verified: boolean };
-/** `claimed`: claimed on the $PARABULL page (this visit, or before it for the demo wallet's #4 and #5). */
+/** `claimed`: the wallet claimed it on the $PARABULL page (this visit, or before it for #4 and #5). */
 export type RewardEpoch = Checked & { claimed: boolean };
 
 export interface RewardSummary {
@@ -146,10 +146,11 @@ const built = new Map<string, Checked[]>();
  * The wallet's holder-reward epochs. Building the demo epochs (real Merkle
  * trees) takes about 150ms, so it waits for the browser to be idle, or runs
  * on the next tick once `urgent` (the Rewards tab is open). Undefined until
- * then. Claims made on the $PARABULL page this visit count at once.
+ * then. The wallet's claims on the $PARABULL page this visit count at once.
  */
 export function useRewardSummary(address: string, urgent: boolean): RewardSummary | undefined {
-  const { claimedEpochs } = useApp();
+  const { claimedFor } = useApp();
+  const claimed = claimedFor(address);
   const [, rerender] = useState(0);
   useEffect(() => {
     if (built.has(address)) return;
@@ -170,5 +171,5 @@ export function useRewardSummary(address: string, urgent: boolean): RewardSummar
     return () => window.clearTimeout(t);
   }, [address, urgent]);
   const checked = built.get(address);
-  return useMemo(() => checked && summarize(checked, claimedEpochs), [checked, claimedEpochs]);
+  return useMemo(() => checked && summarize(checked, claimed), [checked, claimed]);
 }

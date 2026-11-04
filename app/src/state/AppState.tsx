@@ -38,10 +38,13 @@ interface AppState {
   /** Edit the recently viewed list (`recent`). */
   removeRecent: (mint: string) => void;
   clearRecent: () => void;
-  /** Holder-reward epochs claimed this visit (the demo wallet starts with #4 and #5), shared by the claim panel, notifications and Portfolio. */
-  claimedEpochs: ReadonlySet<number>;
-  markClaimed: (epoch: number) => void;
+  /** Holder-reward epochs a wallet (base58) has claimed this visit, shared by the claim panel, notifications and Portfolio; every wallet starts with #4 and #5, as the claim panel always has. */
+  claimedFor: (wallet: string) => ReadonlySet<number>;
+  markClaimed: (wallet: string, epoch: number) => void;
 }
+
+/** What every wallet starts with: the claim panel has always shown epochs #4 and #5 as claimed. */
+const STARTING_CLAIMS: ReadonlySet<number> = new Set([4, 5]);
 
 const Ctx = createContext<AppState | null>(null);
 
@@ -77,7 +80,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchHistory, setSearchHistory] = useState<string[]>(() => loadMints("searchHistory"));
-  const [claimedEpochs, setClaimedEpochs] = useState<ReadonlySet<number>>(() => new Set([4, 5]));
+  const [claims, setClaims] = useState<ReadonlyMap<string, ReadonlySet<number>>>(() => new Map());
   const nextId = useRef(1);
 
   useEffect(() => save("layout", layout), [layout]);
@@ -102,7 +105,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const clearSearchHistory = useCallback(() => setSearchHistory([]), []);
   const removeRecent = useCallback((mint: string) => setRecent((r) => r.filter((m) => m !== mint)), []);
   const clearRecent = useCallback(() => setRecent([]), []);
-  const markClaimed = useCallback((epoch: number) => setClaimedEpochs((s) => new Set(s).add(epoch)), []);
+  const claimedFor = useCallback((wallet: string) => claims.get(wallet) ?? STARTING_CLAIMS, [claims]);
+  const markClaimed = useCallback((wallet: string, epoch: number) => setClaims((m) => new Map(m).set(wallet, new Set(m.get(wallet) ?? STARTING_CLAIMS).add(epoch))), []);
 
   const value = useMemo<AppState>(
     () => ({
@@ -130,10 +134,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       clearSearchHistory,
       removeRecent,
       clearRecent,
-      claimedEpochs,
+      claimedFor,
       markClaimed,
     }),
-    [layout, collapsed, muted, sfx, quickInfo, recent, watch, toasts, toast, dismissToast, searchOpen, searchHistory, addSearchHistory, removeSearchHistory, clearSearchHistory, removeRecent, clearRecent, claimedEpochs, markClaimed],
+    [layout, collapsed, muted, sfx, quickInfo, recent, watch, toasts, toast, dismissToast, searchOpen, searchHistory, addSearchHistory, removeSearchHistory, clearSearchHistory, removeRecent, clearRecent, claimedFor, markClaimed],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -21,9 +21,10 @@ import { useApp } from "../state/AppState";
 function ClaimPanel() {
   const client = useParabullProgram();
   const { setVisible } = useWalletModal();
-  const { toast, sfx, claimedEpochs: claimed, markClaimed } = useApp();
+  const { toast, sfx, claimedFor, markClaimed } = useApp();
   const isMobile = useIsMobile();
   const me = client.publicKey ?? DEMO_WALLET;
+  const claimed = claimedFor(me.toBase58());
   const epochs = useMemo(() => [...walletEpochs(me)].reverse(), [me.toBase58()]); // eslint-disable-line react-hooks/exhaustive-deps
   const [busy, setBusy] = useState<number | null>(null);
   const now = Date.now();
@@ -49,7 +50,7 @@ function ClaimPanel() {
         const sig = await client.claimHolderReward(e.epoch, leaf.index, BigInt(leaf.amount), proof);
         toast({ tone: "info", title: "Claim sent", body: explorer("tx", sig) });
       }
-      markClaimed(e.epoch);
+      markClaimed(me.toBase58(), e.epoch);
       sfx("buy");
       toast({ tone: "good", title: `Claimed ${sol(BigInt(e.you.amount), 4)}`, body: `Epoch ${e.epoch}${isDemo ? " · demo claim, nothing sent on-chain" : ""}` });
     } catch (err) {
@@ -139,7 +140,10 @@ function ClaimPanel() {
         <Gift className="h-5 w-5 text-gold" />
         <div>
           <h2 className="text-[16px] font-semibold">Claim holder rewards</h2>
-          <p className="text-xs text-muted">{note}</p>
+          {/* Two text nodes, as this line has always rendered: the phone's joined `note` shapes a hair differently. */}
+          <p className="text-xs text-muted">
+            {client.publicKey ? "Your wallet's allocations" : isDemo ? "Demo wallet allocations (connect to see your own)" : "Connect a wallet to see your allocations"} · each proof is verified in your browser against the on-chain root before you claim
+          </p>
         </div>
         <div className="ml-auto text-right">
           <div className="text-xs text-muted">Unclaimed</div>

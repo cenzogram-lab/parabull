@@ -86,9 +86,10 @@ export function Portfolio() {
         Its ::before is a canvas backdrop fading in just above the buttons and
         reaching down to the nav, so cards don't show around them; it stays
         inside the strip's own margins, so at rest it hides nothing. On a
-        short screen (a phone in landscape) it stays in place after the page.
+        phone in landscape (under 480px tall) it stays in place after the
+        page: Deposit is in the header too, and Copy address in the profile.
       */}
-      <div className="pointer-events-none z-40 mx-4 mt-5 grid grid-cols-2 gap-3 max-md:sticky max-md:bottom-[calc(5rem+env(safe-area-inset-bottom))] max-md:[@media(max-height:480px)]:relative max-md:[@media(max-height:480px)]:bottom-auto max-md:before:absolute max-md:before:-inset-x-4 max-md:before:-bottom-3 max-md:before:-top-4 max-md:before:-z-10 max-md:before:bg-[linear-gradient(to_bottom,transparent,theme(colors.canvas.DEFAULT)_16px)] md:mx-0 md:mt-8">
+      <div className="pointer-events-none z-40 mx-4 mt-5 grid grid-cols-2 gap-3 max-md:sticky max-md:bottom-[calc(5rem+env(safe-area-inset-bottom))] max-md:[@media(max-height:480px)_and_(orientation:landscape)]:relative max-md:[@media(max-height:480px)_and_(orientation:landscape)]:bottom-auto max-md:before:absolute max-md:before:-inset-x-4 max-md:before:-bottom-3 max-md:before:-top-4 max-md:before:-z-10 max-md:before:bg-[linear-gradient(to_bottom,transparent,theme(colors.canvas.DEFAULT)_16px)] md:mx-0 md:mt-8">
         <button type="button" onClick={wallet.deposit} className="btn-gold pointer-events-auto h-12 rounded-2xl text-[15px] max-md:shadow-[0_10px_28px_-8px_rgba(0,0,0,0.9)]">
           <Plus className="h-[18px] w-[18px]" strokeWidth={2.5} aria-hidden />
           Deposit

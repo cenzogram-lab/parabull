@@ -7,7 +7,7 @@
  */
 import { ArrowDownUp, ChevronDown, ChevronRight, Info } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { usd, usdSigned } from "../../lib/format";
 import { Rng } from "../../lib/rng";
 import type { Period } from "../../lib/types";
@@ -50,8 +50,9 @@ function rankOn(entries: Entry[], value: number, seeded: number): number {
  * 1D is its 24h change, 1W and 1M the equity curve's change over the window.
  * Rewards are what the wallet's holder-reward epochs paid in the period
  * (null until they're built). Volume and squad figures are seeded from the
- * address. A figure that would make the listed ranking places you in it;
- * otherwise the rank is seeded too, so it holds still between visits.
+ * address. A figure that would make the listed ranking places you in it,
+ * and the list shows your row there; otherwise the rank is seeded too, so it
+ * holds still between visits.
  */
 function standing(p: Pick<Portfolio, "address" | "equityUsd" | "change24hUsd" | "history">, tab: Tab, metric: Metric, period: Period, entries: Entry[], rewards: RewardSummary | undefined, solUsd: number, now: number): Standing | null {
   const rng = (what: string) => new Rng(`leaderboard:you:${p.address}:${what}`);
@@ -89,20 +90,33 @@ export function MobileLeaderboard() {
   const [calloutsOpen, setCalloutsOpen] = useState(false);
 
   const entries = useMemo(() => rankEntries(tab, period, metric, traders, squads), [tab, period, metric, traders, squads]);
-  const { address, equityUsd, change24hUsd, history } = portfolio;
+  const { address, equityUsd, change24hUsd, history, handle, avatar } = portfolio;
   const rewards = useRewardSummary(address, tab === "Rewards");
   const you = useMemo(
     () => standing({ address, equityUsd, change24hUsd, history }, tab, metric, period, entries, rewards, solUsd, now),
     [address, equityUsd, change24hUsd, history, tab, metric, period, entries, rewards, solUsd, now],
   );
+  // Where your figure makes the listed board, your own row takes that place (on the podium too) and the rows from there move down one.
+  const rows = useMemo(() => {
+    if (!you || you.rank > entries.length) return entries;
+    const line = tab === "Squads" ? "Your squad" : "Your portfolio";
+    const mine: Entry = { key: "@you", name: handle, avatar, verified: false, meta: line, detail: line, value: you.value, money: you.money, you: true };
+    return [...entries.slice(0, you.rank - 1), mine, ...entries.slice(you.rank - 1)];
+  }, [entries, you, tab, handle, avatar]);
   const word = measureWord(tab, metric);
 
+  const navigate = useNavigate();
   const openEntry = useCallback(
     (entry: Entry, rank: number) => {
+      // Your own plaque opens your portfolio, like the pinned card.
+      if (entry.you) {
+        navigate("/portfolio");
+        return;
+      }
       setPicked({ entry, rank, tab });
       setEntryOpen(true);
     },
-    [tab],
+    [tab, navigate],
   );
 
   return (
@@ -126,7 +140,7 @@ export function MobileLeaderboard() {
           <ChevronRight className="h-4 w-4 shrink-0 text-muted" aria-hidden />
         </button>
 
-        <Podium className="mt-5" entries={entries} label={`${HERO_LABEL[tab][metric]} · ${period}`} word={word} onOpen={openEntry} />
+        <Podium className="mt-5" entries={rows} label={`${HERO_LABEL[tab][metric]} · ${period}`} word={word} onOpen={openEntry} />
 
         <div className="mt-5 flex items-center justify-between gap-3">
           <PillTabs className="w-fit" options={PERIODS} value={period} onChange={setPeriod} label="Period" />
@@ -142,9 +156,9 @@ export function MobileLeaderboard() {
         <PinnedRank className="mt-3" p={portfolio} you={you} label={`${period} ${word}`} />
 
         <ol aria-label={`${tab} by ${period} ${word}`} className="panel mt-3 overflow-hidden">
-          {entries.map((e, i) => (
-            <RankRow key={e.key} e={e} rank={i + 1} word={word} following={following.has(e.key)} onFollow={toggleFollow} onOpen={openEntry} />
-          ))}
+          {rows.map((e, i) =>
+            e.you ? <YouRow key={e.key} e={e} rank={i + 1} word={word} /> : <RankRow key={e.key} e={e} rank={i + 1} word={word} following={following.has(e.key)} onFollow={toggleFollow} onOpen={openEntry} />,
+          )}
         </ol>
       </div>
 
@@ -161,6 +175,8 @@ function PinnedRank({ p, you, label, className }: { p: Portfolio; you: Standing 
   const rank = you ? `#${you.rank.toLocaleString("en-US")}` : "";
   // Under $100K the figure is printed in full, like the header's PnL.
   const value = !you ? "" : Math.abs(you.value) < 1e5 ? (you.money ? usdSigned(you.value) : usd(you.value)) : fmtUsd(you.value, you.money);
+  // Under 380px it's always the compact figure ("+$2.22K"), which leaves the rank line its room.
+  const short = you ? fmtUsd(you.value, you.money) : "";
   return (
     <Link
       to="/portfolio"
@@ -175,22 +191,64 @@ function PinnedRank({ p, you, label, className }: { p: Portfolio; you: Standing 
       </span>
       <span aria-hidden className="min-w-0 flex-1">
         <span className="block truncate text-[15px] font-semibold leading-5 text-cream">{p.handle}</span>
-        <span className="block truncate text-[12.5px] leading-[18px] text-muted">
+        {/* The label gives way first on a narrow phone, so the rank itself always shows. */}
+        <span className="flex min-w-0 text-[12.5px] leading-[18px] text-muted">
           {you ? (
             <>
-              {you.rankLabel} <span className="num font-semibold text-cream">{rank}</span>
+              <span className="truncate">{`${you.rankLabel}\u00a0`}</span>
+              <span className="num shrink-0 font-semibold text-cream">{rank}</span>
             </>
           ) : (
-            "Your rank"
+            <span className="truncate">Your rank</span>
           )}
         </span>
       </span>
       <span aria-hidden className="shrink-0 text-right">
         <span className="block text-[10px] font-semibold uppercase leading-4 tracking-[0.08em] text-muted">{label}</span>
-        {you ? <span className={cx("num block text-[15px] font-semibold leading-5", valueTone(you))}>{value}</span> : <span className="ml-auto block h-5 w-16 animate-pulse rounded bg-surface-3" />}
+        {you ? (
+          <span className={cx("num block text-[15px] font-semibold leading-5", valueTone(you))}>
+            {short === value ? (
+              value
+            ) : (
+              <>
+                <span className="max-[379px]:hidden">{value}</span>
+                <span className="min-[380px]:hidden">{short}</span>
+              </>
+            )}
+          </span>
+        ) : (
+          <span className="ml-auto block h-5 w-16 animate-pulse rounded bg-surface-3" />
+        )}
       </span>
       <ChevronRight className="h-4 w-4 shrink-0 text-muted" aria-hidden />
     </Link>
+  );
+}
+
+/** Your own row, where your figure ranks on the listed board: tinted gold and without Follow; like the pinned card, it opens your portfolio. */
+function YouRow({ e, rank, word }: { e: Entry; rank: number; word: string }) {
+  const top = rank <= 3;
+  return (
+    <li className="border-t border-line-soft first:border-t-0">
+      <Link
+        to="/portfolio"
+        aria-label={`${rank}. You: ${fmtUsd(e.value, e.money)} ${word}. Open your portfolio`}
+        className="flex min-h-[60px] items-center gap-2 bg-gold/[0.07] py-2 pl-2 pr-3 transition-colors duration-100 ease-out focus-visible:outline-offset-[-2px] active:bg-surface-2"
+      >
+        <span aria-hidden className={cx("num w-5 shrink-0 text-center text-[14px] font-semibold", top ? "text-gold" : "text-cream")}>{rank}</span>
+        <span aria-hidden className="relative shrink-0">
+          <RankAvatar src={e.avatar} rank={rank} />
+          <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-gold px-1.5 text-[9px] font-bold uppercase leading-[13px] tracking-wide text-canvas ring-2 ring-surface">You</span>
+        </span>
+        <span aria-hidden className="min-w-0 flex-1">
+          <span className={cx("block truncate text-[14px] font-semibold leading-5", top ? "text-gold" : "text-cream")}>{e.name}</span>
+          <span className="mt-0.5 block truncate text-[11.5px] leading-4 text-muted">{e.meta}</span>
+        </span>
+        <span aria-hidden className="w-20 shrink-0 text-right">
+          <span className={cx("num block truncate text-[13.5px] font-semibold leading-5", valueTone(e))}>{fmtUsd(e.value, e.money)}</span>
+        </span>
+      </Link>
+    </li>
   );
 }
 
@@ -214,7 +272,8 @@ function RankRow({ e, rank, word, following, onFollow, onOpen }: { e: Entry; ran
         <span className="min-w-0 flex-1">
           <span className={cx("block truncate text-[14px] font-semibold leading-5", top ? "text-gold" : "text-cream")}>{e.name}</span>
           <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11.5px] leading-4 text-muted">
-            {e.tag && <span className="shrink-0 rounded bg-surface-3 px-1 text-[10px] font-semibold leading-4 text-rosebronze">{e.tag}</span>}
+            {/* Under 360px the squad tag gives its room to the win rate. */}
+            {e.tag && <span className="shrink-0 rounded bg-surface-3 px-1 text-[10px] font-semibold leading-4 text-rosebronze max-[359px]:hidden">{e.tag}</span>}
             <span className="truncate">{e.meta}</span>
           </span>
         </span>

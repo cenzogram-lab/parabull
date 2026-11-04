@@ -64,6 +64,17 @@ interface MarketState {
 
 const Ctx = createContext<MarketState | null>(null);
 
+/**
+ * Selling `tokens` of a graduated coin. On Raydium a trade moves the price by its weight against 5% of the market
+ * cap: a buy lifts it by the USD it spends and fills at the price before it. A sale is that buy in reverse: the price
+ * falls to where buying the tokens back would start, so it stays above zero, and the sale pays what that buy would
+ * cost, less the 1% fee. Buying and then selling what you bought returns the stake less 1%, at the starting price.
+ */
+export function raydiumSell(c: Pick<Coin, "priceUsd" | "mcapUsd">, tokens: number): { usd: number; priceUsd: number } {
+  const priceUsd = c.priceUsd / (1 + (tokens * c.priceUsd) / Math.max(c.mcapUsd * 0.05, 1));
+  return { usd: tokens * priceUsd * 0.99, priceUsd };
+}
+
 /** Recompute the derived numbers after a curve trade. */
 function reprice(c: Coin, reserves: Coin["reserves"]): Coin {
   const priceUsd = priceSol(reserves) * SOL_USD;
@@ -148,17 +159,19 @@ export function MarketProvider({ children }: { children: ReactNode }) {
     let solAmt: number;
     let tokenAmt: number;
     if (c.migrated) {
-      // Graduated coins trade on Raydium: nudge the price by the trade's weight. A buy spends `amount` lamports;
-      // a sell sells `amount` token base units at the pool price, less the 1% the ticket's estimate takes off.
+      // Graduated coins trade on Raydium (see raydiumSell). A buy spends `amount` lamports at the pool price and
+      // lifts it by the trade's weight; a sell sells `amount` token base units as that buy in reverse.
+      let priceUsd: number;
       if (side === "buy") {
         solAmt = Number(amount) / 1e9;
         tokenAmt = (solAmt * SOL_USD) / c.priceUsd;
+        priceUsd = c.priceUsd * (1 + (solAmt * SOL_USD) / Math.max(c.mcapUsd * 0.05, 1));
       } else {
         tokenAmt = Number(amount) / 1e6;
-        solAmt = (tokenAmt * c.priceUsd * 0.99) / SOL_USD;
+        const sale = raydiumSell(c, tokenAmt);
+        solAmt = sale.usd / SOL_USD;
+        priceUsd = sale.priceUsd;
       }
-      const impact = ((solAmt * SOL_USD) / Math.max(c.mcapUsd * 0.05, 1)) * (side === "buy" ? 1 : -1);
-      const priceUsd = c.priceUsd * (1 + impact);
       next = { ...c, priceUsd, mcapUsd: priceUsd * SUPPLY_TOKENS, athUsd: Math.max(c.athUsd, priceUsd * SUPPLY_TOKENS), spark: [...c.spark.slice(1), priceUsd] };
     } else if (side === "buy") {
       const q = quoteBuyWithSol(c.reserves, amount, FEE_BPS, slippageBps);

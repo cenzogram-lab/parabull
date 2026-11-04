@@ -56,7 +56,8 @@ render, so there's no flash), and shared components change only through
 - **Leaderboard.** Traders / Squads / Rewards, an info card that opens the
   best callouts, the top-4 podium, 1D / 1W / 1M with a Profit / Volume sort,
   your pinned rank (it links to the portfolio) and the ranking with Follow
-  buttons. A row opens that trader's or squad's card.
+  buttons. A row opens that trader's or squad's card; when your figure makes
+  the listed ranking, your own row sits in it at that place.
 - **Coin page.** A compact header, the chart, gauges and stats, then Trades /
   Holders / Callouts as lists, and a Buy / Sell bar that opens the trade
   panel in a sheet.
@@ -73,10 +74,11 @@ render, so there's no flash), and shared components change only through
   to `/parabull-token#claim` land on the claim panel; desktop keeps the
   router's scroll behavior, as before. Back and Forward keep their scroll
   position, and the launch modal leaves the page under it alone.
-- **Landscape.** On a screen under 480px tall the tab rows and the Buy /
-  Sell and Deposit / Receive bars stay in the page instead of pinning. A
-  notched phone in landscape gets the desktop layout, padded clear of the
-  notch.
+- **Landscape.** On a phone in landscape under 480px tall the tab rows and
+  the Deposit / Receive strip stay in the page instead of pinning, and the
+  chart shrinks to fit; the Buy / Sell bar stays docked, since it's the coin
+  page's only way to trade. A notched phone in landscape gets the desktop
+  layout, padded clear of the notch.
 
 **Demo data on the phone screens:** the portfolio's cash starts at 1.84 SOL
 and follows your demo trades (they aren't capped at it, so a bigger buy
@@ -88,9 +90,10 @@ portfolio's. The 24h change compares today with what you held a day ago: a
 holding in a coin launched within the last day counts from what you paid,
 and a demo buy only counts for how its price has moved since. On the
 leaderboard your Rewards figure is what your reward epochs paid in the
-period, and a figure that would make the listed ranking places you in it.
-Follows (the eight top traders to start) and claimed reward epochs are
-shared by every view that shows them, for the visit only.
+period, and a figure that would make the listed ranking puts your row in
+it at that place. Follows (the eight top traders to start) and each
+wallet's claimed reward epochs are shared by every view that shows them,
+for the visit only.
 
 Check a change with `npm run build`, then `npm run audit:mobile` (no
 sideways scrolling, every touch target at least 44x44px, no console errors,
@@ -127,7 +130,8 @@ positions, PnL, closed positions and reward epochs, even for a connected
 wallet). These need the indexer API in
 [`docs/BACKEND_SPEC.md`](../docs/BACKEND_SPEC.md); the UI labels them
 (header pill and footer; on a phone, the footnote, a Demo tag by the
-header's balance and the portfolio's Demo chip).
+header's balance and the portfolio's Demo chip; in both layouts, a Demo tag
+by the Rewards tab's unclaimed figure).
 
 ## Where the logic comes from
 
