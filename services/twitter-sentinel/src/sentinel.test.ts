@@ -30,9 +30,9 @@ function harness(opts: { secret?: string; operatorUsername?: string } = {}) {
   const creator = Keypair.generate();
   const mint = Keypair.generate().publicKey.toBase58();
   const operator = opts.operatorUsername ? { [mint]: { username: opts.operatorUsername, authToken: cookie("e"), ct0: cookie("f") } } : {};
-  const state = { curve: { ...at(0.3), creator: creator.publicKey.toBase58() } as CurveState, watching: 0, mentions: [] as MentionTweet[] };
+  const state = { curve: { ...at(0.3), creator: creator.publicKey.toBase58() } as CurveState, watching: 0, mentions: [] as MentionTweet[], curveReads: 0 };
   const chain: ChainSource = {
-    curve: async () => state.curve,
+    curve: async () => (state.curveReads++, state.curve),
     raise: async () => RAISE,
     ticker: async () => "BULL",
     watch: () => {
@@ -178,6 +178,42 @@ test("without SENTINEL_SECRET creators can't link a session; the operator's acco
     h.state.curve = { ...h.state.curve, ...at(0.55) };
     await h.sentinel.tick();
     assert.equal(h.clients.get("OperatorBull")?.sent.length, 1);
+  } finally {
+    await h.stop();
+  }
+});
+
+test("unsigned, stale, replayed and forged writes are refused before any RPC call", async () => {
+  const h = harness({ secret: SECRET });
+  await h.start();
+  try {
+    const reads = () => h.state.curveReads;
+    const stranger = Keypair.generate();
+    const junk: [string, Promise<Response>, number][] = [
+      ["unsigned PUT", h.raw("PUT", { settings: DEFAULT_SETTINGS }), 400],
+      ["unsigned DELETE", h.raw("DELETE", {}), 400],
+      ["forged PUT signature", h.raw("PUT", { settings: DEFAULT_SETTINGS, issuedAt: h.nowIso(), signer: h.creator.publicKey.toBase58(), signature: Buffer.alloc(64, 7).toString("base64") }), 401],
+      ["forged DELETE signature", h.raw("DELETE", { issuedAt: h.nowIso(), signer: h.creator.publicKey.toBase58(), signature: Buffer.alloc(64, 7).toString("base64") }), 401],
+      ["stale PUT", h.put(DEFAULT_SETTINGS, null, h.creator, new Date(Date.parse(h.nowIso()) - 10 * 60_000).toISOString()), 401],
+      ["bad signer address", h.raw("PUT", { settings: DEFAULT_SETTINGS, issuedAt: h.nowIso(), signer: "not-a-key", signature: "AA==" }), 400],
+    ];
+    for (const [name, res, code] of junk) assert.equal((await res).status, code, name);
+    assert.equal(reads(), 0, "no RPC call for any of them");
+
+    // A replay of an accepted request is also refused without reading the chain.
+    const issuedAt = h.nowIso();
+    assert.equal((await h.put(DEFAULT_SETTINGS, null, h.creator, issuedAt)).status, 200);
+    const afterSave = reads();
+    assert.equal((await h.put(DEFAULT_SETTINGS, null, h.creator, issuedAt)).status, 409, "replay");
+    assert.equal(reads(), afterSave, "a replay costs no RPC call");
+
+    // Only a validly signed request reads the curve: another wallet's signature then gets 403.
+    h.tick();
+    const before = reads();
+    assert.equal((await h.put(DEFAULT_SETTINGS, null, stranger)).status, 403);
+    assert.equal((await h.del(stranger)).status, 403);
+    assert.equal(reads() - before, 2, "one read each, to learn the on-chain creator");
+    assert.equal((await h.get()).active, true, "the stranger changed nothing");
   } finally {
     await h.stop();
   }

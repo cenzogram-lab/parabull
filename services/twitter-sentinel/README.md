@@ -98,3 +98,5 @@ connected and its controls stay off.
 
 The `GET` is public: what it returns is already public (the persona's posts and the handle). Every change needs the
 creator's signature: an unsigned request gets 400, a stale or tampered one 401, another wallet 403, a replay 409.
+The signature, timestamp and replay checks run before any RPC call, so junk requests never reach the chain; only a
+validly signed request reads the curve, to compare its signer with the on-chain creator.
