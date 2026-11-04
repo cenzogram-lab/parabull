@@ -10,7 +10,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { PublicKey } from "@solana/web3.js";
 import { DEFAULT_SETTINGS, type SentinelStatus } from "../../../app/src/lib/sentinelMessage";
 import { AccountError, type XRegistry } from "./accounts";
-import { verifySignedDisconnect, verifySignedSettings } from "./auth";
+import { NOT_CREATOR, verifySignedDisconnect, verifySignedSettings } from "./auth";
 import type { ChainSource } from "./chain";
 import type { Sentinel } from "./sentinel";
 import type { Store } from "./store";
@@ -101,12 +101,19 @@ export function createApi(deps: ServerDeps): Server {
       if (req.method !== "PUT" && req.method !== "DELETE") return send(405, { error: "method not allowed" });
 
       const body = await readBody(req);
-      const curve = await deps.chain.curve(mint);
-      if (!curve) return send(404, { error: "no Parabull bonding curve for this mint" });
+      // The signature, timestamp and replay checks need no RPC, so they run first: unsigned, stale, replayed or forged
+      // requests never reach the chain. Only a validly signed request reads the curve, to learn its on-chain creator.
+      const creatorOf = async (signer: string) => {
+        const curve = await deps.chain.curve(mint);
+        if (!curve) return { error: send(404, { error: "no Parabull bonding curve for this mint" }) };
+        if (curve.creator !== signer) return { error: send(NOT_CREATOR.status, { error: NOT_CREATOR.error }) };
+        return { curve };
+      };
 
       if (req.method === "DELETE") {
-        const auth = verifySignedDisconnect(body, mint, curve.creator, now(), deps.store.lastIssued(mint));
+        const auth = verifySignedDisconnect(body, mint, null, now(), deps.store.lastIssued(mint));
         if (!auth.ok) return send(auth.status, { error: auth.error });
+        if ("error" in (await creatorOf(auth.signer))) return;
         deps.sentinel.forget(mint);
         deps.store.remove(mint, auth.issuedAtMs);
         deps.accounts.invalidate(mint);
@@ -114,8 +121,11 @@ export function createApi(deps: ServerDeps): Server {
         return send(200, status(mint));
       }
 
-      const auth = verifySignedSettings(body, mint, curve.creator, now(), deps.store.lastIssued(mint));
+      const auth = verifySignedSettings(body, mint, null, now(), deps.store.lastIssued(mint));
       if (!auth.ok) return send(auth.status, { error: auth.error });
+      const found = await creatorOf(auth.signer);
+      if ("error" in found) return;
+      const { curve } = found;
       // Checked with X before anything is saved, so a bad session never replaces a working one.
       const linked = auth.session ? await deps.accounts.prepare(mint, auth.session) : null;
       const prev = deps.store.get(mint);

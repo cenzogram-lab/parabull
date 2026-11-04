@@ -13,7 +13,7 @@ import { useNow } from "../hooks/useNow";
 import { OVERLAY_MS } from "../hooks/usePresence";
 import { useParabullProgram } from "../hooks/useParabullProgram";
 import { coinArt } from "../lib/art";
-import { canonicalTicker, nameHash, normalizeName, parseTweetId, tweetIdHash } from "../lib/launchRules";
+import { canonicalTicker, nameHash, normalizeName, parseTweetId, socialLink, tweetIdHash } from "../lib/launchRules";
 import { checkUri, uploadMetadata } from "../lib/metadata";
 import { initialReserves, mcapSol, priceSol, PROTOCOL } from "../lib/protocol";
 import { toHex } from "../lib/sha256";
@@ -108,7 +108,12 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
     ticker: ticker && !t.ok ? t.error : locks.ticker ? "This ticker is locked for 3 days" : null,
     tweet: tw && !tw.ok ? tw.error : locks.tweet ? "This tweet already backed a launch in the last 3 days" : null,
   };
-  const ready = n.ok && t.ok && !errors.name && !errors.ticker && !errors.tweet && (isDemo || image) && (!needsUri || (manualUri && !uriError));
+  // Social links are creator input shown as links on the coin page: only http(s) URLs are accepted.
+  const links = { website: socialLink(socials.website), x: socialLink(socials.x), telegram: socialLink(socials.telegram) };
+  const linkError = (k: keyof typeof links) => (links[k].ok ? null : (links[k] as { error: string }).error);
+  const linksOk = links.website.ok && links.x.ok && links.telegram.ok;
+  const link = (k: keyof typeof links) => (links[k].ok && (links[k] as { value: string }).value) || undefined;
+  const ready = n.ok && t.ok && !errors.name && !errors.ticker && !errors.tweet && linksOk && (isDemo || image) && (!needsUri || (manualUri && !uriError));
 
   const draft: Coin = useMemo(() => {
     const r = initialReserves();
@@ -168,7 +173,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
       setPhase({ step: "running", at: 1, delayMs, started });
       window.setTimeout(() => setPhase({ step: "running", at: 2, delayMs, started: Date.now() }), 900);
       window.setTimeout(() => {
-        const coin = demoLaunch({ name: name.trim(), ticker: t.value, description, image: image?.url ?? null, tweetId: tw?.ok ? tw.value.toString() : null, socials: { x: socials.x || undefined, website: socials.website || undefined, telegram: socials.telegram || undefined } }, client.publicKey?.toBase58() ?? "demo");
+        const coin = demoLaunch({ name: name.trim(), ticker: t.value, description, image: image?.url ?? null, tweetId: tw?.ok ? tw.value.toString() : null, socials: { x: link("x"), website: link("website"), telegram: link("telegram") } }, client.publicKey?.toBase58() ?? "demo");
         sfx("launch");
         setPhase({ step: "done", mint: coin.mint, name: coin.name });
       }, 900 + delayMs);
@@ -177,7 +182,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
     try {
       setPhase({ step: "running", at: 0, delayMs: 0, started });
       const uri = CONFIG.metadataUploadUrl
-        ? await uploadMetadata(CONFIG.metadataUploadUrl, { name: name.trim(), symbol: t.value, description, image: image!.file, website: socials.website, x: socials.x, telegram: socials.telegram })
+        ? await uploadMetadata(CONFIG.metadataUploadUrl, { name: name.trim(), symbol: t.value, description, image: image!.file, website: link("website"), x: link("x"), telegram: link("telegram") })
         : manualUri.trim();
       const req = await client.requestLaunch({ name: name.trim(), symbol: t.value, uri, tweetId: tw?.ok ? tw.value : null });
       setPhase({ step: "running", at: 2, delayMs: 15000, started: Date.now(), ticket: req.ticket.toBase58(), signature: req.signature });
@@ -288,9 +293,12 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
                   ["telegram", Send, "https://t.me/yourcoin"],
                 ] as const
               ).map(([k, Icon, ph]) => (
-                <div key={k} className="input-shell">
-                  <Icon className="ml-3 h-3.5 w-3.5 text-muted" />
-                  <input className="w-full bg-transparent px-2.5 py-2 text-cream outline-none max-md:h-11" value={socials[k]} onChange={(e) => setSocials({ ...socials, [k]: e.target.value })} placeholder={ph} aria-label={k} />
+                <div key={k}>
+                  <div className="input-shell">
+                    <Icon className="ml-3 h-3.5 w-3.5 text-muted" />
+                    <input className="w-full bg-transparent px-2.5 py-2 text-cream outline-none max-md:h-11" value={socials[k]} onChange={(e) => setSocials({ ...socials, [k]: e.target.value })} placeholder={ph} aria-label={k} aria-invalid={!!linkError(k)} />
+                  </div>
+                  {linkError(k) && <p className="mt-1 text-[12px] text-ember">{linkError(k)}</p>}
                 </div>
               ))}
             </div>

@@ -17,6 +17,7 @@ import type { Coin } from "../lib/types";
 import { progressOf } from "../mock/coins";
 import { useApp } from "../state/AppState";
 import { useMarket } from "../state/Market";
+import { safeLink } from "../lib/launchRules";
 
 function CopyPill({ value }: { value: string }) {
   const [done, setDone] = useState(false);
@@ -112,18 +113,18 @@ export function CoinPage() {
                 <a href={explorer("token", coin.mint)} target="_blank" rel="noreferrer" className="inline-flex h-7 items-center gap-1 rounded-full border border-line px-2.5 text-[12px] text-muted hover:text-cream">
                   Solscan <ExternalLink className="h-3 w-3" />
                 </a>
-                {coin.socials.x && (
-                  <a href={coin.socials.x} target="_blank" rel="noreferrer" className="btn-icon h-7 w-7 rounded-full border border-line" aria-label="X">
+                {safeLink(coin.socials.x) && (
+                  <a href={safeLink(coin.socials.x)} target="_blank" rel="noreferrer" className="btn-icon h-7 w-7 rounded-full border border-line" aria-label="X">
                     <XLogo className="h-3.5 w-3.5" />
                   </a>
                 )}
-                {coin.socials.website && (
-                  <a href={coin.socials.website} target="_blank" rel="noreferrer" className="btn-icon h-7 w-7 rounded-full border border-line" aria-label="Website">
+                {safeLink(coin.socials.website) && (
+                  <a href={safeLink(coin.socials.website)} target="_blank" rel="noreferrer" className="btn-icon h-7 w-7 rounded-full border border-line" aria-label="Website">
                     <Globe className="h-3.5 w-3.5" />
                   </a>
                 )}
-                {coin.socials.telegram && (
-                  <a href={coin.socials.telegram} target="_blank" rel="noreferrer" className="btn-icon h-7 w-7 rounded-full border border-line" aria-label="Telegram">
+                {safeLink(coin.socials.telegram) && (
+                  <a href={safeLink(coin.socials.telegram)} target="_blank" rel="noreferrer" className="btn-icon h-7 w-7 rounded-full border border-line" aria-label="Telegram">
                     <Send className="h-3.5 w-3.5" />
                   </a>
                 )}

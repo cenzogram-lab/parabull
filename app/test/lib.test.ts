@@ -96,3 +96,14 @@ test("formatting", () => {
   assert.equal(age(3 * 86_400_000), "3d");
   assert.equal(countdown(2 * 86_400_000 + 3_723_000), "2d 01:02:03");
 });
+
+test("social links: only http(s) URLs are kept", async () => {
+  const { socialLink, safeLink } = await import("../src/lib/launchRules");
+  assert.deepEqual(socialLink(""), { ok: true, value: "" });
+  assert.deepEqual(socialLink(" https://x.com/parabull "), { ok: true, value: "https://x.com/parabull" });
+  for (const bad of ["javascript:alert(1)", "JavaScript:alert(1)", "data:text/html,<script>alert(2)</script>", "vbscript:x", "x.com/parabull", "//evil.example"]) {
+    assert.equal(socialLink(bad).ok, false, bad);
+    assert.equal(safeLink(bad), undefined, bad);
+  }
+  assert.equal(safeLink("http://example.com/a"), "http://example.com/a");
+});
