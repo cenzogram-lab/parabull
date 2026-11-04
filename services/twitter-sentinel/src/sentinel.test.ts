@@ -1,17 +1,22 @@
-/** End to end in dry-run mode: the API, the signed settings, and the milestone and reply loops against a fake chain. */
+/**
+ * End to end in dry-run mode, against a fake chain: the settings API, linking and replacing an X session without a
+ * restart, disconnecting, who may do each, and the milestone and reply loops.
+ */
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { ed25519 } from "@noble/curves/ed25519";
 import { Keypair } from "@solana/web3.js";
-import { DEFAULT_SETTINGS, settingsMessage, type SentinelSettings, type SentinelStatus } from "../../../app/src/lib/sentinelMessage";
-import { settingsDigest } from "./auth";
+import { DEFAULT_SETTINGS, sentinelMessage, type SentinelSettings, type SentinelStatus, type XSession } from "../../../app/src/lib/sentinelMessage";
+import { XRegistry } from "./accounts";
+import { payloadDigest } from "./auth";
 import type { ChainSource, CurveState } from "./chain";
 import { graduationRaise } from "./milestones";
 import type { MentionTweet } from "./replies";
+import { keyFromSecret } from "./seal";
 import { Sentinel } from "./sentinel";
 import { createApi } from "./server";
 import { Store } from "./store";
@@ -19,67 +24,161 @@ import { DryRunX } from "./x";
 
 const RAISE = graduationRaise({ virtualToken: 1_073_000_000_000_000n, virtualSol: 30_000_000_000n, realToken: 793_100_000_000_000n });
 const at = (f: number, migrated = false): Omit<CurveState, "creator"> => ({ realSol: (RAISE * BigInt(Math.round(f * 1000)) + 999n) / 1000n, complete: f >= 1, migrated });
+const cookie = (c: string) => c.repeat(40);
 
-test("a creator's signed settings drive milestone posts and cashtag replies", async () => {
+function harness(opts: { secret?: string; operatorUsername?: string } = {}) {
   const creator = Keypair.generate();
   const mint = Keypair.generate().publicKey.toBase58();
-  let curve: CurveState = { ...at(0.3), creator: creator.publicKey.toBase58() };
-  const chain: ChainSource = { curve: async () => curve, raise: async () => RAISE, ticker: async () => "BULL", watch: () => () => {} };
-  let mentions: MentionTweet[] = [];
-  const x = new DryRunX("parabullbot", () => {}, () => mentions);
+  const operator = opts.operatorUsername ? { [mint]: { username: opts.operatorUsername, authToken: cookie("e"), ct0: cookie("f") } } : {};
+  const state = { curve: { ...at(0.3), creator: creator.publicKey.toBase58() } as CurveState, watching: 0, mentions: [] as MentionTweet[] };
+  const chain: ChainSource = {
+    curve: async () => state.curve,
+    raise: async () => RAISE,
+    ticker: async () => "BULL",
+    watch: () => {
+      state.watching++;
+      return () => void state.watching--;
+    },
+  };
+  /** Every client the registry creates, by handle, so the test can see who posted. */
+  const clients = new Map<string, DryRunX>();
   let clock = Date.parse("2026-11-04T12:00:00Z");
   const now = () => clock;
-  const store = new Store(mkdtempSync(join(tmpdir(), "sentinel-")));
-  const sentinel = new Sentinel({ store, chain, xFor: () => x, coinUrl: (m) => `https://parabull.app/coin/${m}`, now, log: () => {} });
-  const api = createApi({ store, chain, sentinel, xFor: () => x, allowedOrigins: ["https://parabull.app"], now });
-  await new Promise<void>((ok) => api.listen(0, "127.0.0.1", ok));
-  const base = `http://127.0.0.1:${(api.address() as AddressInfo).port}/api/sentinel/${mint}`;
-  const put = (settings: SentinelSettings, signer = creator, issuedAt = new Date(clock).toISOString()) => {
-    const signature = Buffer.from(ed25519.sign(new TextEncoder().encode(settingsMessage(mint, issuedAt, settingsDigest(settings))), signer.secretKey.slice(0, 32))).toString("base64");
-    return fetch(base, { method: "PUT", headers: { "Content-Type": "application/json", Origin: "https://parabull.app" }, body: JSON.stringify({ settings, issuedAt, signer: signer.publicKey.toBase58(), signature }) });
+  const dir = mkdtempSync(join(tmpdir(), "sentinel-"));
+  const store = new Store(dir);
+  const accounts = new XRegistry({
+    store,
+    key: keyFromSecret(opts.secret),
+    operator,
+    make: (a) => {
+      const c = new DryRunX(a.username, () => {}, () => state.mentions);
+      clients.set(a.username, c);
+      return c;
+    },
+  });
+  const sentinel = new Sentinel({ store, chain, xFor: (m) => accounts.for(m), coinUrl: (m) => `https://parabull.app/coin/${m}`, now, log: () => {} });
+  const api = createApi({ store, chain, sentinel, accounts, dryRun: true, allowedOrigins: ["https://parabull.app"], now });
+  const signed = (action: "update settings" | "disconnect", settings: SentinelSettings | null, session: XSession | null, signer: Keypair, issuedAt: string) =>
+    Buffer.from(ed25519.sign(new TextEncoder().encode(sentinelMessage(action, mint, issuedAt, payloadDigest(settings, session ? { ...session, username: session.username.replace(/^@/, "") } : null))), signer.secretKey.slice(0, 32))).toString("base64");
+  let base = "";
+  return {
+    creator,
+    mint,
+    state,
+    clients,
+    store,
+    dir,
+    sentinel,
+    tick: (ms = 1_000) => (clock += ms),
+    nowIso: () => new Date(clock).toISOString(),
+    async start() {
+      await new Promise<void>((ok) => api.listen(0, "127.0.0.1", ok));
+      base = `http://127.0.0.1:${(api.address() as AddressInfo).port}/api/sentinel/${mint}/settings`;
+    },
+    stop: () => (sentinel.stop(), new Promise((ok) => api.close(ok))),
+    get: async () => (await (await fetch(base)).json()) as SentinelStatus,
+    put(settings: SentinelSettings, session: XSession | null = null, signer = creator, issuedAt = new Date(clock).toISOString()) {
+      const body = { settings, ...(session ? { session } : {}), issuedAt, signer: signer.publicKey.toBase58(), signature: signed("update settings", settings, session, signer, issuedAt) };
+      return fetch(base, { method: "PUT", headers: { "Content-Type": "application/json", Origin: "https://parabull.app" }, body: JSON.stringify(body) });
+    },
+    del(signer = creator, issuedAt = new Date(clock).toISOString()) {
+      const body = { issuedAt, signer: signer.publicKey.toBase58(), signature: signed("disconnect", null, null, signer, issuedAt) };
+      return fetch(base, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    },
+    raw: (method: string, body: unknown) => fetch(base, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
   };
+}
+
+const SECRET = "test-secret-that-is-at-least-32-characters";
+
+test("a creator links, updates and disconnects X automation after launch, live, without a restart", async () => {
+  const h = harness({ secret: SECRET });
+  await h.start();
   try {
-    const before = (await (await fetch(base)).json()) as SentinelStatus;
-    assert.deepEqual(before, { mint, mode: "dry-run", account: { username: "parabullbot" }, settings: null, updatedAt: null });
+    assert.deepEqual(await h.get(), { mint: h.mint, mode: "dry-run", account: null, active: false, settings: null, updatedAt: null });
 
-    const stranger = await put(DEFAULT_SETTINGS, Keypair.generate());
-    assert.equal(stranger.status, 403);
+    // Only the creator, and only signed.
+    assert.equal((await h.put(DEFAULT_SETTINGS, null, Keypair.generate())).status, 403);
+    assert.equal((await h.raw("PUT", { settings: DEFAULT_SETTINGS })).status, 400);
+    assert.equal((await h.raw("DELETE", {})).status, 400);
+    assert.equal((await h.del(Keypair.generate())).status, 403);
 
+    // Link an account with the first save.
+    const first: XSession = { username: "@ParabullBot", authToken: cookie("a"), ct0: cookie("b") };
     const settings: SentinelSettings = { ...DEFAULT_SETTINGS, cashtagReplies: true, tone: "macro", context: "Whitepaper v2 is live." };
-    const saved = await put(settings);
+    const saved = await h.put(settings, first);
     assert.equal(saved.status, 200);
-    assert.equal(saved.headers.get("access-control-allow-origin"), "https://parabull.app");
-    assert.deepEqual(((await saved.json()) as SentinelStatus).settings, settings);
-    assert.equal(x.sent.length, 0, "the 25% the curve had already passed when watching began isn't backfilled");
+    const text = await saved.text();
+    assert.doesNotMatch(text, /aaaaaaaa|bbbbbbbb/, "the response never carries the cookies");
+    const st = JSON.parse(text) as SentinelStatus;
+    assert.equal(st.active, true);
+    assert.deepEqual({ ...st.account, linkedAt: typeof st.account?.linkedAt }, { username: "ParabullBot", source: "creator", linkedAt: "string" });
+    assert.doesNotMatch(readFileSync(join(h.dir, "sentinel.json"), "utf8"), /aaaaaaaa|bbbbbbbb/, "sealed at rest");
+    assert.equal(h.state.watching, 1);
 
-    curve = { ...curve, ...at(0.52) };
-    await sentinel.tick();
-    curve = { ...curve, ...at(0.53) };
-    await sentinel.tick();
-    assert.equal(x.sent.length, 1);
-    // Either of the macro persona's two 50% wordings (picked from the mint), with the news line and the link.
-    assert.match(x.sent[0].text, /^(\$BULL: bonding curve 50% filled|Update: \$BULL has reached the curve's midpoint)\. Whitepaper v2 is live\. https:\/\/parabull\.app\/coin\//);
+    h.state.curve = { ...h.state.curve, ...at(0.52) };
+    await h.sentinel.tick();
+    assert.equal(h.clients.get("ParabullBot")?.sent.length, 1, "50% posted by the linked account");
 
-    curve = { ...curve, ...at(1, true) };
-    await sentinel.tick();
-    assert.equal(x.sent.length, 2, "75% and graduation together post once, as graduation");
-    assert.match(x.sent[1].text, /Raydium/);
+    // Replace the session and the persona: the next post goes out from the new account, in the new voice.
+    h.tick();
+    const second: XSession = { username: "NewBull", authToken: cookie("c"), ct0: cookie("d") };
+    assert.equal((await h.put({ ...settings, tone: "wojak", context: "白皮书第二版现已上线。" }, second)).status, 200);
+    assert.equal((await h.get()).account?.username, "NewBull");
+    h.state.curve = { ...h.state.curve, ...at(0.76) };
+    await h.sentinel.tick();
+    assert.equal(h.clients.get("ParabullBot")?.sent.length, 1, "the old account posts nothing more");
+    assert.equal(h.clients.get("NewBull")?.sent.length, 1);
+    assert.match(h.clients.get("NewBull")!.sent[0].text, /白皮书第二版现已上线。/);
 
-    clock += 60_000;
-    mentions = [
-      { id: "t1", text: "@parabullbot is $BULL on Raydium yet?", username: "alice", timeMs: clock - 1_000 },
-      { id: "t2", text: "$BULL $BULL $BULL", username: "bob", timeMs: clock - 900 },
-    ];
-    await sentinel.tickMentions();
-    await sentinel.tickMentions();
-    assert.equal(x.sent.length, 3, "one reply, once");
-    assert.equal(x.sent[2].inReplyTo, "t1");
-    assert.match(x.sent[2].text, /^@alice /);
+    // Settings-only saves keep the linked session.
+    h.tick();
+    assert.equal((await h.put({ ...settings, tone: "wojak", context: "Staking next week." })).status, 200);
+    assert.equal((await h.get()).account?.username, "NewBull");
 
-    const replay = await put(settings, creator, new Date(clock - 60_000).toISOString());
-    assert.equal(replay.status, 409);
+    // Cashtag replies come from the current account.
+    h.tick(60_000);
+    h.state.mentions = [{ id: "t1", text: "@NewBull is $BULL on Raydium yet?", username: "alice", timeMs: Date.parse(h.nowIso()) - 1_000 }];
+    await h.sentinel.tickMentions();
+    assert.equal(h.clients.get("NewBull")?.sent.at(-1)?.inReplyTo, "t1");
+
+    // Disconnect: watching stops, the session is forgotten, nothing more is posted.
+    h.tick();
+    const before = h.nowIso();
+    const bye = await h.del();
+    assert.equal(bye.status, 200);
+    const off = (await bye.json()) as SentinelStatus;
+    assert.deepEqual({ active: off.active, account: off.account, settings: off.settings }, { active: false, account: null, settings: null });
+    assert.equal(h.state.watching, 0, "the curve listener is gone");
+    assert.doesNotMatch(readFileSync(join(h.dir, "sentinel.json"), "utf8"), /sealed|NewBull/, "no session left on disk");
+    const sent = h.clients.get("NewBull")!.sent.length;
+    h.state.curve = { ...h.state.curve, ...at(1, true) };
+    await h.sentinel.tick();
+    await h.sentinel.tickMentions();
+    assert.equal(h.clients.get("NewBull")!.sent.length, sent, "graduation isn't posted after disconnecting");
+
+    // A request signed before the disconnect can't bring it back.
+    assert.equal((await h.put(settings, first, h.creator, new Date(Date.parse(before) - 500).toISOString())).status, 409);
   } finally {
-    sentinel.stop();
-    await new Promise((ok) => api.close(ok));
+    await h.stop();
+  }
+});
+
+test("without SENTINEL_SECRET creators can't link a session; the operator's account posts instead", async () => {
+  const h = harness({ operatorUsername: "OperatorBull" });
+  await h.start();
+  try {
+    assert.deepEqual((await h.get()).account, { username: "OperatorBull", source: "operator", linkedAt: null });
+    const linked = await h.put(DEFAULT_SETTINGS, { username: "ParabullBot", authToken: cookie("a"), ct0: cookie("b") });
+    assert.equal(linked.status, 400);
+    assert.match(((await linked.json()) as { error: string }).error, /SENTINEL_SECRET/);
+    assert.equal((await h.get()).active, false, "a refused session saves nothing");
+    h.tick();
+    assert.equal((await h.put(DEFAULT_SETTINGS)).status, 200, "settings alone still save");
+    h.state.curve = { ...h.state.curve, ...at(0.55) };
+    await h.sentinel.tick();
+    assert.equal(h.clients.get("OperatorBull")?.sent.length, 1);
+  } finally {
+    await h.stop();
   }
 });

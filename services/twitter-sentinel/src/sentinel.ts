@@ -106,6 +106,12 @@ export class Sentinel {
     for (const mint of this.deps.store.mints()) await this.pollMentions(mint);
   }
 
+  /** Stops watching a coin (its record is already gone, so polling skips it too). */
+  forget(mint: string) {
+    this.unwatch.get(mint)?.();
+    this.unwatch.delete(mint);
+  }
+
   stop() {
     for (const off of this.unwatch.values()) off();
     this.unwatch.clear();

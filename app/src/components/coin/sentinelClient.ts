@@ -1,10 +1,12 @@
-/** Client for the X sentinel service (services/twitter-sentinel). The app only reads status and sends signed settings. */
+/** Client for the X sentinel service (services/twitter-sentinel). The app reads status and sends requests signed by the creator's wallet. */
 import { CONFIG } from "../../config";
-import { canonicalSettingsJson, settingsMessage, type SentinelSettings, type SentinelStatus, type SignedSettings } from "../../lib/sentinelMessage";
+import { sentinelMessage, signedPayloadJson, type SentinelAction, type SentinelSettings, type SentinelStatus, type SignedDisconnect, type SignedSettings, type XSession } from "../../lib/sentinelMessage";
 
 export const sentinelConfigured = () => !!CONFIG.sentinelUrl;
 
-const endpoint = (mint: string) => `${CONFIG.sentinelUrl}/api/sentinel/${encodeURIComponent(mint)}`;
+const endpoint = (mint: string) => `${CONFIG.sentinelUrl}/api/sentinel/${encodeURIComponent(mint)}/settings`;
+
+type SignMessage = (message: Uint8Array) => Promise<Uint8Array>;
 
 async function json<T>(res: Response): Promise<T> {
   const body = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
@@ -23,11 +25,22 @@ async function sha256Hex(text: string) {
 
 const base64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
 
-/** Signs the settings with the creator's wallet (signMessage) and saves them. */
-export async function saveSentinelSettings(mint: string, settings: SentinelSettings, signer: string, signMessage: (message: Uint8Array) => Promise<Uint8Array>): Promise<SentinelStatus> {
+async function sign(action: SentinelAction, mint: string, settings: SentinelSettings | null, session: XSession | null, signMessage: SignMessage) {
   const issuedAt = new Date().toISOString();
-  const message = settingsMessage(mint, issuedAt, await sha256Hex(canonicalSettingsJson(settings)));
-  const signature = base64(await signMessage(new TextEncoder().encode(message)));
-  const body: SignedSettings = { settings, issuedAt, signer, signature };
+  const message = sentinelMessage(action, mint, issuedAt, await sha256Hex(signedPayloadJson(settings, session)));
+  return { issuedAt, signature: base64(await signMessage(new TextEncoder().encode(message))) };
+}
+
+/** Signs and saves the settings; `session` (already normalized) links or replaces the X account, null keeps the current one. */
+export async function saveSentinelSettings(mint: string, settings: SentinelSettings, session: XSession | null, signer: string, signMessage: SignMessage): Promise<SentinelStatus> {
+  const { issuedAt, signature } = await sign("update settings", mint, settings, session, signMessage);
+  const body: SignedSettings = { settings, ...(session ? { session } : {}), issuedAt, signer, signature };
   return json<SentinelStatus>(await fetch(endpoint(mint), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+}
+
+/** Signs a disconnect: the sentinel stops watching the coin and forgets its X session. */
+export async function disconnectSentinel(mint: string, signer: string, signMessage: SignMessage): Promise<SentinelStatus> {
+  const { issuedAt, signature } = await sign("disconnect", mint, null, null, signMessage);
+  const body: SignedDisconnect = { issuedAt, signer, signature };
+  return json<SentinelStatus>(await fetch(endpoint(mint), { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
 }

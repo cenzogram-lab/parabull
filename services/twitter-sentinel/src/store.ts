@@ -6,8 +6,6 @@ import type { SentinelMilestone, SentinelSettings } from "../../../app/src/lib/s
 export interface CoinRecord {
   settings: SentinelSettings;
   updatedAt: string;
-  /** issuedAt of the last accepted signed change, ms. */
-  lastIssuedAtMs: number;
   /** Milestones posted or passed; null until the curve was first seen (nothing is backfilled). */
   milestonesDone: SentinelMilestone[] | null;
   /** When mention polling started for this coin, ms. */
@@ -15,40 +13,61 @@ export interface CoinRecord {
   replied: string[];
   lastByAuthor: Record<string, number>;
   recentReplies: number[];
+  /** The X session the creator linked, sealed (see seal.ts). Absent when none, or when the operator's is used. */
+  session?: { username: string; sealed: string; linkedAt: string };
+}
+
+interface FileShape {
+  coins: Record<string, CoinRecord>;
+  /** issuedAt of the last accepted signed request per mint, ms. Kept after a disconnect, so old requests can't be replayed. */
+  lastIssued: Record<string, number>;
 }
 
 export class Store {
-  private data: Record<string, CoinRecord> = {};
+  private data: FileShape = { coins: {}, lastIssued: {} };
   private readonly file: string;
 
   constructor(dir: string) {
     this.file = join(dir, "sentinel.json");
     try {
-      this.data = JSON.parse(readFileSync(this.file, "utf8"));
+      const raw = JSON.parse(readFileSync(this.file, "utf8"));
+      this.data = { coins: raw.coins ?? {}, lastIssued: raw.lastIssued ?? {} };
     } catch {
-      this.data = {};
+      this.data = { coins: {}, lastIssued: {} };
     }
   }
 
   get(mint: string): CoinRecord | undefined {
-    return this.data[mint];
+    return this.data.coins[mint];
   }
 
   mints(): string[] {
-    return Object.keys(this.data);
+    return Object.keys(this.data.coins);
   }
 
-  update(mint: string, patch: (r: CoinRecord | undefined) => CoinRecord): CoinRecord {
-    const next = patch(this.data[mint]);
-    this.data[mint] = next;
+  lastIssued(mint: string): number | null {
+    return this.data.lastIssued[mint] ?? null;
+  }
+
+  update(mint: string, patch: (r: CoinRecord | undefined) => CoinRecord, issuedAtMs?: number): CoinRecord {
+    const next = patch(this.data.coins[mint]);
+    this.data.coins[mint] = next;
+    if (issuedAtMs !== undefined) this.data.lastIssued[mint] = issuedAtMs;
     this.flush();
     return next;
+  }
+
+  /** Forgets the coin, including its sealed session; keeps only its last request time. */
+  remove(mint: string, issuedAtMs: number) {
+    delete this.data.coins[mint];
+    this.data.lastIssued[mint] = issuedAtMs;
+    this.flush();
   }
 
   private flush() {
     mkdirSync(dirname(this.file), { recursive: true });
     const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(this.data, null, 2));
+    writeFileSync(tmp, JSON.stringify(this.data, null, 2), { mode: 0o600 });
     renameSync(tmp, this.file);
   }
 }

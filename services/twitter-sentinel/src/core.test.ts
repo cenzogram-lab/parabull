@@ -4,8 +4,9 @@ import { BorshAccountsCoder } from "@coral-xyz/anchor";
 import BN from "bn.js";
 import { ed25519 } from "@noble/curves/ed25519";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { canonicalSettingsJson, DEFAULT_SETTINGS, normalizeSettings, settingsMessage, SENTINEL_MILESTONES, SENTINEL_TONES, type SentinelSettings } from "../../../app/src/lib/sentinelMessage";
-import { settingsDigest, verifySignedSettings } from "./auth";
+import { DEFAULT_SETTINGS, normalizeSettings, sentinelMessage, SENTINEL_MILESTONES, SENTINEL_TONES, signedPayloadJson, type SentinelSettings, type XSession } from "../../../app/src/lib/sentinelMessage";
+import { payloadDigest, verifySignedDisconnect, verifySignedSettings } from "./auth";
+import { keyFromSecret, seal, unseal } from "./seal";
 import { decodeCurve, decodeRaise, IDL } from "./chain";
 import { due, graduationRaise, progress, reached } from "./milestones";
 import { MAX_POST, milestonePost, replyText, weightedLength } from "./persona";
@@ -40,9 +41,11 @@ test("every persona's posts fit in 280 characters with the ticker and link", () 
   // CJK weighs 2 per character on X: 200 of them would pass a .length check and still be over the limit.
   const cjk = "白皮书第二版现已上线，质押功能下周推出。".repeat(10);
   const emoji = "🐂🚀".repeat(80);
+  // Appended lore with a long link (counted as 23) mixed with CJK, as a creator might paste it.
+  const mixed = `Docs: https://docs.parabull.app/${"guides/".repeat(30)}staking 质押上线 🐂 ${"更新".repeat(60)}`;
   for (const { value: tone } of SENTINEL_TONES)
     for (const { key } of SENTINEL_MILESTONES)
-      for (const context of ["", "Whitepaper v2 is live.", long, cjk, emoji]) {
+      for (const context of ["", "Whitepaper v2 is live.", long, cjk, emoji, mixed]) {
         const p = milestonePost(tone, key, coin, context);
         assert.ok(weightedLength(p) <= MAX_POST, `${tone}/${key}: weighted ${weightedLength(p)}`);
         assert.match(p, /\$BULL/);
@@ -82,10 +85,43 @@ test("replies go only to posts that mention the account and the cashtag", () => 
   assert.deepEqual(capped.map((p) => p.id), ["9"], "the hourly cap of 10 counts earlier replies");
 });
 
-function sign(kp: Keypair, mint: string, settings: SentinelSettings, issuedAt: string) {
-  const msg = new TextEncoder().encode(settingsMessage(mint, issuedAt, settingsDigest(settings)));
+function sign(kp: Keypair, mint: string, settings: SentinelSettings | null, issuedAt: string, session: XSession | null = null, action: "update settings" | "disconnect" = "update settings") {
+  const msg = new TextEncoder().encode(sentinelMessage(action, mint, issuedAt, payloadDigest(settings, session)));
   return Buffer.from(ed25519.sign(msg, kp.secretKey.slice(0, 32))).toString("base64");
 }
+
+const SESSION: XSession = { username: "ParabullBot", authToken: "a".repeat(40), ct0: "b".repeat(160) };
+
+test("a linked session is covered by the signature, and a disconnect needs its own", () => {
+  const creator = Keypair.generate();
+  const mint = Keypair.generate().publicKey.toBase58();
+  const now = Date.parse("2026-11-04T12:00:00Z");
+  const issuedAt = new Date(now).toISOString();
+  const signer = creator.publicKey.toBase58();
+  const body = { settings: DEFAULT_SETTINGS, session: { ...SESSION, username: "@ParabullBot" }, issuedAt, signer, signature: sign(creator, mint, DEFAULT_SETTINGS, issuedAt, SESSION) };
+  const ok = verifySignedSettings(body, mint, signer, now, null);
+  assert.ok(ok.ok && ok.session?.username === "ParabullBot", "the handle loses its @");
+  // Swapping in other cookies breaks the signature.
+  assert.equal((verifySignedSettings({ ...body, session: { ...SESSION, ct0: "c".repeat(160) } }, mint, signer, now, null) as { status: number }).status, 401);
+  assert.equal((verifySignedSettings({ ...body, session: { ...SESSION, ct0: "not a cookie" } }, mint, signer, now, null) as { status: number }).status, 400);
+  // A settings signature can't be reused to disconnect, and vice versa.
+  assert.equal((verifySignedDisconnect(body, mint, signer, now, null) as { status: number }).status, 401);
+  const bye = { issuedAt, signer, signature: sign(creator, mint, null, issuedAt, null, "disconnect") };
+  assert.ok(verifySignedDisconnect(bye, mint, signer, now, null).ok);
+  const stranger = Keypair.generate();
+  assert.equal((verifySignedDisconnect({ issuedAt, signer: stranger.publicKey.toBase58(), signature: sign(stranger, mint, null, issuedAt, null, "disconnect") }, mint, signer, now, null) as { status: number }).status, 403);
+  assert.equal((verifySignedDisconnect({}, mint, signer, now, null) as { status: number }).status, 400, "unsigned");
+});
+
+test("sealed sessions open only with the same key and mint", () => {
+  assert.equal(keyFromSecret("too short"), null);
+  const key = keyFromSecret("x".repeat(32))!;
+  const sealed = seal(key, "MintA", SESSION);
+  assert.doesNotMatch(sealed, /aaaaaaaa/, "no cookie in the clear");
+  assert.deepEqual(unseal(key, "MintA", sealed), SESSION);
+  assert.throws(() => unseal(key, "MintB", sealed), "bound to its mint");
+  assert.throws(() => unseal(keyFromSecret("y".repeat(32))!, "MintA", sealed), "wrong key");
+});
 
 test("signed settings: only the creator, only fresh, never replayed", () => {
   const creator = Keypair.generate();
@@ -111,8 +147,8 @@ test("the browser's SHA-256 of the settings matches the service's", async () => 
   const s = normalizeSettings({ ...DEFAULT_SETTINGS, context: "  Whitepaper v2 live\u0007  " });
   assert.ok(s.ok);
   assert.equal(s.value.context, "Whitepaper v2 live");
-  const web = Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalSettingsJson(s.value)))).toString("hex");
-  assert.equal(web, settingsDigest(s.value));
+  const web = Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(signedPayloadJson(s.value, SESSION)))).toString("hex");
+  assert.equal(web, payloadDigest(s.value, SESSION));
 });
 
 /** A zero-valued instance of an IDL struct, so the real coder can encode test accounts. */
