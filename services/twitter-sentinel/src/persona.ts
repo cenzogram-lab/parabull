@@ -61,14 +61,53 @@ function fill(template: string, values: Record<string, string>): string {
   return composeContext({ state: values as unknown as State, template }).replace(/\s+/g, " ").trim();
 }
 
-/** Fits the text in a post: drops the news first, then shortens it with an ellipsis. */
+/** Code points X weighs 1 (twitter-text v3: Latin, punctuation and similar); every other character weighs 2. */
+const LIGHT: readonly [number, number][] = [
+  [0, 4351],
+  [8192, 8205],
+  [8208, 8223],
+  [8242, 8247],
+];
+const URL_RE = /https?:\/\/\S+/g;
+/** X counts every link as 23 characters, whatever its length. */
+const URL_WEIGHT = 23;
+
+const charWeight = (ch: string) => {
+  const cp = ch.codePointAt(0)!;
+  return LIGHT.some(([a, b]) => cp >= a && cp <= b) ? 1 : 2;
+};
+
+/**
+ * Length as X counts it against the 280 limit: CJK and emoji weigh 2, links 23. Each emoji code point counts as 2
+ * (X counts a joined emoji sequence as 2 in total), so this can only over-count, never let a post through too long.
+ */
+export function weightedLength(text: string): number {
+  let n = 0;
+  for (const part of text.split(URL_RE)) for (const ch of part) n += charWeight(ch);
+  return n + (text.match(URL_RE)?.length ?? 0) * URL_WEIGHT;
+}
+
+/** The longest start of `text` (whole characters) that weighs at most `max`. */
+function cutWeighted(text: string, max: number): string {
+  let n = 0;
+  let out = "";
+  for (const ch of text) {
+    n += charWeight(ch);
+    if (n > max) break;
+    out += ch;
+  }
+  return out;
+}
+
+/** Fits the text in a post by X's weighted count: shortens the news with an ellipsis first, then drops it. */
 function fit(template: string, values: Record<string, string>): string {
   const withNews = fill(template, { ...values, news: values.news ? `${values.news} ` : "" });
-  if (withNews.length <= MAX_POST) return withNews;
-  const room = MAX_POST - fill(template, { ...values, news: "" }).length - 2;
-  if (values.news && room > 20) return fill(template, { ...values, news: `${values.news.slice(0, room - 1).trimEnd()}… ` });
+  if (weightedLength(withNews) <= MAX_POST) return withNews;
   const bare = fill(template, { ...values, news: "" });
-  return bare.length <= MAX_POST ? bare : `${bare.slice(0, MAX_POST - 1)}…`;
+  // Shortened news adds itself, an ellipsis (U+2026 weighs 2) and one space.
+  const room = MAX_POST - weightedLength(bare) - 3;
+  if (values.news && room > 20) return fill(template, { ...values, news: `${cutWeighted(values.news, room).trimEnd()}… ` });
+  return weightedLength(bare) <= MAX_POST ? bare : `${cutWeighted(bare, MAX_POST - 2)}…`;
 }
 
 export interface CoinFacts {

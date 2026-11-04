@@ -71,8 +71,19 @@ export function XAutomationModal({ open, onClose, coin }: { open: boolean; onClo
   const saved = load.kind === "ready" ? (load.status.settings ?? DEFAULT_SETTINGS) : DEFAULT_SETTINGS;
   const dirty = useMemo(() => canonicalSettingsJson(draft) !== canonicalSettingsJson(saved), [draft, saved]);
   const signer = publicKey?.toBase58();
-  const blocker =
-    load.kind !== "ready" ? null : !signer ? `Connect the wallet that launched $${coin.ticker} to save.` : signer !== coin.creator ? `Only the wallet that launched $${coin.ticker} can change this.` : !signMessage ? "This wallet can't sign messages." : null;
+  // A demo-mode coin was simulated in this browser and has no bonding curve on-chain, so the sentinel can't watch it
+  // (and refuses its settings): the modal shows what X automation offers, but can't save.
+  const blocker = isDemo
+    ? `$${coin.ticker} is a demo coin, simulated in this browser, so the sentinel has no on-chain curve to watch. X automation saves for coins launched on-chain (chain mode).`
+    : load.kind !== "ready"
+      ? null
+      : !signer
+        ? `Connect the wallet that launched $${coin.ticker} to save.`
+        : signer !== coin.creator
+          ? `Only the wallet that launched $${coin.ticker} can change this.`
+          : !signMessage
+            ? "This wallet can't sign messages."
+            : null;
   const editable = load.kind === "ready" && !saving;
   const account = load.kind === "ready" ? load.status.account : null;
 

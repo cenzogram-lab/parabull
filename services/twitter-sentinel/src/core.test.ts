@@ -8,7 +8,7 @@ import { canonicalSettingsJson, DEFAULT_SETTINGS, normalizeSettings, settingsMes
 import { settingsDigest, verifySignedSettings } from "./auth";
 import { decodeCurve, decodeRaise, IDL } from "./chain";
 import { due, graduationRaise, progress, reached } from "./milestones";
-import { MAX_POST, milestonePost, replyText } from "./persona";
+import { MAX_POST, milestonePost, replyText, weightedLength } from "./persona";
 import { hasCashtag, mentionsAccount, selectReplies, type MentionTweet } from "./replies";
 
 const DEFAULT_INITIAL = { virtualToken: 1_073_000_000_000_000n, virtualSol: 30_000_000_000n, realToken: 793_100_000_000_000n };
@@ -37,15 +37,23 @@ test("milestones follow SOL raised; graduation needs the Raydium migration", () 
 test("every persona's posts fit in 280 characters with the ticker and link", () => {
   const coin = { mint: "Mint111", ticker: "BULL", url: "https://parabull.app/coin/Mint111" };
   const long = "Partnership with a top-10 desk announced today, details in the thread. ".repeat(20);
+  // CJK weighs 2 per character on X: 200 of them would pass a .length check and still be over the limit.
+  const cjk = "白皮书第二版现已上线，质押功能下周推出。".repeat(10);
+  const emoji = "🐂🚀".repeat(80);
   for (const { value: tone } of SENTINEL_TONES)
     for (const { key } of SENTINEL_MILESTONES)
-      for (const context of ["", "Whitepaper v2 is live.", long]) {
+      for (const context of ["", "Whitepaper v2 is live.", long, cjk, emoji]) {
         const p = milestonePost(tone, key, coin, context);
-        assert.ok(p.length <= MAX_POST, `${tone}/${key}: ${p.length}`);
+        assert.ok(weightedLength(p) <= MAX_POST, `${tone}/${key}: weighted ${weightedLength(p)}`);
         assert.match(p, /\$BULL/);
         assert.ok(p.includes(coin.url), p);
         assert.doesNotMatch(p, /\{\{/);
       }
+  assert.equal(weightedLength("gm"), 2);
+  assert.equal(weightedLength("白皮书"), 6);
+  assert.equal(weightedLength(`see ${coin.url}`), 4 + 23, "a link counts 23 whatever its length");
+  const cjkReply = replyText("bull", coin, "alice", "9", 0.5, cjk);
+  assert.ok(weightedLength(cjkReply) <= MAX_POST && cjkReply.includes("白皮书"), cjkReply);
   const r = replyText("macro", coin, "alice", "123", 0.42, "Staking next week.");
   assert.match(r, /^@alice /);
   assert.match(r, /42%/);
