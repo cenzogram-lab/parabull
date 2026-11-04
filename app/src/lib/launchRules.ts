@@ -68,3 +68,26 @@ export function tweetIdHash(id: bigint): Uint8Array {
 
 /** Byte length the program checks against MAX_URI_LEN. */
 export const byteLength = (s: string) => utf8.encode(s).length;
+
+/**
+ * A coin's social link (website, X, Telegram): empty, or an absolute http(s) URL. Anything else (javascript:,
+ * data:, a bare word) is refused at launch and never rendered as a link, since it comes from the creator.
+ */
+export function socialLink(input: string | undefined): Check<string> {
+  const raw = (input ?? "").trim();
+  if (!raw) return { ok: true, value: "" };
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return { ok: false, error: "Use a full link, starting with https://" };
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return { ok: false, error: "Links must start with https://" };
+  return { ok: true, value: url.href };
+}
+
+/** The link to render, or undefined when it isn't a safe http(s) URL. */
+export const safeLink = (input: string | undefined) => {
+  const c = socialLink(input);
+  return c.ok && c.value ? c.value : undefined;
+};

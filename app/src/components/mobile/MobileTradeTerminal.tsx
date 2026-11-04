@@ -23,6 +23,7 @@ import { MobileTabs } from "./MobileUi";
 import { MobileTradeBar } from "./MobileTradeBar";
 import { HolderList, TradeFeed } from "./MobileTradeLists";
 import { XAutomationButton } from "../coin/XAutomationModal";
+import { safeLink } from "../../lib/launchRules";
 
 type Tab = "Trades" | "Holders" | "Callouts";
 const TABS = ["Trades", "Holders", "Callouts"] as const;
@@ -147,9 +148,9 @@ export function MobileTradeTerminal({ coin }: { coin: Coin }) {
   const tabsAnchor = useRef<HTMLDivElement>(null);
   const watched = watchlist.has(coin.mint);
   const socials = [
-    { href: coin.socials.x, label: "X", icon: <XLogo className="h-4 w-4" /> },
-    { href: coin.socials.website, label: "Website", icon: <Globe className="h-[18px] w-[18px]" aria-hidden /> },
-    { href: coin.socials.telegram, label: "Telegram", icon: <Send className="h-[18px] w-[18px]" aria-hidden /> },
+    { href: safeLink(coin.socials.x), label: "X", icon: <XLogo className="h-4 w-4" /> },
+    { href: safeLink(coin.socials.website), label: "Website", icon: <Globe className="h-[18px] w-[18px]" aria-hidden /> },
+    { href: safeLink(coin.socials.telegram), label: "Telegram", icon: <Send className="h-[18px] w-[18px]" aria-hidden /> },
   ].filter((s) => !!s.href);
 
   // Once the tab row is pinned, a new tab starts at its top rather than wherever the old one was scrolled to.

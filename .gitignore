@@ -8,3 +8,8 @@ scripts/snapshots/
 # app build output and local screenshots
 app/dist/
 app/screenshots/
+
+# local env files: RPC URLs with API keys, SENTINEL_SECRET and the like
+.env
+.env.*
+!.env.example
