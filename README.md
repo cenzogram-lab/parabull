@@ -29,6 +29,7 @@ A Solana meme launchpad built on Anchor 0.31.1:
 | Holder rewards: `publish_reward_epoch` / `claim_holder_reward` (Merkle + bitmap, push or pull) | Done |
 | `expire_reward_epoch` (claim window fixed per epoch) | Done |
 | `scripts/`: deploy + init, launch/trade smoke test, reference crank (typechecked against the IDL) | Done, not yet run against a live cluster |
+| `app/`: desktop web app (board, explore, launch, trading terminal, leaderboard, live, holder rewards, $PARABULL hub) | Done on demo data; launches, trades and claims are wired to the program but not yet run against a live cluster |
 | SBF build + devnet run against real Raydium; LP-fee amount source; holder snapshot job | Not started |
 
 ## Development
@@ -39,6 +40,9 @@ cargo test -p parabull
 
 See [AGENTS.md](AGENTS.md) for the product rules and contribution
 constraints.
+
+The web app lives in [`app/`](app/README.md) (`cd app && npm ci && npm run
+dev`). Its bronze/copper design system is in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Reference sources
 

@@ -1,0 +1,46 @@
+{
+  "name": "parabull-app",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Parabull desktop web app: board, explorer, launch flow, trading terminal and $PARABULL hub",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit -p . && tsc --noEmit -p tsconfig.test.json && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p tsconfig.test.json",
+    "test": "tsx --test test/*.test.ts",
+    "sync-idl": "node scripts/sync-idl.mjs",
+    "check-idl": "node scripts/sync-idl.mjs --check",
+    "screenshots": "node scripts/screenshots.mjs"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "0.31.1",
+    "@fontsource-variable/inter": "5.3.0",
+    "@fontsource/cinzel": "5.3.0",
+    "@fontsource/jetbrains-mono": "5.3.0",
+    "@solana/wallet-adapter-base": "0.9.28",
+    "@solana/wallet-adapter-react": "0.15.40",
+    "@solana/wallet-adapter-react-ui": "0.9.40",
+    "@solana/wallet-adapter-solflare": "0.6.34",
+    "@solana/web3.js": "1.99.0",
+    "buffer": "6.0.3",
+    "lightweight-charts": "5.2.1",
+    "lucide-react": "1.67.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-router-dom": "7.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "5.2.0",
+    "autoprefixer": "10.6.2",
+    "postcss": "8.5.32",
+    "tailwindcss": "3.4.19",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vite": "7.3.7"
+  }
+}
