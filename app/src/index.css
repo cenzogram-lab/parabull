@@ -1,0 +1,209 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Brushed-metal grain: fractal noise stretched horizontally (low x frequency,
+ * high y frequency) gives fine horizontal brushing, like the copper reference.
+ */
+:root {
+  color-scheme: dark;
+  --grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='600' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.0035 0.75' numOctaves='3' seed='7' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  --copper-sheen: linear-gradient(90deg, #7a4529 0%, #b87333 9%, #e8b48c 20%, #c87d55 31%, #9a5735 44%, #d49b7e 58%, #f2cba8 66%, #c87d55 78%, #8a4e2f 91%, #b87333 100%);
+  --gold-sheen: linear-gradient(90deg, #c88a47 0%, #e5a967 18%, #f8dcae 36%, #e5a967 52%, #d39550 70%, #f1c78f 86%, #c88a47 100%);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-canvas font-sans text-[13px] leading-5 text-cream antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  ::selection {
+    background: rgba(229, 169, 103, 0.35);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #4a3528 transparent;
+  }
+  :focus-visible {
+    outline: 2px solid #e5a967;
+    outline-offset: 2px;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    @apply text-muted;
+  }
+}
+
+@layer components {
+  /* Surfaces ------------------------------------------------------------- */
+  .panel {
+    @apply rounded-xl border border-line bg-surface shadow-panel;
+  }
+  .panel-raised {
+    @apply rounded-xl border border-line-accent/70 bg-surface-2 shadow-lift;
+  }
+  /* Dark brushed bronze: hero bands, panel headers. */
+  .brushed-dark {
+    background-color: #1a1715;
+    background-image: linear-gradient(180deg, rgba(212, 155, 126, 0.07), rgba(0, 0, 0, 0) 55%), var(--grain);
+    background-blend-mode: normal, soft-light;
+    background-size: auto, 600px 240px;
+  }
+  /* Bright brushed copper: progress fills, accents. */
+  .metal-copper {
+    background-image: var(--grain), var(--copper-sheen);
+    background-blend-mode: overlay, normal;
+    background-size: 600px 240px, 100% 100%;
+  }
+  /* Radiant amber-gold CTA metal. */
+  .metal-gold {
+    background-image: var(--grain), var(--gold-sheen);
+    background-blend-mode: overlay, normal;
+    background-size: 600px 240px, 100% 100%;
+  }
+  .metal-text {
+    background-image: linear-gradient(100deg, #f6d6b4 0%, #e5a967 30%, #c87d55 55%, #f2cba8 75%, #b87333 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hairline {
+    @apply border-line-soft;
+  }
+
+  /* Controls ------------------------------------------------------------- */
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-semibold transition-all duration-100 ease-out disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  /* Primary CTA (Launch, Place Trade, Claim): solid amber-gold, bronze on hover, press-in. */
+  .btn-gold {
+    @apply btn bg-gold text-canvas hover:bg-bronze active:scale-[0.98] disabled:hover:bg-gold disabled:active:scale-100;
+  }
+  .btn-copper {
+    @apply btn bg-copper text-canvas hover:bg-gold active:scale-[0.98];
+  }
+  .btn-ghost {
+    @apply btn border border-line bg-surface text-cream hover:border-line-accent hover:bg-surface-2;
+  }
+  .btn-icon {
+    @apply inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-cream;
+  }
+  /* Text inputs, number fields, textareas. */
+  .input {
+    @apply w-full rounded-lg border border-line bg-canvas-2 px-3 py-2 text-cream transition-colors duration-100 placeholder:text-muted focus:border-copper focus:outline-none focus:ring-1 focus:ring-gold;
+  }
+  /* Same focus treatment for inputs wrapped with a prefix/suffix ($, icons, units). */
+  .input-shell {
+    @apply flex items-center rounded-lg border border-line bg-canvas-2 transition-colors duration-100 focus-within:border-copper focus-within:ring-1 focus-within:ring-gold;
+  }
+  .input-shell input {
+    @apply focus:outline-none;
+  }
+  /* Tabs and chip switches: transparent until hovered, gold-on-bronze when active. */
+  .tab {
+    @apply border border-transparent text-muted transition-colors duration-100 ease-out hover:bg-surface hover:text-cream;
+  }
+  .tab-active {
+    @apply border border-line-accent bg-surface-4 text-gold shadow-sm transition-colors duration-100 ease-out;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-md border border-line bg-surface px-2 py-1 text-xs font-medium text-muted transition-colors duration-100 ease-out hover:bg-surface-2 hover:text-cream;
+  }
+  .chip-active {
+    @apply border-line-accent bg-surface-4 text-gold shadow-sm hover:bg-surface-4 hover:text-gold;
+  }
+  /* Screener rows and token cards. */
+  .hover-lift {
+    @apply transition-all duration-100 ease-out hover:border-line-accent hover:bg-surface-2 hover:shadow-[0_4px_16px_rgba(200,125,85,0.08)];
+  }
+  .row-hover {
+    @apply transition-colors duration-100 ease-out hover:bg-surface-2;
+  }
+  .kbd {
+    @apply rounded border border-line bg-surface-2 px-1.5 font-sans text-[11px] font-medium text-muted;
+  }
+  .label {
+    @apply text-xs font-medium text-muted;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  .mask-fade-x {
+    mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Wallet adapter: brushed-copper border, deep background, cream text. */
+.wallet-adapter-button {
+  font-family: "Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif !important;
+  height: 36px !important;
+  padding: 0 14px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 36px !important;
+  border-radius: 10px !important;
+  background-color: #1a1715 !important;
+  border: 1px solid #6b4c38 !important;
+  color: #f5ebe6 !important;
+}
+.wallet-adapter-button:not([disabled]):hover {
+  background-color: #231d19 !important;
+  border-color: #c87d55 !important;
+}
+.wallet-adapter-button-start-icon {
+  width: 18px !important;
+  height: 18px !important;
+  margin-right: 8px !important;
+}
+.wallet-adapter-dropdown-list {
+  background: #1a1715 !important;
+  border: 1px solid #4a3528 !important;
+  border-radius: 12px !important;
+  font-family: "Inter Variable", Inter, sans-serif !important;
+}
+.wallet-adapter-dropdown-list-item:not([disabled]):hover {
+  background-color: #231d19 !important;
+}
+.wallet-adapter-modal-wrapper {
+  background: #1a1715 !important;
+  border: 1px solid #4a3528 !important;
+  font-family: "Inter Variable", Inter, sans-serif !important;
+}
+.wallet-adapter-modal-title {
+  color: #f5ebe6 !important;
+}
+.wallet-adapter-modal-list .wallet-adapter-button {
+  border: none !important;
+  background: transparent !important;
+}
+.wallet-adapter-modal-list .wallet-adapter-button:hover {
+  background: #231d19 !important;
+}
+.wallet-adapter-modal-button-close {
+  background: #231d19 !important;
+}

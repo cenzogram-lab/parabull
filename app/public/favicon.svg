@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<defs>
+<linearGradient id="b" x1="0.15" y1="0" x2="0.85" y2="1"><stop offset="0" stop-color="#F6D2AC"/><stop offset="0.28" stop-color="#D9925F"/><stop offset="0.55" stop-color="#B87333"/><stop offset="0.8" stop-color="#7E4626"/><stop offset="1" stop-color="#4A2816"/></linearGradient>
+<linearGradient id="h" x1="0" y1="0" x2="0.4" y2="1"><stop offset="0" stop-color="#FFF0D8"/><stop offset="0.3" stop-color="#E5A967"/><stop offset="0.7" stop-color="#B87333"/><stop offset="1" stop-color="#6A3A1E"/></linearGradient>
+<linearGradient id="l" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFE6C8" stop-opacity="0.55"/><stop offset="1" stop-color="#FFE6C8" stop-opacity="0"/></linearGradient>
+<linearGradient id="m" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E9B488"/><stop offset="1" stop-color="#9A5631"/></linearGradient>
+</defs>
+<rect width="64" height="64" rx="14" fill="#0D0C0B"/>
+<path d="M23.6 23.2C14.8 24.6 7 21 4 8.2C8.8 14.6 15 17.4 24.4 17.2Z" fill="url(#h)"/><path d="M40.4 23.2C49.2 24.6 57 21 60 8.2C55.2 14.6 49 17.4 39.6 17.2Z" fill="url(#h)"/>
+<path d="M20.4 24.6C14.6 23.2 10 25 7.4 28.4C12.2 30.2 17 30 21.4 28Z" fill="#8E5130"/><path d="M43.6 24.6C49.4 23.2 54 25 56.6 28.4C51.8 30.2 47 30 42.6 28Z" fill="#6E3C22"/>
+<path d="M20.6 18.6C25.6 15.6 38.4 15.6 43.4 18.6C46.4 24.4 44.8 31.8 41.4 37.6C39.8 40.8 38.9 44.2 38.6 47.4C39 52.8 35.8 56 32 56C28.2 56 25 52.8 25.4 47.4C25.1 44.2 24.2 40.8 22.6 37.6C19.2 31.8 17.6 24.4 20.6 18.6Z" fill="url(#b)"/><path d="M20.6 18.6C25.6 15.6 32 15.9 32 15.9L32 44.4L25.4 47.4C25.1 44.2 24.2 40.8 22.6 37.6C19.2 31.8 17.6 24.4 20.6 18.6Z" fill="url(#l)"/><path d="M43.4 18.6C38.4 15.6 32 15.9 32 15.9L32 44.4L38.6 47.4C38.9 44.2 39.8 40.8 41.4 37.6C44.8 31.8 46.4 24.4 43.4 18.6Z" fill="#1A0C05" opacity="0.28"/>
+<path d="M29.8 17.6L34.2 17.6L33.1 39L30.9 39Z" fill="#FFE9CF" opacity="0.2"/><path d="M25.6 46C28 43.9 36 43.9 38.4 46C39.6 52 36.2 56 32 56C27.8 56 24.4 52 25.6 46Z" fill="url(#m)"/>
+<path d="M22.6 26L30.2 28.3L29.8 29.3L22.4 27.1Z" fill="#3B2112" opacity="0.85"/><path d="M41.4 26L33.8 28.3L34.2 29.3L41.6 27.1Z" fill="#2A160B" opacity="0.85"/>
+<path d="M23.8 28.9L29.6 30.6L24.9 31.7Z" fill="#2A160B"/><path d="M40.2 28.9L34.4 30.6L39.1 31.7Z" fill="#2A160B"/>
+<ellipse cx="28.8" cy="50.4" rx="1.55" ry="2.15" fill="#3A1E10"/><ellipse cx="35.2" cy="50.4" rx="1.55" ry="2.15" fill="#3A1E10"/>
+</svg>

@@ -1,0 +1,5662 @@
+{
+  "address": "8tBGLgWXDAssTBgUaamsB4ZbyRQivNDiGFiyTMfQiPFW",
+  "metadata": {
+    "name": "parabull",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Parabull bonding-curve launchpad: blind launches, ticker registry, 1% fee flywheel, Raydium CPMM graduation"
+  },
+  "instructions": [
+    {
+      "name": "accept_admin",
+      "docs": [
+        "Nominee: accept the admin role."
+      ],
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "pending_admin",
+          "signer": true
+        },
+        {
+          "name": "global",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "buy",
+      "docs": [
+        "Buy `amount` tokens for at most `max_sol_cost` lamports (fee inclusive).",
+        "Partially fills to the curve's remaining tokens; the final fill completes it."
+      ],
+      "discriminator": [
+        102,
+        6,
+        61,
+        18,
+        1,
+        218,
+        235,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "global",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "bonding_curve",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  45,
+                  99,
+                  117,
+                  114,
+                  118,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "curve_token_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "bonding_curve"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "user_token_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "max_sol_cost",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "buyback_and_burn",
+      "docs": [
+        "Crank: swap the staged SOL for $PARABULL on Raydium CPMM (enforcing",
+        "`min_amount_out`) and burn everything received."
+      ],
+      "discriminator": [
+        121,
+        156,
+        154,
+        165,
+        194,
+        86,
+        180,
+        130
+      ],
+      "accounts": [
+        {
+          "name": "crank",
+          "docs": [
+            "Funds the temporary token accounts; refunded when they close."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "global",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyback_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  121,
+                  98,
+                  97,
+                  99,
+                  107,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyback_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  121,
+                  98,
+                  97,
+                  99,
+                  107,
+                  45,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "parabull_mint",
+          "writable": true
+        },
+        {
+          "name": "parabull_token_program"
+        },
+        {
+          "name": "authority_parabull_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "buyback_authority"
+              },
+              {
+                "kind": "account",
+                "path": "parabull_token_program"
+              },
+              {
+                "kind": "account",
+                "path": "parabull_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "wsol_mint",
+          "address": "So11111111111111111111111111111111111111112"
+        },
+        {
+          "name": "authority_wsol_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "buyback_authority"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "wsol_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "cpmm_program"
+        },
+        {
+          "name": "cpmm_authority"
+        },
+        {
+          "name": "amm_config"
+        },
+        {
+          "name": "pool_state",
+          "writable": true
+        },
+        {
+          "name": "wsol_vault",
+          "writable": true
+        },
+        {
+          "name": "parabull_vault",
+          "writable": true
+        },
+        {
+          "name": "observation_state",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "min_amount_out",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "claim_holder_reward",
+      "docs": [
+        "Anyone: pay leaf `index` of `epoch` to its claimant (push or pull)."
+      ],
+      "discriminator": [
+        51,
+        163,
+        15,
+        252,
+        248,
+        154,
+        190,
+        46
+      ],
+      "accounts": [
+        {
+          "name": "holder_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "reward_epoch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  119,
+                  97,
+                  114,
+                  100,
+                  45,
+                  101,
+                  112,
+                  111,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "epoch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "claimant",
+          "docs": [
+            "Recipient named in the Merkle leaf (system-owned wallet). Not a signer:",
+            "anyone may submit the claim, funds can only go here."
+          ],
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "epoch",
+          "type": "u64"
+        },
+        {
+          "name": "index",
+          "type": "u32"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "proof",
+          "type": {
+            "vec": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "collect_lp_fees",
+      "docs": [
+        "Crank: harvest post-graduation LP fees via the fee-key NFT and route the",
+        "SOL (escrow first, then buyback / holder vaults / treasury)."
+      ],
+      "discriminator": [
+        8,
+        174,
+        201,
+        78,
+        141,
+        117,
+        163,
+        33
+      ],
+      "accounts": [
+        {
+          "name": "crank",
+          "docs": [
+            "Pays the temporary WSOL account's rent; refunded in the same instruction."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "global",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "Writable: burning the collected tokens reduces the mint's supply."
+          ],
+          "writable": true
+        },
+        {
+          "name": "bonding_curve",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  45,
+                  99,
+                  117,
+                  114,
+                  118,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_key_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  45,
+                  107,
+                  101,
+                  121,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_vault_token_account",
+          "docs": [
+            "Receives the launched-token side; burned and closed before the instruction ends."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "fee_key_vault"
+              },
+              {
+                "kind": "account",
+                "path": "token_2022_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "fee_vault_wsol_account",
+          "docs": [
+            "Temporary WSOL receiver; closed (unwrapped) before the instruction ends."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "fee_key_vault"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "wsol_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "wsol_mint",
+          "address": "So11111111111111111111111111111111111111112"
+        },
+        {
+          "name": "buyback_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  121,
+                  98,
+                  97,
+                  99,
+                  107,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "holder_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "lp_lock_program"
+        },
+        {
+          "name": "lp_lock_authority"
+        },
+        {
+          "name": "fee_nft_account",
+          "writable": true
+        },
+        {
+          "name": "locked_liquidity",
+          "writable": true
+        },
+        {
+          "name": "cpmm_program"
+        },
+        {
+          "name": "cpmm_authority"
+        },
+        {
+          "name": "pool_state",
+          "writable": true
+        },
+        {
+          "name": "lp_mint",
+          "writable": true
+        },
+        {
+          "name": "token_0_vault",
+          "writable": true
+        },
+        {
+          "name": "token_1_vault",
+          "writable": true
+        },
+        {
+          "name": "lock_lp_vault",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "token_2022_program",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "memo_program",
+          "address": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "fee_lp_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "create",
+      "docs": [
+        "Blind launch. Signed by the launch authority and the fresh mint keypair;",
+        "consumes the ticket, claims the ticker/name locks, creates the curve."
+      ],
+      "discriminator": [
+        24,
+        30,
+        200,
+        40,
+        5,
+        28,
+        7,
+        119
+      ],
+      "accounts": [
+        {
+          "name": "launch_authority",
+          "docs": [
+            "Backend signer; fronts the rent and is repaid exactly that from the ticket."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "global",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "ticket",
+          "docs": [
+            "Closed to the treasury at the end of the instruction: after the launch",
+            "authority's rent is repaid, the fee and anything unspent go there."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  105,
+                  99,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "account",
+                "path": "ticket.nonce",
+                "account": "LaunchTicket"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Ticket owner; recorded as the curve's creator."
+          ],
+          "writable": true,
+          "relations": [
+            "ticket"
+          ]
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "Fresh server-generated keypair; must sign. Holds no authority after this ix."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  45,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "bonding_curve",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  45,
+                  99,
+                  117,
+                  114,
+                  118,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "curve_token_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "bonding_curve"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "ticker_registry",
+          "docs": [
+            "Created on first use; re-claimed only after its 3-day lock lapses."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "ticket"
+              }
+            ]
+          }
+        },
+        {
+          "name": "name_registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  110,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "ticket.name_hash",
+                "account": "LaunchTicket"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tweet_registry",
+          "docs": [
+            "Required exactly when the ticket carries an announcement tweet."
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  119,
+                  101,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "ticket"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "symbol",
+          "type": "string"
+        },
+        {
+          "name": "uri",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "expire_reward_epoch",
+      "docs": [
+        "Crank or admin: after an epoch's claim window, stop its claims and",
+        "release its unclaimed reservation back to the holder vault."
+      ],
+      "discriminator": [
+        139,
+        138,
+        100,
+        102,
+        196,
+        232,
+        103,
+        204
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The crank authority or the admin."
+          ],
+          "signer": true
+        },
+        {
+          "name": "global",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "holder_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "reward_epoch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  119,
+                  97,
+                  114,
+                  100,
+                  45,
+                  101,
+                  112,
+                  111,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "epoch_index"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "epoch_index",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize",
+      "docs": [
+        "One-time `Global` setup. Only the program's upgrade authority may call it,",
+        "so deployment cannot be front-run."
+      ],
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "global",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyback_vault",
+          "docs": [
+            "Destination of swept buyback fees (SOL held as lamports above rent)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  121,
+                  98,
+                  97,
+                  99,
+                  107,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "holder_vault",
+          "docs": [
+            "Destination of swept holder-reward fees."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "8tBGLgWXDAssTBgUaamsB4ZbyRQivNDiGFiyTMfQiPFW"
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "GlobalParams"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "lock_migrated_lp",
+      "docs": [
+        "Graduation 3/3 (crank + fresh NFT mint keypair): lock all LP in Burn & Earn."
+      ],
+      "discriminator": [
+        49,
+        25,
+        99,
+        246,
+        14,
+        32,
+        216,
+        154
+      ],
+      "accounts": [
+        {
+          "name": "crank",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "global",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "bonding_curve",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  45,
+                  99,
+                  117,
+                  114,
+                  118,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "migration_authority",
+          "docs": [
+            "LP owner and rent payer for the lock accounts (from the reserve)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  103,
+                  114,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_key_vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  45,
+                  107,
+                  101,
+                  121,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_nft_mint",
+          "docs": [
+            "Fresh keypair generated by the crank; the lock program initialises it."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "lp_lock_program"
+        },
+        {
+          "name": "lp_lock_authority"
+        },
+        {
+          "name": "pool_state"
+        },
+        {
+          "name": "lp_mint"
+        },
+        {
+          "name": "creator_lp_token",
+          "writable": true
+        },
+        {
+          "name": "token_0_vault",
+          "writable": true
+        },
+        {
+          "name": "token_1_vault",
+          "writable": true
+        },
+        {
+          "name": "fee_nft_account",
+          "writable": true
+        },
+        {
+          "name": "locked_liquidity",
+          "writable": true
+        },
+        {
+          "name": "lock_lp_vault",
+          "writable": true
+        },
+        {
+          "name": "nft_metadata",
+          "writable": true
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "metadata_program",
+          "address": "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "migrate_raydium",
+      "docs": [
+        "Graduation 2/3 (crank): create the Raydium CPMM pool."
+      ],
+      "discriminator": [
+        198,
+        96,
+        158,
+        2,
+        114,
+        87,
+        180,
+        1
+      ],
+      "accounts": [
+        {
+          "name": "crank",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "global",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "Writable: unsolicited surplus tokens are burned."
+          ],
+          "writable": true
+        },
+        {
+          "name": "bonding_curve",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  45,
+                  99,
+                  117,
+                  114,
+                  118,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "migration_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  103,
+                  114,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority_token_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "migration_authority"
+              },
+              {
+                "kind": "account",
+                "path": "token_2022_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "authority_wsol_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "migration_authority"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "wsol_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "wsol_mint",
+          "address": "So11111111111111111111111111111111111111112"
+        },
+        {
+          "name": "cpmm_program"
+        },
+        {
+          "name": "amm_config"
+        },
+        {
+          "name": "cpmm_authority"
+        },
+        {
+          "name": "pool_state",
+          "writable": true
+        },
+        {
+          "name": "lp_mint",
+          "writable": true
+        },
+        {
+          "name": "creator_lp_token",
+          "writable": true
+        },
+        {
+          "name": "token_0_vault",
+          "writable": true
+        },
+        {
+          "name": "token_1_vault",
+          "writable": true
+        },
+        {
+          "name": "create_pool_fee",
+          "writable": true
+        },
+        {
+          "name": "observation_state",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "token_2022_program",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "prepare_buyback",
+      "docs": [
+        "Crank: stage `amount` lamports from BuybackVault for `buyback_and_burn`",
+        "(send both in one transaction)."
+      ],
+      "discriminator": [
+        127,
+        177,
+        47,
+        169,
+        245,
+        67,
+        106,
+        84
+      ],
+      "accounts": [
+        {
+          "name": "crank",
+          "signer": true
+        },
+        {
+          "name": "global",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyback_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  121,
+                  98,
+                  97,
+                  99,
+                  107,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyback_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  121,
+                  98,
+                  97,
+                  99,
+                  107,
+                  45,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "prepare_migration",
+      "docs": [
+        "Graduation 1/3 (crank): move the curve's tokens + SOL to the migration authority."
+      ],
+      "discriminator": [
+        59,
+        118,
+        102,
+        18,
+        9,
+        133,
+        23,
+        172
+      ],
+      "accounts": [
+        {
+          "name": "crank",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "global",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "Writable: unsolicited surplus tokens are burned."
+          ],
+          "writable": true
+        },
+        {
+          "name": "bonding_curve",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  45,
+                  99,
+                  117,
+                  114,
+                  118,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "curve_token_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "bonding_curve"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "migration_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  103,
+                  114,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority_token_account",
+          "docs": [
+            "Becomes CPMM's `creator_token_*` for the launched mint."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "migration_authority"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "propose_admin",
+      "docs": [
+        "Admin: nominate a new admin (`Pubkey::default()` cancels)."
+      ],
+      "discriminator": [
+        121,
+        214,
+        199,
+        212,
+        87,
+        39,
+        117,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "global",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "new_admin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "publish_reward_epoch",
+      "docs": [
+        "Crank: commit `total_lamports` of the holder vault to a snapshot Merkle root."
+      ],
+      "discriminator": [
+        98,
+        14,
+        69,
+        83,
+        53,
+        252,
+        44,
+        206
+      ],
+      "accounts": [
+        {
+          "name": "crank",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "global",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "holder_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "reward_epoch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  119,
+                  97,
+                  114,
+                  100,
+                  45,
+                  101,
+                  112,
+                  111,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "holder_vault.next_epoch",
+                "account": "HolderRewardVault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "merkle_root",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "total_lamports",
+          "type": "u64"
+        },
+        {
+          "name": "num_leaves",
+          "type": "u32"
+        },
+        {
+          "name": "snapshot_slot",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "refund_ticket",
+      "docs": [
+        "Return an unused ticket's deposit + rent to its payer. Payer: after",
+        "expiry. Launch authority: any time (backend rejection)."
+      ],
+      "discriminator": [
+        178,
+        97,
+        75,
+        218,
+        227,
+        28,
+        21,
+        73
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The payer (after expiry) or the launch authority (any time)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "relations": [
+            "ticket"
+          ]
+        },
+        {
+          "name": "global",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "ticket",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  105,
+                  99,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "account",
+                "path": "ticket.nonce",
+                "account": "LaunchTicket"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "release_dex_escrow",
+      "docs": [
+        "Pay a funded escrow (`dex_target_lamports`) to the treasury, once."
+      ],
+      "discriminator": [
+        247,
+        115,
+        38,
+        207,
+        87,
+        83,
+        105,
+        62
+      ],
+      "accounts": [
+        {
+          "name": "global",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "bonding_curve",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  45,
+                  99,
+                  117,
+                  114,
+                  118,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "request_launch",
+      "docs": [
+        "User deposits `Global.ticket_deposit_lamports` and commits to the exact",
+        "name/symbol/URI. `symbol` must be the canonical ticker.",
+        "`tweet_id` (optional) is the numeric status ID of the announcement tweet."
+      ],
+      "discriminator": [
+        194,
+        49,
+        100,
+        76,
+        25,
+        25,
+        76,
+        233
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "global",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "ticket",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  105,
+                  99,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "arg",
+                "path": "nonce"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "nonce",
+          "type": "u64"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "symbol",
+          "type": "string"
+        },
+        {
+          "name": "uri",
+          "type": "string"
+        },
+        {
+          "name": "tweet_id",
+          "type": {
+            "option": "u64"
+          }
+        }
+      ]
+    },
+    {
+      "name": "sell",
+      "docs": [
+        "Sell `amount` tokens for at least `min_sol_output` lamports (net of fee)."
+      ],
+      "discriminator": [
+        51,
+        230,
+        133,
+        164,
+        1,
+        127,
+        131,
+        173
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "global",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "bonding_curve",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  45,
+                  99,
+                  117,
+                  114,
+                  118,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "curve_token_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "bonding_curve"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "user_token_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "min_sol_output",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_paused",
+      "docs": [
+        "Admin: emergency pause (launches, trading, buybacks, new reward epochs)."
+      ],
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "global",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "sweep_fees",
+      "docs": [
+        "Move buyback / holder / treasury buckets to their vaults (never the escrow)."
+      ],
+      "discriminator": [
+        175,
+        225,
+        98,
+        71,
+        118,
+        66,
+        34,
+        148
+      ],
+      "accounts": [
+        {
+          "name": "global",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "bonding_curve",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  45,
+                  99,
+                  117,
+                  114,
+                  118,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyback_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  121,
+                  98,
+                  97,
+                  99,
+                  107,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "holder_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "top_up_dex_escrow",
+      "docs": [
+        "Anyone can add protocol fees to a curve's DexScreener escrow, up to the target."
+      ],
+      "discriminator": [
+        61,
+        135,
+        174,
+        248,
+        89,
+        170,
+        132,
+        72
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "global",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "bonding_curve",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  45,
+                  99,
+                  117,
+                  114,
+                  118,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "update_global_params",
+      "docs": [
+        "Admin: partial `Global` update, validated as a whole."
+      ],
+      "discriminator": [
+        146,
+        36,
+        222,
+        108,
+        89,
+        226,
+        249,
+        126
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "global",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "update",
+          "type": {
+            "defined": {
+              "name": "GlobalUpdate"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "BondingCurve",
+      "discriminator": [
+        23,
+        183,
+        248,
+        55,
+        96,
+        216,
+        172,
+        96
+      ]
+    },
+    {
+      "name": "BuybackVault",
+      "discriminator": [
+        153,
+        166,
+        71,
+        144,
+        179,
+        189,
+        137,
+        251
+      ]
+    },
+    {
+      "name": "Global",
+      "discriminator": [
+        167,
+        232,
+        232,
+        177,
+        200,
+        108,
+        114,
+        127
+      ]
+    },
+    {
+      "name": "HolderRewardVault",
+      "discriminator": [
+        226,
+        191,
+        43,
+        79,
+        146,
+        8,
+        189,
+        140
+      ]
+    },
+    {
+      "name": "LaunchTicket",
+      "discriminator": [
+        235,
+        200,
+        179,
+        207,
+        226,
+        242,
+        244,
+        161
+      ]
+    },
+    {
+      "name": "NameRegistry",
+      "discriminator": [
+        169,
+        63,
+        83,
+        240,
+        198,
+        158,
+        53,
+        11
+      ]
+    },
+    {
+      "name": "RewardEpoch",
+      "discriminator": [
+        214,
+        103,
+        106,
+        97,
+        14,
+        4,
+        33,
+        156
+      ]
+    },
+    {
+      "name": "TickerRegistry",
+      "discriminator": [
+        179,
+        120,
+        101,
+        250,
+        243,
+        117,
+        178,
+        237
+      ]
+    },
+    {
+      "name": "TweetRegistry",
+      "discriminator": [
+        12,
+        194,
+        241,
+        83,
+        239,
+        106,
+        27,
+        57
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "AdminTransferProposed",
+      "discriminator": [
+        203,
+        168,
+        175,
+        51,
+        239,
+        104,
+        20,
+        85
+      ]
+    },
+    {
+      "name": "AdminTransferred",
+      "discriminator": [
+        255,
+        147,
+        182,
+        5,
+        199,
+        217,
+        38,
+        179
+      ]
+    },
+    {
+      "name": "BuybackBurned",
+      "discriminator": [
+        186,
+        84,
+        241,
+        202,
+        152,
+        185,
+        0,
+        115
+      ]
+    },
+    {
+      "name": "BuybackStaged",
+      "discriminator": [
+        66,
+        102,
+        77,
+        204,
+        41,
+        16,
+        89,
+        5
+      ]
+    },
+    {
+      "name": "DexEscrowReleased",
+      "discriminator": [
+        224,
+        87,
+        5,
+        197,
+        206,
+        21,
+        240,
+        102
+      ]
+    },
+    {
+      "name": "DexEscrowToppedUp",
+      "discriminator": [
+        175,
+        161,
+        244,
+        114,
+        168,
+        200,
+        41,
+        103
+      ]
+    },
+    {
+      "name": "EpochExpired",
+      "discriminator": [
+        100,
+        30,
+        119,
+        234,
+        71,
+        13,
+        47,
+        170
+      ]
+    },
+    {
+      "name": "FeesSwept",
+      "discriminator": [
+        96,
+        218,
+        115,
+        136,
+        74,
+        170,
+        202,
+        172
+      ]
+    },
+    {
+      "name": "GlobalParamsUpdated",
+      "discriminator": [
+        212,
+        96,
+        46,
+        152,
+        150,
+        242,
+        177,
+        48
+      ]
+    },
+    {
+      "name": "GraduationReady",
+      "discriminator": [
+        225,
+        53,
+        28,
+        227,
+        76,
+        125,
+        195,
+        142
+      ]
+    },
+    {
+      "name": "HolderRewardClaimed",
+      "discriminator": [
+        38,
+        51,
+        8,
+        24,
+        30,
+        110,
+        96,
+        202
+      ]
+    },
+    {
+      "name": "LaunchRequested",
+      "discriminator": [
+        182,
+        25,
+        247,
+        28,
+        152,
+        144,
+        12,
+        50
+      ]
+    },
+    {
+      "name": "LiquidityLocked",
+      "discriminator": [
+        150,
+        201,
+        204,
+        183,
+        217,
+        13,
+        119,
+        185
+      ]
+    },
+    {
+      "name": "LpFeesCollected",
+      "discriminator": [
+        208,
+        126,
+        62,
+        199,
+        117,
+        158,
+        108,
+        232
+      ]
+    },
+    {
+      "name": "MigratedToRaydium",
+      "discriminator": [
+        34,
+        204,
+        182,
+        221,
+        253,
+        2,
+        1,
+        28
+      ]
+    },
+    {
+      "name": "MigrationPrepared",
+      "discriminator": [
+        34,
+        222,
+        38,
+        134,
+        134,
+        231,
+        82,
+        228
+      ]
+    },
+    {
+      "name": "PauseToggled",
+      "discriminator": [
+        105,
+        215,
+        89,
+        53,
+        198,
+        232,
+        136,
+        161
+      ]
+    },
+    {
+      "name": "RewardEpochPublished",
+      "discriminator": [
+        210,
+        4,
+        41,
+        48,
+        209,
+        206,
+        81,
+        194
+      ]
+    },
+    {
+      "name": "TicketRefunded",
+      "discriminator": [
+        46,
+        173,
+        213,
+        43,
+        145,
+        205,
+        132,
+        218
+      ]
+    },
+    {
+      "name": "TokenCreated",
+      "discriminator": [
+        236,
+        19,
+        41,
+        255,
+        130,
+        78,
+        147,
+        172
+      ]
+    },
+    {
+      "name": "TradeEvent",
+      "discriminator": [
+        189,
+        219,
+        127,
+        211,
+        78,
+        230,
+        97,
+        238
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Overflow",
+      "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6001,
+      "name": "DivisionByZero",
+      "msg": "Division by zero"
+    },
+    {
+      "code": 6002,
+      "name": "Truncation",
+      "msg": "Value does not fit in u64"
+    },
+    {
+      "code": 6003,
+      "name": "ZeroAmount",
+      "msg": "Amount must be greater than zero"
+    },
+    {
+      "code": 6004,
+      "name": "InsufficientReserves",
+      "msg": "Requested amount exceeds curve reserves"
+    },
+    {
+      "code": 6005,
+      "name": "Unauthorized",
+      "msg": "Signer is not authorised for this action"
+    },
+    {
+      "code": 6006,
+      "name": "Paused",
+      "msg": "Program is paused"
+    },
+    {
+      "code": 6007,
+      "name": "PlatformFeeTooHigh",
+      "msg": "Platform fee exceeds the 1% ceiling"
+    },
+    {
+      "code": 6008,
+      "name": "FeeSplitOutOfRange",
+      "msg": "Buyback + holder basis points exceed 10000"
+    },
+    {
+      "code": 6009,
+      "name": "TicketDepositTooLow",
+      "msg": "Launch ticket deposit does not cover the launch fee plus rent buffer"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidDuration",
+      "msg": "Invalid duration parameter"
+    },
+    {
+      "code": 6011,
+      "name": "InvalidCurveParams",
+      "msg": "Invalid bonding curve parameters"
+    },
+    {
+      "code": 6012,
+      "name": "InvalidAuthority",
+      "msg": "A required authority or mint is the default pubkey"
+    },
+    {
+      "code": 6013,
+      "name": "InvalidTicker",
+      "msg": "Ticker must be 1-10 ASCII letters or digits"
+    },
+    {
+      "code": 6014,
+      "name": "InvalidName",
+      "msg": "Name must be 1-32 bytes"
+    },
+    {
+      "code": 6015,
+      "name": "InvalidUri",
+      "msg": "URI exceeds 200 bytes"
+    },
+    {
+      "code": 6016,
+      "name": "NonCanonicalSymbol",
+      "msg": "Symbol must already be the canonical ticker (uppercase A-Z/0-9, no $ or spaces)"
+    },
+    {
+      "code": 6017,
+      "name": "NonCanonicalName",
+      "msg": "Name must not have leading or trailing whitespace"
+    },
+    {
+      "code": 6018,
+      "name": "TicketExpired",
+      "msg": "Launch ticket has expired"
+    },
+    {
+      "code": 6019,
+      "name": "TicketNotExpired",
+      "msg": "Launch ticket has not expired yet"
+    },
+    {
+      "code": 6020,
+      "name": "LaunchFeeExceedsDeposit",
+      "msg": "Launch fee exceeds the ticket deposit"
+    },
+    {
+      "code": 6021,
+      "name": "MetadataMismatch",
+      "msg": "Name/symbol/URI do not match the launch ticket commitment"
+    },
+    {
+      "code": 6022,
+      "name": "TickerLocked",
+      "msg": "Ticker is locked by a launch in the last 3 days"
+    },
+    {
+      "code": 6023,
+      "name": "NameLocked",
+      "msg": "Name is locked by a launch in the last 3 days"
+    },
+    {
+      "code": 6024,
+      "name": "TradingNotOpenYet",
+      "msg": "Trading has not opened yet for this curve"
+    },
+    {
+      "code": 6025,
+      "name": "CurveComplete",
+      "msg": "Bonding curve is complete; trading is locked until migration"
+    },
+    {
+      "code": 6026,
+      "name": "SlippageExceeded",
+      "msg": "Slippage limit exceeded"
+    },
+    {
+      "code": 6027,
+      "name": "LamportInvariantViolated",
+      "msg": "Bonding curve lamports do not cover rent + reserves + accrued fees"
+    },
+    {
+      "code": 6028,
+      "name": "CurveNotComplete",
+      "msg": "Bonding curve is not complete"
+    },
+    {
+      "code": 6029,
+      "name": "InvalidMigrationStage",
+      "msg": "Migration is not at the required stage"
+    },
+    {
+      "code": 6030,
+      "name": "InvalidMigrationAccount",
+      "msg": "Account does not match the derived Raydium/migration address"
+    },
+    {
+      "code": 6031,
+      "name": "InsufficientMigrationSol",
+      "msg": "Curve SOL does not exceed the migration reserve"
+    },
+    {
+      "code": 6032,
+      "name": "MigrationPriceOutOfRange",
+      "msg": "Opening pool price deviates too far from the curve's final price"
+    },
+    {
+      "code": 6033,
+      "name": "InvalidMigrationParams",
+      "msg": "Invalid migration parameters"
+    },
+    {
+      "code": 6034,
+      "name": "EscrowNotFunded",
+      "msg": "DexScreener escrow has not reached the target"
+    },
+    {
+      "code": 6035,
+      "name": "EscrowAlreadyFunded",
+      "msg": "DexScreener escrow is already funded"
+    },
+    {
+      "code": 6036,
+      "name": "EscrowAlreadyReleased",
+      "msg": "DexScreener escrow was already released"
+    },
+    {
+      "code": 6037,
+      "name": "NoPendingAdmin",
+      "msg": "No admin transfer is pending for this signer"
+    },
+    {
+      "code": 6038,
+      "name": "NothingCollected",
+      "msg": "Nothing was collected"
+    },
+    {
+      "code": 6039,
+      "name": "BuybackNotConfigured",
+      "msg": "$PARABULL buyback pool is not configured"
+    },
+    {
+      "code": 6040,
+      "name": "InsufficientVaultBalance",
+      "msg": "Vault cannot pay this amount and stay rent-exempt"
+    },
+    {
+      "code": 6041,
+      "name": "InsufficientRewardFunds",
+      "msg": "Holder vault cannot fund this epoch on top of outstanding rewards"
+    },
+    {
+      "code": 6042,
+      "name": "InvalidRewardEpoch",
+      "msg": "Invalid holder-reward epoch parameters"
+    },
+    {
+      "code": 6043,
+      "name": "InvalidMerkleProof",
+      "msg": "Merkle proof does not match the epoch root"
+    },
+    {
+      "code": 6044,
+      "name": "RewardAlreadyClaimed",
+      "msg": "Reward already claimed"
+    },
+    {
+      "code": 6045,
+      "name": "RewardEpochExhausted",
+      "msg": "Claim exceeds the epoch's remaining total"
+    },
+    {
+      "code": 6046,
+      "name": "RewardEpochExpired",
+      "msg": "Reward epoch has expired"
+    },
+    {
+      "code": 6047,
+      "name": "RewardEpochNotExpired",
+      "msg": "Reward epoch claim window has not ended"
+    },
+    {
+      "code": 6048,
+      "name": "InvalidTweetId",
+      "msg": "Tweet ID must be a non-zero X/Twitter status ID"
+    },
+    {
+      "code": 6049,
+      "name": "TweetLocked",
+      "msg": "Announcement tweet is locked by a launch in the last 3 days"
+    },
+    {
+      "code": 6050,
+      "name": "TweetRegistryMismatch",
+      "msg": "Tweet registry account must be passed exactly when the ticket has a tweet"
+    }
+  ],
+  "types": [
+    {
+      "name": "AdminTransferProposed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_admin",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AdminTransferred",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_admin",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BondingCurve",
+      "docs": [
+        "Per-token curve. PDA: `[\"bonding-curve\", mint]`.",
+        "",
+        "Lamport invariant: `lamports >= rent_exempt_min + real_sol_reserves + accrued_fees()`.",
+        "Fees are tallied here (not pushed to shared vaults) so trades on different",
+        "tokens never write-lock a common account."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "complete",
+            "docs": [
+              "Real token reserves hit zero; trading stops, awaiting migration."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "migrated",
+            "docs": [
+              "Liquidity seeded into Raydium CPMM and LP locked."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "escrow_released",
+            "docs": [
+              "DexScreener escrow paid out; later fees skip Stage 1."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "Wallet that paid the launch ticket. Earns 0% of trading fees."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "virtual_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "virtual_sol_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "real_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "real_sol_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "token_total_supply",
+            "type": "u64"
+          },
+          {
+            "name": "created_slot",
+            "type": "u64"
+          },
+          {
+            "name": "trading_open_slot",
+            "docs": [
+              "No buy/sell before this slot."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "launch_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "escrow_accrued",
+            "docs": [
+              "Fee buckets (lamports held in this account until swept)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "buyback_accrued",
+            "type": "u64"
+          },
+          {
+            "name": "holder_accrued",
+            "type": "u64"
+          },
+          {
+            "name": "treasury_accrued",
+            "type": "u64"
+          },
+          {
+            "name": "migration_stage",
+            "docs": [
+              "`MigrationStage` as u8."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "migration_sol",
+            "docs": [
+              "Amounts moved to the migration authority by `prepare_migration`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "migration_tokens",
+            "type": "u64"
+          },
+          {
+            "name": "raydium_pool",
+            "docs": [
+              "Raydium CPMM pool created by `migrate_raydium`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_nft_mint",
+            "docs": [
+              "Burn & Earn fee-key NFT mint created by `lock_migrated_lp`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_fees_sol_collected",
+            "docs": [
+              "Lifetime post-graduation LP fees: SOL collected and launched tokens",
+              "collected-and-burned (measured amounts)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lp_fees_tokens_burned",
+            "type": "u64"
+          },
+          {
+            "name": "_reserved",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "BuybackBurned",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "parabull_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "sol_in",
+            "type": "u64"
+          },
+          {
+            "name": "tokens_burned",
+            "type": "u64"
+          },
+          {
+            "name": "min_amount_out",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BuybackStaged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "vault_remaining",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BuybackVault",
+      "docs": [
+        "Program-owned SOL for $PARABULL buyback & burn. PDA: `[\"buyback-vault\"]`.",
+        "SOL is held as this account's lamports above rent."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "total_deposited_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "total_spent_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "total_tokens_burned",
+            "type": "u64"
+          },
+          {
+            "name": "buyback_count",
+            "type": "u64"
+          },
+          {
+            "name": "last_buyback_at",
+            "type": "i64"
+          },
+          {
+            "name": "_reserved",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "DexEscrowReleased",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "excess_to_buyback",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DexEscrowToppedUp",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "accepted",
+            "type": "u64"
+          },
+          {
+            "name": "escrow_accrued",
+            "type": "u64"
+          },
+          {
+            "name": "target",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EpochExpired",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "epoch_index",
+            "type": "u64"
+          },
+          {
+            "name": "reclaimed_lamports",
+            "docs": [
+              "Unclaimed lamports released back to the vault's available balance."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "expired_by",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeesSwept",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "to_buyback_vault",
+            "type": "u64"
+          },
+          {
+            "name": "to_holder_vault",
+            "type": "u64"
+          },
+          {
+            "name": "to_treasury",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Global",
+      "docs": [
+        "Singleton config. PDA: `[\"global\"]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "admin",
+            "docs": [
+              "Config + emergency authority."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "launch_authority",
+            "docs": [
+              "Backend signer that must co-sign every `create` (blind launch)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "crank_authority",
+            "docs": [
+              "Backend signer for migrate / escrow release / buyback / holder epochs."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "docs": [
+              "Receives launch fees, released DexScreener escrow and treasury fees."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "parabull_mint",
+            "docs": [
+              "Native $PARABULL mint (buyback target, holder-reward eligibility)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "launch_fee_lamports",
+            "docs": [
+              "Protocol launch fee carved out of each ticket (0.2 SOL)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "ticket_deposit_lamports",
+            "docs": [
+              "Total a user deposits into a `LaunchTicket` (~0.23 SOL)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "ticket_ttl_seconds",
+            "docs": [
+              "After this many seconds an unconsumed ticket is refundable."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "platform_fee_bps",
+            "docs": [
+              "Platform trading fee, hard-capped at `MAX_PLATFORM_FEE_BPS` (1%)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "buyback_bps",
+            "docs": [
+              "Post-escrow split of the platform fee; remainder goes to treasury."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "holder_bps",
+            "type": "u16"
+          },
+          {
+            "name": "dex_target_lamports",
+            "docs": [
+              "DexScreener listing target in lamports (admin-updated from SOL/USD)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "dex_target_updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "trading_open_delay_slots",
+            "docs": [
+              "Slots between creation and the first allowed trade (anti block-zero)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "registry_lock_seconds",
+            "docs": [
+              "Ticker/name lock window (3 days)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "initial_virtual_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "initial_virtual_sol_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "initial_real_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "token_total_supply",
+            "type": "u64"
+          },
+          {
+            "name": "launch_count",
+            "type": "u64"
+          },
+          {
+            "name": "cpmm_program",
+            "docs": [
+              "Raydium CPMM program (mainnet `CPMMoo8L…`), configurable per cluster."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "cpmm_amm_config",
+            "docs": [
+              "CPMM `AmmConfig` (fee tier) new pools are created under."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_lock_program",
+            "docs": [
+              "Raydium Burn & Earn LP-lock program and its authority."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_lock_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "migration_reserve_lamports",
+            "docs": [
+              "SOL held back from the pool to pay Raydium fees and rent."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pending_admin",
+            "docs": [
+              "Two-step admin transfer: set by `propose_admin`, cleared by `accept_admin`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "parabull_pool",
+            "docs": [
+              "Raydium CPMM WSOL/$PARABULL pool used by `buyback_and_burn`",
+              "(`Pubkey::default()` until the pool exists)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "reward_claim_window_seconds",
+            "docs": [
+              "Claim window copied into each reward epoch at publish time."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "_reserved",
+            "type": {
+              "array": [
+                "u8",
+                24
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "GlobalParams",
+      "docs": [
+        "Admin-settable parameters, validated as a unit."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "crank_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "parabull_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "launch_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "ticket_deposit_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "ticket_ttl_seconds",
+            "type": "i64"
+          },
+          {
+            "name": "platform_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "buyback_bps",
+            "type": "u16"
+          },
+          {
+            "name": "holder_bps",
+            "type": "u16"
+          },
+          {
+            "name": "dex_target_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "trading_open_delay_slots",
+            "type": "u64"
+          },
+          {
+            "name": "registry_lock_seconds",
+            "type": "i64"
+          },
+          {
+            "name": "initial_virtual_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "initial_virtual_sol_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "initial_real_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "token_total_supply",
+            "type": "u64"
+          },
+          {
+            "name": "cpmm_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "cpmm_amm_config",
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_lock_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_lock_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "migration_reserve_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "parabull_pool",
+            "docs": [
+              "May be default at initialize; required only by `buyback_and_burn`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "reward_claim_window_seconds",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GlobalParamsUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "update",
+            "type": {
+              "defined": {
+                "name": "GlobalUpdate"
+              }
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GlobalUpdate",
+      "docs": [
+        "Partial update for `update_global_params`: `None` leaves a field unchanged.",
+        "The merged result is validated with the same rules as `initialize`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "dex_target_lamports",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "buyback_bps",
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "holder_bps",
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "migration_reserve_lamports",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "trading_open_delay_slots",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "cpmm_program",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "cpmm_amm_config",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "lp_lock_program",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "lp_lock_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "parabull_mint",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "parabull_pool",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "reward_claim_window_seconds",
+            "type": {
+              "option": "i64"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "GraduationReady",
+      "docs": [
+        "The last real token was bought; the curve is locked until Raydium migration."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "bonding_curve",
+            "type": "pubkey"
+          },
+          {
+            "name": "real_sol_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "virtual_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "virtual_sol_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "escrow_accrued",
+            "type": "u64"
+          },
+          {
+            "name": "escrow_funded",
+            "type": "bool"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HolderRewardClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "epoch",
+            "type": "u64"
+          },
+          {
+            "name": "index",
+            "type": "u32"
+          },
+          {
+            "name": "claimant",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HolderRewardVault",
+      "docs": [
+        "Program-owned SOL for $PARABULL holder rewards. PDA: `[\"holder-vault\"]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "total_deposited_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "total_committed_lamports",
+            "docs": [
+              "Lamports committed to published epochs (claimable or claimed)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_claimed_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "next_epoch",
+            "docs": [
+              "Next epoch index to publish."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_expired_lamports",
+            "docs": [
+              "Unclaimed lamports released by `expire_reward_epoch`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "_reserved",
+            "type": {
+              "array": [
+                "u8",
+                56
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LaunchRequested",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "ticket",
+            "type": "pubkey"
+          },
+          {
+            "name": "payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "ticker",
+            "type": "string"
+          },
+          {
+            "name": "name_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "metadata_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "deposit_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "tweet_id_hash",
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  32
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LaunchTicket",
+      "docs": [
+        "User-funded launch request. PDA: `[\"ticket\", payer, nonce_le]`.",
+        "",
+        "The payer commits to the exact metadata; the backend can only consume the",
+        "ticket with matching metadata, or the payer refunds after `expires_at`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "deposit_lamports",
+            "docs": [
+              "Everything the user paid: the flat deposit, *including* this ticket's",
+              "own rent (the ticket holds exactly this many lamports)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "launch_fee_lamports",
+            "docs": [
+              "Protocol fee quoted at request time. The rest of the deposit repays",
+              "the rent the launch authority fronts in `create`; anything unspent",
+              "goes to the treasury."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "ticker",
+            "type": {
+              "array": [
+                "u8",
+                10
+              ]
+            }
+          },
+          {
+            "name": "ticker_len",
+            "type": "u8"
+          },
+          {
+            "name": "name_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "metadata_hash",
+            "docs": [
+              "`metadata_commitment(name, symbol, uri)`."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "tweet_id_hash",
+            "docs": [
+              "`launch::tweet_id_hash(tweet_id)` of the announcement tweet, if any.",
+              "Computed on-chain from the numeric status ID so URL variants of one",
+              "tweet can't dodge the lock."
+            ],
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  32
+                ]
+              }
+            }
+          },
+          {
+            "name": "_reserved",
+            "type": {
+              "array": [
+                "u8",
+                24
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LiquidityLocked",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_amount",
+            "type": "u64"
+          },
+          {
+            "name": "fee_nft_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_nft_owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "reserve_refunded_to_treasury",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpFeesCollected",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_lp_amount",
+            "type": "u64"
+          },
+          {
+            "name": "sol_collected",
+            "docs": [
+              "Measured SOL actually received (unwrapped from WSOL)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "tokens_burned",
+            "docs": [
+              "Measured launched-token amount received, burned in the same instruction."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "to_escrow",
+            "type": "u64"
+          },
+          {
+            "name": "to_buyback_vault",
+            "type": "u64"
+          },
+          {
+            "name": "to_holder_vault",
+            "type": "u64"
+          },
+          {
+            "name": "to_treasury",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MigratedToRaydium",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "token_0",
+            "type": "pubkey"
+          },
+          {
+            "name": "token_1",
+            "type": "pubkey"
+          },
+          {
+            "name": "tokens_to_pool",
+            "type": "u64"
+          },
+          {
+            "name": "sol_to_pool",
+            "type": "u64"
+          },
+          {
+            "name": "surplus_tokens_burned",
+            "docs": [
+              "Unsolicited tokens found in the migration authority's account, burned."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "surplus_wsol",
+            "docs": [
+              "Unsolicited WSOL in the migration authority's account; follows the",
+              "unspent reserve to the treasury in `lock_migrated_lp`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MigrationPrepared",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "migration_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "sol_to_pool",
+            "type": "u64"
+          },
+          {
+            "name": "sol_reserve",
+            "type": "u64"
+          },
+          {
+            "name": "tokens_to_pool",
+            "type": "u64"
+          },
+          {
+            "name": "surplus_tokens_burned",
+            "docs": [
+              "Unsolicited tokens found in the curve's token account, burned."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NameRegistry",
+      "docs": [
+        "Name lock. PDA: `[\"name\", sha256(normalized_name)]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "name_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "launch_timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PauseToggled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RewardEpoch",
+      "docs": [
+        "One holder-reward distribution: an off-chain snapshot of $PARABULL holders",
+        "committed as a Merkle root over `(index, claimant, amount)` leaves.",
+        "PDA: `[\"reward-epoch\", epoch_le]`. Sized per epoch for its claimed-bitmap."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "epoch",
+            "type": "u64"
+          },
+          {
+            "name": "merkle_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "snapshot_slot",
+            "type": "u64"
+          },
+          {
+            "name": "total_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "claimed_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "num_leaves",
+            "type": "u32"
+          },
+          {
+            "name": "claimed_count",
+            "type": "u32"
+          },
+          {
+            "name": "published_at",
+            "type": "i64"
+          },
+          {
+            "name": "expires_at",
+            "docs": [
+              "`published_at + Global.reward_claim_window_seconds` at publish time."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "expired",
+            "docs": [
+              "Set by `expire_reward_epoch`; no claims afterwards."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "claimed_bitmap",
+            "docs": [
+              "Bit `i` set once leaf `i` has been paid."
+            ],
+            "type": "bytes"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RewardEpochPublished",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "epoch",
+            "type": "u64"
+          },
+          {
+            "name": "merkle_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "total_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "num_leaves",
+            "type": "u32"
+          },
+          {
+            "name": "snapshot_slot",
+            "type": "u64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TickerRegistry",
+      "docs": [
+        "Ticker lock. PDA: `[\"registry\", normalized_ticker]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "ticker",
+            "type": {
+              "array": [
+                "u8",
+                10
+              ]
+            }
+          },
+          {
+            "name": "ticker_len",
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "launch_timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TicketRefunded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "ticket",
+            "type": "pubkey"
+          },
+          {
+            "name": "payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "refunded_by",
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "bonding_curve",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "ticket",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "type": "string"
+          },
+          {
+            "name": "created_slot",
+            "type": "u64"
+          },
+          {
+            "name": "trading_open_slot",
+            "type": "u64"
+          },
+          {
+            "name": "launch_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "virtual_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "virtual_sol_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "real_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "token_total_supply",
+            "type": "u64"
+          },
+          {
+            "name": "launch_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "rent_reimbursed",
+            "docs": [
+              "Rent the launch authority fronted for this create, repaid from the ticket."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "treasury_received",
+            "docs": [
+              "Launch fee plus any unspent operational allocation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "tweet_id_hash",
+            "docs": [
+              "Announcement tweet locked for this launch, if any."
+            ],
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  32
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TradeEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "is_buy",
+            "type": "bool"
+          },
+          {
+            "name": "token_amount",
+            "type": "u64"
+          },
+          {
+            "name": "sol_amount",
+            "docs": [
+              "Buy: lamports added to reserves. Sell: lamports removed from reserves."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "fee",
+            "type": "u64"
+          },
+          {
+            "name": "fee_to_escrow",
+            "type": "u64"
+          },
+          {
+            "name": "fee_to_buyback",
+            "type": "u64"
+          },
+          {
+            "name": "fee_to_holders",
+            "type": "u64"
+          },
+          {
+            "name": "fee_to_treasury",
+            "type": "u64"
+          },
+          {
+            "name": "virtual_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "virtual_sol_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "real_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "real_sol_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TweetRegistry",
+      "docs": [
+        "Announcement-tweet lock. PDA: `[\"tweet\", tweet_id_hash]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "tweet_id_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "launch_timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}

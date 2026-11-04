@@ -230,6 +230,8 @@ reading only.
 | `programs/parabull/tests/rewards_flow.rs` | Runtime tests: Merkle epochs, pull/push claims, double-claim, solvency |
 | `programs/parabull/tests/common/raydium_mock.rs` | Native Raydium CPMM / lock mocks at the mainnet IDs; they re-derive and check every account |
 | `docs/BACKEND_SPEC.md` | Off-chain services: launch worker (random delay, tweet verification), bundle-risk indexer, similarity flags |
+| `docs/DESIGN.md` | Bronze/copper design system: tokens, contrast, materials, typography, brand mark, data-viz rules |
+| `app/` | Web app (React + Vite + Tailwind). See `app/README.md` for routes, modes, and what's wired to the program vs demo data |
 | `reference/` | Byte-matching pump.fun reconstructions. Read-only |
 
 ## Cluster addresses (Raydium)
@@ -319,7 +321,9 @@ pins both index-0 addresses.
   parabull --features idl-build --locked`.
 - **`scripts`:** builds and caches anchor-cli 0.31.1 from crates.io, runs
   `anchor idl build`, then `npm ci`, `npm run typecheck` and `npm test` in
-  `scripts/`.
+  `scripts/`. It also checks that `app/src/idl/` matches the generated IDL.
+- **`app`:** `npm ci`, `npm test` and `npm run build` (typecheck + Vite) in
+  `app/`.
 
 Both jobs use `line-tables-only` debug info, because each runtime-test
 binary is about 440 MB with full debug info.
@@ -331,6 +335,10 @@ binary is about 440 MB with full debug info.
 - **check with IDL build**: `cargo check -p parabull --features idl-build`
 - **scripts**: `cd scripts && npm ci && npm run typecheck && npm test`
   (needs `target/types/parabull.ts` from `anchor build`)
+- **app**: `cd app && npm ci && npm test && npm run build`. After a program
+  change, regenerate the IDL and run `npm run sync-idl` in `app/`; CI fails
+  if `app/src/idl/` drifts. `npm run screenshots -- <dir>` captures every
+  page with Playwright.
 - **build / deploy**: `anchor build` and `anchor deploy` (needs the Anchor
   0.31.1 and Solana CLIs). Before the first deploy, run `anchor keys sync`
   with your own program keypair. The root `Makefile` wraps every step. The

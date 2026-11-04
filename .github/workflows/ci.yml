@@ -79,3 +79,29 @@ jobs:
       - name: Script unit tests
         working-directory: scripts
         run: npm test
+      # app/ commits a copy of the IDL so it builds without the Anchor CLI;
+      # fail if that copy drifts from what the program generates.
+      - name: App IDL copy matches the program
+        run: node app/scripts/sync-idl.mjs --check
+
+  app:
+    name: app (typecheck + tests + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: npm ci
+        working-directory: app
+        run: npm ci
+      - name: Unit tests (launch rules, quotes, Merkle proofs, demo data)
+        working-directory: app
+        run: npm test
+      # Typechecks the app and its tests, then builds with Vite.
+      - name: Build
+        working-directory: app
+        run: npm run build
