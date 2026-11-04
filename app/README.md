@@ -116,6 +116,7 @@ Set these in `app/.env.local` (see `src/config.ts`):
 | `VITE_RPC_URL` | the cluster's public RPC | Your RPC endpoint |
 | `VITE_METADATA_UPLOAD_URL` | unset | Backend that pins the image and metadata JSON and returns `{ uri }`. Without it, chain mode asks for a metadata URI |
 | `VITE_REWARDS_BASE_URL` | unset | Where `epoch-<n>.json` snapshot artifacts (from `scripts/src/snapshot.ts`) are served |
+| `VITE_SENTINEL_URL` | unset | The X sentinel ([`services/twitter-sentinel`](../services/twitter-sentinel/README.md)). A coin's creator gets an **X automation** button on its page (milestone posts, cashtag replies, persona, project context), saved with a wallet signature. Unset, the modal says the sentinel isn't connected |
 
 **Wired to the program** (`src/hooks/useParabullProgram.ts`):
 - `request_launch`, then waiting for the launch worker (the ticket closes,
