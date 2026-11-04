@@ -133,10 +133,12 @@ export function PriceChart({ coin }: { coin: Coin }) {
         </span>
       </div>
       {/*
-        On a phone in landscape (under 480px tall) the chart takes the screen less the header, the nav and its toolbar,
-        at least 160px; from the small viewport (svh), so it holds still while the browser's bars come and go.
+        On a phone in landscape (under 480px tall) the chart fits between the header and the docked Buy / Sell bar: the
+        screen less 12rem (the 3.5rem header, the 3rem bar, the 5rem below it where the nav sits, and 0.5rem to spare).
+        It's sized from the small viewport (svh), so it holds still while the browser's bars come and go. No floor: one
+        taller than that space would put the chart's foot under the bar on the shortest screens.
       */}
-      <div className="relative h-[420px] max-md:h-[300px] max-md:[@media(max-height:480px)_and_(orientation:landscape)]:h-[max(160px,calc(100svh-12rem))]">
+      <div className="relative h-[420px] max-md:h-[300px] max-md:[@media(max-height:480px)_and_(orientation:landscape)]:h-[calc(100svh-12rem)]">
         {shown && (
           <div className="pointer-events-none absolute left-3 top-2 z-10 flex flex-wrap items-baseline gap-x-3 text-[11.5px]">
             <span className="text-base font-semibold text-cream">{fmt(shown.close)}</span>

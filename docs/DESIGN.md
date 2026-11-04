@@ -208,11 +208,12 @@ views switch with `useIsMobile()`.
   link or button; its secondary action (a Follow toggle) sits beside it, and
   decorative icons inside it are `aria-hidden`. Only inline links inside a
   sentence may sit in a `[data-touch-exempt]` element.
-- Below 380px the ranking rows' Follow pill shrinks to its icon (a plus, or a
-  check once followed; `FollowButton narrow`), so names keep their room, and
-  the pinned rank card prints its figure compact, so the rank always shows.
-  Below 360px a ranking row drops its squad tag and a search row with
-  figures drops the coin's age, so the win rate and the ticker fit.
+- Below 384px the ranking rows' Follow pill shrinks to its icon (a plus, or a
+  check once followed; `FollowButton narrow`), so names and win rates keep
+  their room. Below 380px the pinned rank card prints its figure compact, so
+  the rank always shows. Below 360px a ranking row drops its squad tag and a
+  search row with figures drops the coin's age, so the win rate and the
+  ticker fit.
 - The wallet picker (wallet-adapter) gets 48px rows and a 44px close button
   on phones, in `index.css`.
 - `npm run audit:mobile` checks overflow, target sizes and console errors.
@@ -245,8 +246,9 @@ views switch with `useIsMobile()`.
   The tab rows and the Deposit / Receive strip stay in the page instead of
   pinning, so the content keeps room between the header and the nav; Buy /
   Sell stays docked, since it's the coin page's only way to trade. The coin
-  chart shrinks to `max(160px, 100svh - 12rem)`, sized from the small
-  viewport so it holds still while the browser's bars come and go.
+  chart shrinks to `100svh - 12rem`, so it fits between the header and the
+  docked Buy / Sell bar, sized from the small viewport so it holds still
+  while the browser's bars come and go.
 
 ### Layers
 
@@ -272,7 +274,8 @@ views switch with `useIsMobile()`.
   - Esc, a backdrop tap, the close button or dragging the handle down 80px
     closes it. Esc closes the top layer first: a popover open inside the
     sheet (Slippage) or the wallet picker over it, which also gets Tab while
-    it's open.
+    it's open. When the picker closes, focus goes back to the control that
+    opened it.
   - Focus moves into the sheet and back to the trigger, unless something
     else took it meanwhile (search's field after ⌘K).
   - It doesn't use a portal, so render it at the page root: an ancestor with
@@ -282,8 +285,9 @@ views switch with `useIsMobile()`.
   dialogs) moves focus in (unless it's already inside), keeps Tab inside,
   bringing back focus that fell out, and gives focus back the same way,
   after a click outside too. The wallet picker over it gets Tab and the
-  first Esc, as over a sheet. The desktop launch modal doesn't opt in, so
-  it behaves as before.
+  first Esc, and when it closes focus goes back to the control that opened
+  it, as over a sheet. The desktop launch modal doesn't opt in, so it
+  behaves as before.
 - Colors, borders and fills change over 100ms ease-out; primary buttons press
   in with `active:scale-[0.98]` (the Deposit pill uses `scale-95`).
   `prefers-reduced-motion` collapses all of it.
@@ -299,7 +303,9 @@ views switch with `useIsMobile()`.
 - On cards and wells (`bg-surface`, `bg-canvas-2`) the loss tint is `/15`
   (`ChangePill soft`): ember stays at 4.6:1 or better there, where `/30`
   gives 4.15:1. The phone's pills on cards use it, and so do the Portfolio
-  and Search rows in both layouts; the other desktop pages keep `/30`.
+  rows and Search's Recently viewed and Popular rows (over their ember wash)
+  in both layouts; search results, on the canvas, and the other desktop
+  pages keep `/30`.
 - Never green, and never color alone: every change has a sign and an arrow.
 
 ### Type

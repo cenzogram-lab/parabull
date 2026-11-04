@@ -3,6 +3,7 @@
  * 44px icon buttons, the Follow toggle, section headers and the bottom sheet. Everything here
  * keeps touch targets at 44x44px or larger.
  */
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { Check, ChevronRight, Plus, Sprout, X } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -163,8 +164,8 @@ export function IconButton({ label, onClick, children, className, type = "button
  * Follow toggle. `sm`: a 32px gold outline pill with a 44px hit area
  * (`touch-target`) that turns into a quiet "Following". `lg`: a full-width
  * 44px button for sheets, solid gold until followed. `narrow` (sm only):
- * below 380px the pill shrinks to its icon (a plus, or a check once
- * followed), so a ranking row's name keeps its room.
+ * below 384px the pill shrinks to its icon (a plus, or a check once
+ * followed), so a ranking row's name and win rate keep their room.
  */
 export function FollowButton({ name, on, onToggle, size = "sm", narrow = false, className }: { name: string; on: boolean; onToggle: () => void; size?: "sm" | "lg"; narrow?: boolean; className?: string }) {
   const compact = size === "sm" && narrow;
@@ -178,7 +179,7 @@ export function FollowButton({ name, on, onToggle, size = "sm", narrow = false, 
         size === "sm"
           ? cx(
               "touch-target relative inline-flex h-8 w-16 shrink-0 items-center justify-center gap-0.5 rounded-full border text-[12px] font-semibold transition-[color,background-color,border-color,transform] duration-100 ease-out active:scale-[0.98]",
-              compact && "max-[379px]:w-8",
+              compact && "max-[383px]:w-8",
               on ? "border-line bg-surface-2 text-muted" : "border-gold/55 bg-gold/10 text-gold active:bg-gold/20",
             )
           : cx("h-11 w-full rounded-xl text-[14px]", on ? "btn-ghost" : "btn-gold"),
@@ -186,10 +187,10 @@ export function FollowButton({ name, on, onToggle, size = "sm", narrow = false, 
       )}
     >
       {size === "lg" && on && <Check className="h-4 w-4 text-gold" strokeWidth={2.5} aria-hidden />}
-      {compact && on && <Check className="h-3.5 w-3.5 min-[380px]:hidden" strokeWidth={2.5} aria-hidden />}
+      {compact && on && <Check className="h-3.5 w-3.5 min-[384px]:hidden" strokeWidth={2.5} aria-hidden />}
       {!on && <Plus className={size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4"} strokeWidth={2.5} aria-hidden />}
       {/* The aria-label names the button, so the narrow icon-only pill reads the same. */}
-      {compact ? <span className="max-[379px]:hidden">{on ? "Following" : "Follow"}</span> : on ? "Following" : "Follow"}
+      {compact ? <span className="max-[383px]:hidden">{on ? "Following" : "Follow"}</span> : on ? "Following" : "Follow"}
     </button>
   );
 }
@@ -242,7 +243,8 @@ const DISMISS_PX = 80;
  * to 85% of the viewport tall with a scrolling body, clear of the home
  * indicator. Closes on Esc, a backdrop tap, the close button, or dragging
  * the handle down. Focus moves into the sheet and back to the trigger, and
- * Tab stays inside it (or in the wallet picker over it).
+ * Tab stays inside it (or in the wallet picker over it; when the picker
+ * closes, focus goes back to the control that opened it).
  *
  * It renders in place (no portal), so keep it out of any element with a
  * transform, filter or backdrop-filter, which would become the containing
@@ -310,6 +312,28 @@ export function BottomSheet({ open, onClose, title, children }: { open: boolean;
       if (active === document.body || (active && panel.current?.contains(active))) trigger?.focus({ preventScroll: true });
     };
   }, [open]);
+
+  // The wallet picker never gives focus back: when it closes, focus that fell to the page returns to the control in the
+  // sheet that opened it (relabelled once a wallet is picked), or to the sheet if that control is gone.
+  const { visible: picker } = useWalletModal();
+  const beforePicker = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!open) {
+      beforePicker.current = null;
+      return;
+    }
+    const active = document.activeElement;
+    if (picker) {
+      beforePicker.current = active instanceof HTMLElement && panel.current?.contains(active) ? active : null;
+      return;
+    }
+    const back = beforePicker.current;
+    beforePicker.current = null;
+    // An Esc before Tab reached the picker, or a tap on its backdrop, leaves focus on the opener: nothing to do.
+    if (!back || (active && active !== document.body)) return;
+    back.focus({ preventScroll: true });
+    if (!panel.current?.contains(document.activeElement)) panel.current?.focus({ preventScroll: true });
+  }, [picker, open]);
 
   if (!mounted) return null;
 

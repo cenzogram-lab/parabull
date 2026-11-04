@@ -5,6 +5,7 @@
  */
 import { ArrowDownLeft, Plus } from "lucide-react";
 import { useRef, useState } from "react";
+import { useRemembered } from "../components/mobile/MobileCoinList";
 import { type TabOption, MobileTabs } from "../components/mobile/MobileUi";
 import { ClosedPanel, OpenPanel, RepliesPanel } from "../components/portfolio/PortfolioPanels";
 import { PortfolioEquity } from "../components/portfolio/PortfolioEquity";
@@ -27,7 +28,8 @@ export function Portfolio() {
   const { solUsd } = useMarket();
   const isMobile = useIsMobile();
   const wallet = useWalletActions(p.address);
-  const [tab, setTab] = useState<Tab>("Open");
+  // Kept for the visit: Back from the $PARABULL page (or a coin) finds the tab you left.
+  const [tab, setTab] = useRemembered<Tab>("portfolio:tab", "Open");
   const [sheet, setSheet] = useState<SheetKind | null>(null);
   const rewards = useRewardSummary(p.address, tab === "Rewards");
   const claimable = !!rewards && rewards.unclaimedLamports > 0n;

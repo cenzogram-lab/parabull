@@ -73,12 +73,15 @@ render, so there's no flash), and shared components change only through
 - **Navigation.** On a phone a page you open starts at the top, and links
   to `/parabull-token#claim` land on the claim panel; desktop keeps the
   router's scroll behavior, as before. Back and Forward keep their scroll
-  position, and the launch modal leaves the page under it alone.
+  position, and the launch modal leaves the page under it alone. The tabs,
+  filters and sort you pick on Board and Explore, the leaderboard's board,
+  period and sort, and the portfolio's tab are kept for the visit, so Back
+  from a coin, your portfolio or the $PARABULL page finds the list you left.
 - **Landscape.** On a phone in landscape under 480px tall the tab rows and
-  the Deposit / Receive strip stay in the page instead of pinning, and the
-  chart shrinks to fit; the Buy / Sell bar stays docked, since it's the coin
-  page's only way to trade. A notched phone in landscape gets the desktop
-  layout, padded clear of the notch.
+  the Deposit / Receive strip stay in the page instead of pinning; the Buy /
+  Sell bar stays docked, since it's the coin page's only way to trade, and
+  the chart shrinks to fit between it and the header. A notched phone in
+  landscape gets the desktop layout, padded clear of the notch.
 
 **Demo data on the phone screens:** the portfolio's cash starts at 1.84 SOL
 and follows your demo trades (they aren't capped at it, so a bigger buy

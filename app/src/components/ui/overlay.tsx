@@ -1,3 +1,4 @@
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { CheckCircle2, Info, X, XCircle } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { backdropClass, dialogClass, usePresence } from "../../hooks/usePresence";
@@ -9,9 +10,9 @@ const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), selec
 
 /**
  * Centered dialog; below md a full-screen sheet. With `manageFocus`, focus moves into the dialog as it opens, Tab stays
- * inside it (or in the wallet picker over it, which Esc closes first), and focus goes back to the trigger when it
- * closes, as in BottomSheet. It's opt-in (the phone launch modal and the Portfolio dialogs), so the desktop launch modal
- * keeps the behavior it had.
+ * inside it (or in the wallet picker over it, which Esc closes first; when the picker closes, focus goes back to the
+ * control that opened it), and focus goes back to the trigger when it closes, as in BottomSheet. It's opt-in (the phone
+ * launch modal and the Portfolio dialogs), so the desktop launch modal keeps the behavior it had.
  */
 export function Modal({ open, onClose, children, label, className, manageFocus = false }: { open: boolean; onClose: () => void; children: ReactNode; label: string; className?: string; manageFocus?: boolean }) {
   const { mounted, shown } = usePresence(open);
@@ -74,6 +75,27 @@ export function Modal({ open, onClose, children, label, className, manageFocus =
       if (trigger && (active === document.body || (active && dialog.current?.contains(active)))) trigger.focus({ preventScroll: true });
     };
   }, [open, manageFocus]);
+  // The wallet picker never gives focus back: when it closes, focus that fell to the page returns to the control in the
+  // dialog that opened it (relabelled once a wallet is picked), or to the dialog if that control is gone.
+  const { visible: picker } = useWalletModal();
+  const beforePicker = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!open || !manageFocus) {
+      beforePicker.current = null;
+      return;
+    }
+    const active = document.activeElement;
+    if (picker) {
+      beforePicker.current = active instanceof HTMLElement && dialog.current?.contains(active) ? active : null;
+      return;
+    }
+    const back = beforePicker.current;
+    beforePicker.current = null;
+    // An Esc before Tab reached the picker, or a press on its backdrop, leaves focus on the opener: nothing to do.
+    if (!back || (active && active !== document.body)) return;
+    back.focus({ preventScroll: true });
+    if (!dialog.current?.contains(document.activeElement)) dialog.current?.focus({ preventScroll: true });
+  }, [picker, open, manageFocus]);
   if (!mounted) return null;
   return (
     <div className="fixed inset-0 z-50">

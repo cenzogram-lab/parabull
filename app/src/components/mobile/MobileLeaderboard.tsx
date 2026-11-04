@@ -15,6 +15,7 @@ import { useMarket } from "../../state/Market";
 import { usePortfolio, type Portfolio } from "../../state/usePortfolio";
 import { useRewardSummary, type RewardSummary } from "../portfolio/shared";
 import { cx } from "../ui/primitives";
+import { useRemembered } from "./MobileCoinList";
 import { asideText, fmtUsd, measureWord, Podium, rankEntries, RankAvatar, valueTone, type Entry, type Metric, type Tab } from "./MobileLeaderboardParts";
 import { CalloutsSheet, EntrySheet, SortSheet, type Picked } from "./MobileLeaderboardSheets";
 import { FollowButton, PillTabs } from "./MobileUi";
@@ -80,9 +81,10 @@ export function MobileLeaderboard() {
   const { traders, squads, following, toggleFollow, solUsd } = useMarket();
   const portfolio = usePortfolio();
   const [now] = useState(() => Date.now());
-  const [tab, setTab] = useState<Tab>("Traders");
-  const [period, setPeriod] = useState<Period>("1D");
-  const [metric, setMetric] = useState<Metric>("Profit");
+  // Kept for the visit, as on Board and Explore: Back from your portfolio or a coin finds the board you left, at its scroll offset.
+  const [tab, setTab] = useRemembered<Tab>("leaderboard:tab", "Traders");
+  const [period, setPeriod] = useRemembered<Period>("leaderboard:period", "1D");
+  const [metric, setMetric] = useRemembered<Metric>("leaderboard:metric", "Profit");
   // The sheet keeps its last entry while it slides away.
   const [picked, setPicked] = useState<Picked | null>(null);
   const [entryOpen, setEntryOpen] = useState(false);
@@ -278,7 +280,7 @@ function RankRow({ e, rank, word, following, onFollow, onOpen }: { e: Entry; ran
           </span>
         </span>
       </span>
-      {/* Below 380px Follow shrinks to its icon, so names keep their room on narrow phones (the figures need their 80px: "+$474.20K"). */}
+      {/* Below 384px Follow shrinks to its icon, so names and win rates keep their room on narrow phones (the figures need their 80px: "+$474.20K"). */}
       <FollowButton name={e.name} on={following} onToggle={() => onFollow(e.key)} narrow />
       <span aria-hidden className="pointer-events-none relative w-20 shrink-0 text-right">
         <span className={cx("num block truncate text-[13.5px] font-semibold leading-5", valueTone(e))}>{fmtUsd(e.value, e.money)}</span>
