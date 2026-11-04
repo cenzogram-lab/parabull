@@ -142,8 +142,8 @@ is visible.
 
 ## Layout
 
-The layout uses the structure of the pump.fun desktop app (no Perps, GO or
-Mayhem), restyled:
+The layout uses the structure of the pump.fun desktop app (no Perps or GO),
+restyled:
 - **Dock:** collapsible left dock, `w-16` collapsed and `w-60` expanded.
 - **Header:** `h-14`, with a centered ⌘K search and the wallet button.
 - **Quick-info strip:** `h-10`, with Top traders, Open positions,
