@@ -12,7 +12,8 @@
     "test": "tsx --test test/*.test.ts",
     "sync-idl": "node scripts/sync-idl.mjs",
     "check-idl": "node scripts/sync-idl.mjs --check",
-    "screenshots": "node scripts/screenshots.mjs"
+    "screenshots": "node scripts/screenshots.mjs",
+    "audit:mobile": "node scripts/mobile-audit.mjs"
   },
   "dependencies": {
     "@coral-xyz/anchor": "0.31.1",
