@@ -6,7 +6,7 @@ import { XLogo } from "../brand/Wordmark";
 export function Footer() {
   const { solUsd } = useMarket();
   return (
-    <footer className="flex h-10 shrink-0 items-center gap-6 border-t border-line bg-canvas px-5 text-[12.5px] text-muted">
+    <footer className="hidden md:flex h-10 shrink-0 items-center gap-6 border-t border-line bg-canvas px-5 text-[12.5px] text-muted">
       <span>© 2026 Parabull</span>
       <span className="num">SOL ${solUsd.toFixed(2)}</span>
       <span className="text-muted/80">

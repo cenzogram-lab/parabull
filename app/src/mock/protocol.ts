@@ -95,5 +95,19 @@ export function rewardEpochs(claimant: PublicKey, now = Date.now()): DemoEpoch[]
   return out;
 }
 
+const epochCache = new Map<string, readonly DemoEpoch[]>();
+
+/**
+ * `rewardEpochs` for a wallet, built once per visit and shared by every view
+ * that shows them (header notifications, Portfolio, Holder rewards, the claim
+ * panel): building the trees takes about 150ms. Copy before sorting.
+ */
+export function walletEpochs(claimant: PublicKey): readonly DemoEpoch[] {
+  const key = claimant.toBase58();
+  let epochs = epochCache.get(key);
+  if (!epochs) epochCache.set(key, (epochs = rewardEpochs(claimant)));
+  return epochs;
+}
+
 /** The wallet demo mode treats as "you" before a real wallet connects. */
 export const DEMO_WALLET = new PublicKey(new Rng("demo-wallet").bytes(32));

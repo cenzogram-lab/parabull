@@ -154,8 +154,8 @@ export function CoinCallouts({ coin }: { coin: Coin }) {
   const list = mine.length ? mine : callouts.slice(0, 3);
   if (!list.length) return <Empty>No callouts yet.</Empty>;
   return (
-    <div className="px-3">
-      {!mine.length && <p className="pt-3 text-xs text-muted">No callouts on ${coin.ticker} yet. Recent callouts across Parabull:</p>}
+    <div className="px-3 max-md:px-1">
+      {!mine.length && <p className="pt-3 text-xs text-muted max-md:px-3">No callouts on ${coin.ticker} yet. Recent callouts across Parabull:</p>}
       {list.map((c) => (
         <CalloutCard key={c.id} callout={c} trader={traders.find((t) => t.handle === c.handle)} coin={byMint.get(c.mint)} dense />
       ))}

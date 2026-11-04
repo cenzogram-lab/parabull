@@ -1,10 +1,13 @@
 import { Copy, Eye, Heart, MessageCircle, MoreHorizontal, Share2, UserPlus } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useIsMobile } from "../../hooks/useMediaQuery";
 import { useNow } from "../../hooks/useNow";
 import { age, pct, shortAddr, usd, usdCompact, usdSigned } from "../../lib/format";
 import type { Callout, Coin, Trader } from "../../lib/types";
 import { progressOf } from "../../mock/coins";
+import { useMarket } from "../../state/Market";
 import { XLogo } from "../brand/Wordmark";
+import { FollowButton } from "../mobile/MobileUi";
 import { AgeTag, ChangePill, cx, HotBadge, LockBadge, StageBadge } from "../ui/primitives";
 import { CoinAvatar, Meter, TraderAvatar } from "../ui/visuals";
 
@@ -16,7 +19,7 @@ export function ActiveLocks({ coin, compact = true }: { coin: Coin; compact?: bo
   if (coin.locks.tweet && coin.locks.tweet > now) locks.push("Tweet");
   if (!locks.length) return null;
   return (
-    <span className="flex flex-nowrap gap-1">
+    <span className="flex flex-nowrap gap-1 max-md:flex-wrap">
       {locks.map((k) => (
         <LockBadge key={k} kind={k} compact={compact && k !== "Tweet"} />
       ))}
@@ -93,6 +96,8 @@ export function CoinCard({ coin }: { coin: Coin }) {
 /** Social callout: a public call on a coin the trader holds. */
 export function CalloutCard({ callout, trader, coin, dense = false }: { callout: Callout; trader?: Trader; coin?: Coin; dense?: boolean }) {
   const now = useNow();
+  const isMobile = useIsMobile();
+  const { following, toggleFollow } = useMarket();
   if (!coin) return null;
   return (
     <article className={cx("border-b border-line-soft", dense ? "px-3 py-3" : "px-1 py-5")}>
@@ -105,9 +110,14 @@ export function CalloutCard({ callout, trader, coin, dense = false }: { callout:
             <span className="min-w-0 truncate text-[12.5px] text-muted">@{callout.handle}</span>
             <span className="shrink-0 text-[12.5px] text-muted">· {age(now - callout.ts)}</span>
             <div className="ml-auto flex items-center gap-1">
-              <button className="inline-flex h-7 items-center gap-1 rounded-full border border-line px-2.5 text-xs font-semibold text-cream hover:border-line-accent">
-                <UserPlus className="h-3.5 w-3.5" /> Follow
-              </button>
+              {/* Below md it's the shared follow toggle (as on the leaderboard); the desktop button is unchanged. */}
+              {isMobile ? (
+                <FollowButton name={`@${callout.handle}`} on={following.has(callout.handle)} onToggle={() => toggleFollow(callout.handle)} />
+              ) : (
+                <button className="touch-target inline-flex h-7 items-center gap-1 rounded-full border border-line px-2.5 text-xs font-semibold text-cream hover:border-line-accent">
+                  <UserPlus className="h-3.5 w-3.5" /> Follow
+                </button>
+              )}
               {!dense && (
                 <button className="btn-icon h-7 w-7" aria-label="More">
                   <MoreHorizontal className="h-4 w-4" />
@@ -126,7 +136,7 @@ export function CalloutCard({ callout, trader, coin, dense = false }: { callout:
               <div className="text-[11.5px] text-muted">Position</div>
               <div className="num text-[13px] font-semibold">{callout.closed ? "Closed" : usd(callout.positionUsd)}</div>
             </div>
-            <div className="min-w-[88px] text-right">
+            <div className="min-w-[88px] text-right max-md:min-w-0">
               <div className="text-[11.5px] text-muted">Net PnL</div>
               <div className={cx("num text-[13px] font-semibold", callout.pnlUsd >= 0 ? "text-gold" : "text-ember")}>{usdSigned(callout.pnlUsd)}</div>
             </div>

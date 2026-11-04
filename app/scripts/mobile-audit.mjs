@@ -51,8 +51,9 @@ try {
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(400);
     const r = await page.evaluate((MIN) => {
-      const vw = window.innerWidth;
       const doc = document.documentElement;
+      // clientWidth, not innerWidth: with mobile emulation an overflowing page widens the layout viewport, and innerWidth grows with it.
+      const vw = doc.clientWidth;
       const overflowX = doc.scrollWidth > vw + 1;
       const wide = [];
       if (overflowX) {
@@ -89,7 +90,7 @@ try {
         }
         if (w + 0.5 < MIN || h + 0.5 < MIN) small.push(`${describe(el)} ${Math.round(w)}x${Math.round(h)}`);
       }
-      return { overflowX, scrollWidth: doc.scrollWidth, wide: wide.map((w) => `${describe(w.el)} right=${w.right}`), small };
+      return { overflowX, scrollWidth: doc.scrollWidth, clientWidth: vw, wide: wide.map((w) => `${describe(w.el)} right=${w.right}`), small };
     }, MIN);
     report.push({ route, ...r, errors: [...errors] });
   }
@@ -104,7 +105,7 @@ for (const r of report) {
   bad += issues;
   if (json) continue;
   console.log(`\n${r.route}: ${issues ? `${issues} issue(s)` : "ok"}`);
-  if (r.overflowX) console.log(`  horizontal overflow: scrollWidth ${r.scrollWidth} > 390\n    ${r.wide.join("\n    ")}`);
+  if (r.overflowX) console.log(`  horizontal overflow: scrollWidth ${r.scrollWidth} > ${r.clientWidth}\n    ${r.wide.join("\n    ")}`);
   if (r.small.length) console.log(`  touch targets under ${MIN}px (${r.small.length}):\n    ${r.small.slice(0, 40).join("\n    ")}${r.small.length > 40 ? `\n    ...and ${r.small.length - 40} more` : ""}`);
   if (r.errors.length) console.log(`  console errors:\n    ${r.errors.join("\n    ")}`);
 }

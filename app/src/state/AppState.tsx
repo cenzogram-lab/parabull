@@ -30,6 +30,14 @@ interface AppState {
   dismissToast: (id: number) => void;
   searchOpen: boolean;
   setSearchOpen: (open: boolean) => void;
+  /** Mints picked from search, newest first (max 12, persisted). */
+  searchHistory: string[];
+  addSearchHistory: (mint: string) => void;
+  removeSearchHistory: (mint: string) => void;
+  clearSearchHistory: () => void;
+  /** Edit the recently viewed list (`recent`). */
+  removeRecent: (mint: string) => void;
+  clearRecent: () => void;
 }
 
 const Ctx = createContext<AppState | null>(null);
@@ -42,6 +50,11 @@ function load<T>(key: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+/** A persisted list of mints; anything malformed in storage reads as empty. */
+function loadMints(key: string): string[] {
+  const v = load<unknown>(key, []);
+  return Array.isArray(v) ? v.filter((m): m is string => typeof m === "string").slice(0, 12) : [];
 }
 function save(key: string, value: unknown) {
   try {
@@ -60,6 +73,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [watch, setWatch] = useState<string[]>(() => load("watchlist", []));
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchHistory, setSearchHistory] = useState<string[]>(() => loadMints("searchHistory"));
   const nextId = useRef(1);
 
   useEffect(() => save("layout", layout), [layout]);
@@ -67,6 +81,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => save("muted", muted), [muted]);
   useEffect(() => save("recent", recent), [recent]);
   useEffect(() => save("watchlist", watch), [watch]);
+  useEffect(() => save("searchHistory", searchHistory), [searchHistory]);
 
   const dismissToast = useCallback((id: number) => setToasts((ts) => ts.filter((t) => t.id !== id)), []);
   const toast = useCallback(
@@ -78,6 +93,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [dismissToast],
   );
   const sfx = useCallback((kind: "buy" | "sell" | "launch") => !muted && playSfx(kind), [muted]);
+  const addSearchHistory = useCallback((mint: string) => setSearchHistory((h) => [mint, ...h.filter((m) => m !== mint)].slice(0, 12)), []);
+  const removeSearchHistory = useCallback((mint: string) => setSearchHistory((h) => h.filter((m) => m !== mint)), []);
+  const clearSearchHistory = useCallback(() => setSearchHistory([]), []);
+  const removeRecent = useCallback((mint: string) => setRecent((r) => r.filter((m) => m !== mint)), []);
+  const clearRecent = useCallback(() => setRecent([]), []);
 
   const value = useMemo<AppState>(
     () => ({
@@ -99,8 +119,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       dismissToast,
       searchOpen,
       setSearchOpen,
+      searchHistory,
+      addSearchHistory,
+      removeSearchHistory,
+      clearSearchHistory,
+      removeRecent,
+      clearRecent,
     }),
-    [layout, collapsed, muted, sfx, quickInfo, recent, watch, toasts, toast, dismissToast, searchOpen],
+    [layout, collapsed, muted, sfx, quickInfo, recent, watch, toasts, toast, dismissToast, searchOpen, searchHistory, addSearchHistory, removeSearchHistory, clearSearchHistory, removeRecent, clearRecent],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

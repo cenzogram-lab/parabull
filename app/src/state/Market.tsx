@@ -43,6 +43,13 @@ interface MarketState {
   streams: Stream[];
   solUsd: number;
   positions: Record<string, Position>;
+  /** The demo holdings the session started with (held for over a day), before any demo trade: the portfolio's 24h baseline. */
+  startPositions: Record<string, Position>;
+  /** Net SOL your demo trades moved (negative after buys, positive after sells), for the portfolio's cash. */
+  demoSolDelta: number;
+  /** Traders (by handle) and squads (`squad:<name>`) you follow; the demo starts with the eight top traders. Kept for the visit. */
+  following: Set<string>;
+  toggleFollow: (key: string) => void;
   demoTrade: (mint: string, side: "buy" | "sell", amount: bigint, slippageBps: bigint) => Trade | null;
   demoLaunch: (draft: LaunchDraft, creator: string) => Coin;
 }
@@ -75,17 +82,30 @@ export function MarketProvider({ children }: { children: ReactNode }) {
   const [liveTrades, setLiveTrades] = useState<Trade[]>([]);
   const historyCache = useRef(new Map<string, Trade[]>());
   const initial = useRef(coins);
-  const [positions, setPositions] = useState<Record<string, Position>>(() => {
-    // A few demo holdings so the sell side and PnL have something to show.
+  const [startPositions] = useState<Record<string, Position>>(() => {
+    // A few demo holdings so the sell side and PnL have something to show; each was bought at its own
+    // seeded price (0.55x to 1.35x today's), so some are up and some are down.
     const p: Record<string, Position> = {};
-    for (const c of initial.current.filter((x) => !x.migrated).slice(0, 6)) p[c.mint] = { tokens: 4_200_000_000_000n, costUsd: 4_200_000 * c.priceUsd * 0.62 };
+    for (const c of initial.current.filter((x) => !x.migrated).slice(0, 6)) p[c.mint] = { tokens: 4_200_000_000_000n, costUsd: 4_200_000 * c.priceUsd * new Rng(`entry:${c.mint}`).range(0.55, 1.35) };
     return p;
   });
+  const [positions, setPositions] = useState(startPositions);
+  const [demoSolDelta, setDemoSolDelta] = useState(0);
 
   const social = useMemo(() => {
     const traders = generateTraders(initial.current);
     return { traders, squads: generateSquads(traders), callouts: generateCallouts(initial.current), streams: generateStreams(initial.current) };
   }, []);
+  const [following, setFollowing] = useState(() => new Set(social.traders.slice(0, 8).map((t) => t.handle)));
+  const toggleFollow = useCallback(
+    (key: string) =>
+      setFollowing((s) => {
+        const next = new Set(s);
+        if (!next.delete(key)) next.add(key);
+        return next;
+      }),
+    [],
+  );
 
   const byMint = useMemo(() => new Map(coins.map((c) => [c.mint, c])), [coins]);
 
@@ -195,6 +215,8 @@ export function MarketProvider({ children }: { children: ReactNode }) {
         const costUsd = side === "buy" ? cur.costUsd + r.trade.sol * SOL_USD : cur.costUsd * (Number(tokens) / Math.max(1, Number(cur.tokens)));
         return { ...ps, [mint]: { tokens, costUsd } };
       });
+      // A buy's `sol` includes the fee; a sell's is the net payout.
+      setDemoSolDelta((d) => d + (side === "buy" ? -r.trade.sol : r.trade.sol));
       return r.trade;
     },
     [applyTrade, pushTrade],
@@ -248,8 +270,8 @@ export function MarketProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<MarketState>(
-    () => ({ coins, byMint, liveTrades, tradesFor, ...social, solUsd: SOL_USD, positions, demoTrade, demoLaunch }),
-    [coins, byMint, liveTrades, tradesFor, social, positions, demoTrade, demoLaunch],
+    () => ({ coins, byMint, liveTrades, tradesFor, ...social, solUsd: SOL_USD, positions, startPositions, demoSolDelta, following, toggleFollow, demoTrade, demoLaunch }),
+    [coins, byMint, liveTrades, tradesFor, social, positions, startPositions, demoSolDelta, following, toggleFollow, demoTrade, demoLaunch],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

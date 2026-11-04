@@ -48,7 +48,7 @@ export function Dock() {
   const launch = () => navigate("/create", { state: { background: location } });
   const ctrl = "flex h-10 items-center rounded-xl text-muted transition-colors hover:bg-surface hover:text-cream";
   return (
-    <nav aria-label="Main" className={cx("sticky top-0 z-30 flex h-screen shrink-0 flex-col border-r border-line bg-canvas py-3 transition-[width] duration-200", collapsed ? "w-16 items-center" : "w-60 px-3")}>
+    <nav aria-label="Main" className={cx("sticky top-0 z-30 hidden md:flex h-screen shrink-0 flex-col border-r border-line bg-canvas py-3 transition-[width] duration-200", collapsed ? "w-16 items-center" : "w-60 px-3")}>
       <div className={cx("relative flex h-11 items-center", collapsed ? "justify-center" : "px-1.5")}>
         {collapsed ? <BullMark size={38} /> : <Wordmark size={34} />}
         <button

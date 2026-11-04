@@ -21,6 +21,8 @@ const PAIRS: readonly [string, string][] = [
   ["#1A2A12", "#9CCB59"],
   ["#2C1A0C", "#F2B45C"],
 ];
+/** Gold, rose-bronze, amber and copper only: for the wallet's own avatar, which sits in the bronze header on every mobile page. */
+const BRONZE_PAIRS: readonly [string, string][] = [PAIRS[0], PAIRS[7], PAIRS[11], ["#2A160E", "#C87D55"]];
 
 /** 24x24 emblems. */
 const EMBLEMS: Record<string, string> = {
@@ -76,10 +78,11 @@ export function coinArt(seed: string, ticker: string): string {
   return svgUri(svg);
 }
 
-/** Circular 5x5 mirrored identicon for traders. */
-export function avatarArt(seed: string): string {
+/** Circular 5x5 mirrored identicon for traders; `bronze` keeps it to the bronze/copper/gold pairs. */
+export function avatarArt(seed: string, palette: "all" | "bronze" = "all"): string {
   const rng = new Rng(`avatar:${seed}`);
-  const [dark, light] = PAIRS[hashSeed(`a${seed}`) % PAIRS.length];
+  const pairs = palette === "bronze" ? BRONZE_PAIRS : PAIRS;
+  const [dark, light] = pairs[hashSeed(`a${seed}`) % pairs.length];
   const cells: string[] = [];
   for (let y = 0; y < 5; y++) {
     for (let x = 0; x < 3; x++) {

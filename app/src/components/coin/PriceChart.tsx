@@ -1,6 +1,7 @@
 import { CandlestickSeries, ColorType, createChart, CrosshairMode, HistogramSeries, type IChartApi, type ISeriesApi, type MouseEventParams, type UTCTimestamp } from "lightweight-charts";
 import { CandlestickChart } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useIsMobile } from "../../hooks/useMediaQuery";
 import { compact, pct, price, usdCompact } from "../../lib/format";
 import type { Coin } from "../../lib/types";
 import { candles, INTERVALS, type Interval } from "../../mock/market";
@@ -10,6 +11,16 @@ import { cx, Segmented } from "../ui/primitives";
 const SUPPLY = 1e9;
 type Unit = "Price" | "MCap";
 type Ohlc = { open: number; high: number; low: number; close: number };
+
+/**
+ * Options that differ on phones: a vertical swipe scrolls the page instead of
+ * the chart (horizontal drags still pan it), and a little more headroom keeps
+ * the top candles clear of the readout.
+ */
+const touchOptions = (mobile: boolean) => ({
+  handleScroll: { vertTouchDrag: !mobile },
+  rightPriceScale: { scaleMargins: { top: mobile ? 0.16 : 0.1, bottom: 0.24 } },
+});
 
 /**
  * Candles: amber-gold up, bronze-red down (with a lighter edge so bodies clear
@@ -29,14 +40,19 @@ export function PriceChart({ coin }: { coin: Coin }) {
   // Candles regenerate per coin and interval; live trades only move the last bar.
   const data = useMemo(() => candles(coin, iv), [coin.mint, iv]); // eslint-disable-line react-hooks/exhaustive-deps
   const [hover, setHover] = useState<Ohlc | null>(null);
+  const isMobile = useIsMobile();
+  // The layout the chart was created for; options change only when it flips.
+  const mobileRef = useRef(isMobile);
 
   useEffect(() => {
     if (!box.current) return;
+    const touch = touchOptions(mobileRef.current);
     const c = createChart(box.current, {
       autoSize: true,
       layout: { background: { type: ColorType.Solid, color: hex.surface }, textColor: hex.muted, fontFamily: "Inter Variable, Inter, sans-serif", fontSize: 11, attributionLogo: false },
       grid: { vertLines: { color: "rgba(74,53,40,0.35)" }, horzLines: { color: "rgba(74,53,40,0.35)" } },
-      rightPriceScale: { borderColor: hex.line, scaleMargins: { top: 0.1, bottom: 0.24 } },
+      handleScroll: touch.handleScroll,
+      rightPriceScale: { borderColor: hex.line, ...touch.rightPriceScale },
       timeScale: { borderColor: hex.line, timeVisible: true, secondsVisible: false, rightOffset: 4 },
       crosshair: {
         mode: CrosshairMode.Normal,
@@ -72,10 +88,17 @@ export function PriceChart({ coin }: { coin: Coin }) {
   }, []);
 
   useEffect(() => {
+    if (mobileRef.current === isMobile) return;
+    mobileRef.current = isMobile;
+    chart.current?.applyOptions(touchOptions(isMobile));
+  }, [isMobile]);
+
+  useEffect(() => {
     const cs = candleSeries.current;
     const vs = volSeries.current;
     if (!cs || !vs) return;
-    cs.applyOptions({ priceFormat: { type: "custom", minMove: 1e-12, formatter: (v: number) => (unit === "MCap" ? usdCompact(v) : price(v)) } });
+    // The volume band's bottom margin stretches the price axis below zero; on a phone those ticks get no label rather than a negative price.
+    cs.applyOptions({ priceFormat: { type: "custom", minMove: 1e-12, formatter: (v: number) => (mobileRef.current && v < 0 ? "" : unit === "MCap" ? usdCompact(v) : price(v)) } });
     cs.setData(data.map((k) => ({ time: k.time as UTCTimestamp, open: k.open * scale, high: k.high * scale, low: k.low * scale, close: k.close * scale })));
     vs.setData(data.map((k) => ({ time: k.time as UTCTimestamp, value: k.volume, color: k.close >= k.open ? "rgba(229,169,103,0.32)" : "rgba(181,80,58,0.42)" })));
     chart.current?.applyOptions({ timeScale: { secondsVisible: iv === "1s" } });
@@ -98,24 +121,29 @@ export function PriceChart({ coin }: { coin: Coin }) {
   const fmt = (v: number) => (unit === "MCap" ? usdCompact(v * SUPPLY) : price(v));
   return (
     <div className="panel overflow-hidden">
-      <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
-        <Segmented size="xs" label="Interval" options={Object.keys(INTERVALS) as Interval[]} value={iv} onChange={setIv} />
-        <Segmented size="xs" label="Units" options={["Price", "MCap"] as const} value={unit} onChange={setUnit} />
-        <span className="ml-auto flex items-center gap-1.5 text-xs text-muted">
-          <CandlestickChart className="h-3.5 w-3.5 text-copper" />
-          {coin.ticker}/SOL · {coin.migrated ? "Raydium CPMM" : "Bonding curve"}
+      {/* Below md the intervals fill their own row (44px each, as every .tab is there) and the units share the next with the pair; under 360px the row gets the side padding it needs for six of them. */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 max-[359px]:px-2">
+        <Segmented size={isMobile ? "sm" : "xs"} label="Interval" options={Object.keys(INTERVALS) as Interval[]} value={iv} onChange={setIv} className="max-md:grid max-md:w-full max-md:grid-cols-6" />
+        <Segmented size={isMobile ? "sm" : "xs"} label="Units" options={["Price", "MCap"] as const} value={unit} onChange={setUnit} className="max-md:grid max-md:grid-cols-2" />
+        <span className="ml-auto flex items-center gap-1.5 text-xs text-muted max-md:min-w-0">
+          <CandlestickChart className="h-3.5 w-3.5 text-copper max-md:shrink-0" />
+          <span className="max-md:truncate">
+            {coin.ticker}/SOL · {coin.migrated ? "Raydium CPMM" : "Bonding curve"}
+          </span>
         </span>
       </div>
-      <div className="relative h-[420px]">
+      <div className="relative h-[420px] max-md:h-[300px]">
         {shown && (
           <div className="pointer-events-none absolute left-3 top-2 z-10 flex flex-wrap items-baseline gap-x-3 text-[11.5px]">
             <span className="text-base font-semibold text-cream">{fmt(shown.close)}</span>
             <span className={cx("num font-semibold", change >= 0 ? "text-gold" : "text-ember")}>{pct(change)}</span>
-            {(["open", "high", "low", "close"] as const).map((k) => (
-              <span key={k} className="num text-muted">
-                {k[0].toUpperCase()} <span className="text-cream">{fmt(shown[k])}</span>
-              </span>
-            ))}
+            {/* On a phone the full OHLC row shows only while a finger is on the chart, so the readout stays one line. */}
+            {(!isMobile || hover) &&
+              (["open", "high", "low", "close"] as const).map((k) => (
+                <span key={k} className="num text-muted">
+                  {k[0].toUpperCase()} <span className="text-cream">{fmt(shown[k])}</span>
+                </span>
+              ))}
             {!hover && (
               <span className="num text-muted">
                 Vol 24h <span className="text-cream">${compact(coin.vol24hUsd)}</span>

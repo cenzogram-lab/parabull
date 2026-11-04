@@ -3,8 +3,10 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { XLogo } from "../components/brand/Wordmark";
 import { CalloutCard } from "../components/coin/CoinViews";
+import { MobileLeaderboard } from "../components/mobile/MobileLeaderboard";
 import { cx, Segmented, UnderlineTabs } from "../components/ui/primitives";
 import { TraderAvatar } from "../components/ui/visuals";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { compact, pct, usdCompact, usdSigned } from "../lib/format";
 import type { Period } from "../lib/types";
 import { useMarket } from "../state/Market";
@@ -54,7 +56,12 @@ function Plaque({ e, rank, big }: { e: Entry; rank: number; big?: boolean }) {
   );
 }
 
+/** Below md the mobile leaderboard replaces this page's whole tree; desktop renders unchanged. */
 export function Leaderboard() {
+  return useIsMobile() ? <MobileLeaderboard /> : <DesktopLeaderboard />;
+}
+
+function DesktopLeaderboard() {
   const { traders, squads, callouts, byMint } = useMarket();
   const [tab, setTab] = useState<Tab>("Traders");
   const [period, setPeriod] = useState<Period>("1D");

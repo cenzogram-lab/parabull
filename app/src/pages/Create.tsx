@@ -195,8 +195,9 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
   const fee = Number(fees.fee) / 1e9;
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-      <div className="space-y-4 p-6">
-        <div>
+      <div className="space-y-4 p-6 max-md:px-4 max-md:py-5">
+        {/* In the full-screen mobile modal, keep the intro clear of the close button. */}
+        <div className={onClose ? "max-md:pr-12" : undefined}>
           <h2 className="flex items-center gap-2 text-xl font-semibold">
             <Rocket className="h-5 w-5 text-copper" /> Start a coin
           </h2>
@@ -221,8 +222,8 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
         </Field>
         <Field label="Ticker" error={errors.ticker} hint={t.ok ? <>Registered as <span className="font-mono text-rosebronze">${t.value}</span> · locked for 3 days after launch</> : "1-10 letters or digits, stored uppercase."}>
           <div className="input-shell">
-            <span className="pl-3 text-muted">$</span>
-            <input className="w-full bg-transparent px-1.5 py-2 uppercase text-cream outline-none" value={ticker} onChange={(e) => setTicker(e.target.value.replace(/[^A-Za-z0-9$]/g, "").toUpperCase().slice(0, 11))} placeholder="BRONZE" />
+            <span className="pl-3 text-muted max-md:text-base">$</span>
+            <input className="w-full bg-transparent px-1.5 py-2 uppercase text-cream outline-none max-md:h-11" value={ticker} onChange={(e) => setTicker(e.target.value.replace(/[^A-Za-z0-9$]/g, "").toUpperCase().slice(0, 11))} placeholder="BRONZE" />
           </div>
         </Field>
         <Field label="Description">
@@ -242,7 +243,16 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
           >
             {image ? <img src={image.url} alt="" className="h-16 w-16 rounded-xl object-cover" /> : <span className="flex h-16 w-16 items-center justify-center rounded-xl bg-surface-2"><ImagePlus className="h-6 w-6 text-copper" /></span>}
             <div className="text-[13px]">
-              <div className="font-semibold">{image ? image.file.name : "Drag and drop an image, or click to browse"}</div>
+              <div className="font-semibold max-md:break-all">
+                {image ? (
+                  image.file.name
+                ) : (
+                  <>
+                    <span className="max-md:hidden">Drag and drop an image, or click to browse</span>
+                    <span className="md:hidden">Tap to choose an image</span>
+                  </>
+                )}
+              </div>
               <div className="text-xs text-muted">PNG, JPG, WebP or GIF up to 5 MB. Square works best.</div>
             </div>
             {image && (
@@ -260,7 +270,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
         >
           <div className="input-shell">
             <XLogo className="ml-3 h-3.5 w-3.5 text-muted" />
-            <input className="w-full bg-transparent px-2.5 py-2 text-cream outline-none" value={tweet} onChange={(e) => setTweet(e.target.value)} placeholder="https://x.com/you/status/1850000000000000000" />
+            <input className="w-full bg-transparent px-2.5 py-2 text-cream outline-none max-md:h-11 max-md:text-ellipsis" value={tweet} onChange={(e) => setTweet(e.target.value)} placeholder="https://x.com/you/status/1850000000000000000" />
           </div>
         </Field>
         <div className="rounded-xl border border-line">
@@ -279,7 +289,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
               ).map(([k, Icon, ph]) => (
                 <div key={k} className="input-shell">
                   <Icon className="ml-3 h-3.5 w-3.5 text-muted" />
-                  <input className="w-full bg-transparent px-2.5 py-2 text-cream outline-none" value={socials[k]} onChange={(e) => setSocials({ ...socials, [k]: e.target.value })} placeholder={ph} aria-label={k} />
+                  <input className="w-full bg-transparent px-2.5 py-2 text-cream outline-none max-md:h-11" value={socials[k]} onChange={(e) => setSocials({ ...socials, [k]: e.target.value })} placeholder={ph} aria-label={k} />
                 </div>
               ))}
             </div>
@@ -298,15 +308,15 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
           <dl className="mt-3 space-y-1.5 text-[13px]">
             <div className="flex justify-between">
               <dt className="text-muted">Protocol fee (anti-slop)</dt>
-              <dd className="num">{fee.toFixed(3)} SOL</dd>
+              <dd className="num max-md:shrink-0 max-md:whitespace-nowrap max-md:pl-3">{fee.toFixed(3)} SOL</dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-muted">Rent & gas allowance (ticket, mint, curve, locks)</dt>
-              <dd className="num">{(deposit - fee).toFixed(3)} SOL</dd>
+              <dd className="num max-md:shrink-0 max-md:whitespace-nowrap max-md:pl-3">{(deposit - fee).toFixed(3)} SOL</dd>
             </div>
             <div className="flex justify-between border-t border-line pt-2 text-[14px] font-semibold">
               <dt>You pay, all-in</dt>
-              <dd className="num text-gold">{deposit.toFixed(3)} SOL</dd>
+              <dd className="num text-gold max-md:shrink-0 max-md:whitespace-nowrap max-md:pl-3">{deposit.toFixed(3)} SOL</dd>
             </div>
           </dl>
           <p className="mt-2 text-xs text-muted">≈ ${(deposit * SOL_USD).toFixed(2)}. Any unused allowance goes to the protocol treasury. If the coin isn't created, the ticket is refunded in full. Creator fee: 0%.</p>
@@ -318,7 +328,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
         {isDemo && <p className="text-center text-xs text-muted">Demo mode: the launch is simulated, including the random 3-15 s delay. Nothing is sent on-chain.</p>}
       </div>
 
-      <div className="border-t border-line bg-canvas-2/50 p-6 lg:border-l lg:border-t-0">
+      <div className="border-t border-line bg-canvas-2/50 p-6 lg:border-l lg:border-t-0 max-md:px-4 max-md:py-5">
         <div className="lg:sticky lg:top-6">
           <div className="label mb-2">Live preview · Pro Screener</div>
           <div className="panel overflow-hidden">
@@ -378,7 +388,7 @@ function LaunchProgress({ phase, onReset, onView }: { phase: Exclude<Phase, { st
     ["Coin is live", "Trading opens 2 slots after creation"],
   ];
   return (
-    <div className="relative overflow-hidden p-10">
+    <div className="relative overflow-hidden p-10 max-md:px-4 max-md:py-8">
       <div className="pointer-events-none absolute -right-16 -top-10 opacity-[0.06]">
         <BullMark size={360} ring={false} title="" />
       </div>
@@ -416,7 +426,7 @@ function LaunchProgress({ phase, onReset, onView }: { phase: Exclude<Phase, { st
           ))}
         </ol>
         {phase.step === "running" && phase.signature && (
-          <a href={explorer("tx", phase.signature)} target="_blank" rel="noreferrer" className="mt-4 inline-block text-xs text-gold hover:underline">
+          <a href={explorer("tx", phase.signature)} target="_blank" rel="noreferrer" className="mt-4 inline-block text-xs text-gold hover:underline max-md:mt-2 max-md:inline-flex max-md:h-11 max-md:items-center max-md:px-2">
             View ticket transaction
           </a>
         )}
@@ -454,12 +464,13 @@ export function CreateModal() {
 
 export function CreatePage() {
   return (
-    <div className="p-6">
-      <div className="panel mx-auto max-w-[1100px] overflow-hidden">
+    <div className="p-6 max-md:p-0">
+      {/* Below md the form runs edge to edge on the page instead of sitting in a card. */}
+      <div className="panel mx-auto max-w-[1100px] overflow-hidden max-md:rounded-none max-md:border-0 max-md:bg-transparent max-md:shadow-none">
         <LaunchForm />
       </div>
-      <p className="mt-4 text-center text-xs text-muted">
-        <Link to="/" className="hover:text-cream">
+      <p className="mt-4 text-center text-xs text-muted max-md:mt-1">
+        <Link to="/" className="hover:text-cream max-md:inline-flex max-md:h-11 max-md:items-center max-md:px-4 max-md:text-[13px]">
           Back to the board
         </Link>
       </p>
