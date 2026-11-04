@@ -128,8 +128,8 @@ export function Leaderboard() {
 
         <ol className="mt-4 space-y-2">
           {entries.map((e, i) => (
-            <li key={e.key} className="panel overflow-hidden">
-              <button onClick={() => setOpen((o) => (o === e.key ? null : e.key))} className="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-surface-2" aria-expanded={open === e.key}>
+            <li key={e.key} className="panel hover-lift overflow-hidden">
+              <button onClick={() => setOpen((o) => (o === e.key ? null : e.key))} className="flex w-full items-center gap-4 px-4 py-3 text-left" aria-expanded={open === e.key}>
                 <span className={cx("num w-6 text-center text-[15px] font-semibold", i < 3 ? "text-gold" : "text-muted")}>{i + 1}</span>
                 <TraderAvatar src={e.avatar} size={42} verified={e.verified} ring={FRAMES[i]?.ring} />
                 <span className="min-w-0 flex-1">

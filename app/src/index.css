@@ -36,7 +36,7 @@
   }
   input::placeholder,
   textarea::placeholder {
-    @apply text-muted/70;
+    @apply text-muted;
   }
 }
 
@@ -79,13 +79,14 @@
 
   /* Controls ------------------------------------------------------------- */
   .btn {
-    @apply inline-flex select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-semibold transition-[background-color,color,box-shadow,filter] duration-150 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-semibold transition-all duration-100 ease-out disabled:cursor-not-allowed disabled:opacity-50;
   }
+  /* Primary CTA (Launch, Place Trade, Claim): solid amber-gold, bronze on hover, press-in. */
   .btn-gold {
-    @apply btn metal-gold text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.45),0_6px_18px_-8px_rgba(229,169,103,0.7)] hover:brightness-110;
+    @apply btn bg-gold text-canvas hover:bg-bronze active:scale-[0.98] disabled:hover:bg-gold disabled:active:scale-100;
   }
   .btn-copper {
-    @apply btn bg-copper text-canvas hover:bg-gold;
+    @apply btn bg-copper text-canvas hover:bg-gold active:scale-[0.98];
   }
   .btn-ghost {
     @apply btn border border-line bg-surface text-cream hover:border-line-accent hover:bg-surface-2;
@@ -93,14 +94,36 @@
   .btn-icon {
     @apply inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-cream;
   }
+  /* Text inputs, number fields, textareas. */
   .input {
-    @apply w-full rounded-lg border border-line bg-canvas-2 px-3 py-2 text-cream outline-none transition-colors focus:border-copper;
+    @apply w-full rounded-lg border border-line bg-canvas-2 px-3 py-2 text-cream transition-colors duration-100 placeholder:text-muted focus:border-copper focus:outline-none focus:ring-1 focus:ring-gold;
+  }
+  /* Same focus treatment for inputs wrapped with a prefix/suffix ($, icons, units). */
+  .input-shell {
+    @apply flex items-center rounded-lg border border-line bg-canvas-2 transition-colors duration-100 focus-within:border-copper focus-within:ring-1 focus-within:ring-gold;
+  }
+  .input-shell input {
+    @apply focus:outline-none;
+  }
+  /* Tabs and chip switches: transparent until hovered, gold-on-bronze when active. */
+  .tab {
+    @apply border border-transparent text-muted transition-colors duration-100 ease-out hover:bg-surface hover:text-cream;
+  }
+  .tab-active {
+    @apply border border-line-accent bg-surface-4 text-gold shadow-sm transition-colors duration-100 ease-out;
   }
   .chip {
-    @apply inline-flex items-center gap-1 rounded-md border border-line bg-surface px-2 py-1 text-xs font-medium text-muted transition-colors hover:text-cream;
+    @apply inline-flex items-center gap-1 rounded-md border border-line bg-surface px-2 py-1 text-xs font-medium text-muted transition-colors duration-100 ease-out hover:bg-surface-2 hover:text-cream;
   }
   .chip-active {
-    @apply border-line-accent bg-surface-2 text-cream;
+    @apply border-line-accent bg-surface-4 text-gold shadow-sm hover:bg-surface-4 hover:text-gold;
+  }
+  /* Screener rows and token cards. */
+  .hover-lift {
+    @apply transition-all duration-100 ease-out hover:border-line-accent hover:bg-surface-2 hover:shadow-[0_4px_16px_rgba(200,125,85,0.08)];
+  }
+  .row-hover {
+    @apply transition-colors duration-100 ease-out hover:bg-surface-2;
   }
   .kbd {
     @apply rounded border border-line bg-surface-2 px-1.5 font-sans text-[11px] font-medium text-muted;

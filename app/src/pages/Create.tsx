@@ -9,6 +9,7 @@ import { Modal } from "../components/ui/overlay";
 import { cx } from "../components/ui/primitives";
 import { CONFIG, explorer, isDemo } from "../config";
 import { useNow } from "../hooks/useNow";
+import { OVERLAY_MS } from "../hooks/usePresence";
 import { useParabullProgram } from "../hooks/useParabullProgram";
 import { coinArt } from "../lib/art";
 import { canonicalTicker, nameHash, normalizeName, parseTweetId, tweetIdHash } from "../lib/launchRules";
@@ -219,7 +220,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Bronze Bull" maxLength={64} />
         </Field>
         <Field label="Ticker" error={errors.ticker} hint={t.ok ? <>Registered as <span className="font-mono text-rosebronze">${t.value}</span> · locked for 3 days after launch</> : "1-10 letters or digits, stored uppercase."}>
-          <div className="flex items-center rounded-lg border border-line bg-canvas-2 focus-within:border-copper">
+          <div className="input-shell">
             <span className="pl-3 text-muted">$</span>
             <input className="w-full bg-transparent px-1.5 py-2 uppercase text-cream outline-none" value={ticker} onChange={(e) => setTicker(e.target.value.replace(/[^A-Za-z0-9$]/g, "").toUpperCase().slice(0, 11))} placeholder="BRONZE" />
           </div>
@@ -257,7 +258,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
           error={errors.tweet}
           hint={tw?.ok ? <>Status ID {tw.value.toString()} · every URL form of this tweet maps to one on-chain lock for 3 days</> : "Paste the tweet URL that announces the launch. It's locked on-chain so it can't back another coin for 3 days."}
         >
-          <div className="flex items-center rounded-lg border border-line bg-canvas-2 focus-within:border-copper">
+          <div className="input-shell">
             <XLogo className="ml-3 h-3.5 w-3.5 text-muted" />
             <input className="w-full bg-transparent px-2.5 py-2 text-cream outline-none" value={tweet} onChange={(e) => setTweet(e.target.value)} placeholder="https://x.com/you/status/1850000000000000000" />
           </div>
@@ -276,7 +277,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
                   ["telegram", Send, "https://t.me/yourcoin"],
                 ] as const
               ).map(([k, Icon, ph]) => (
-                <div key={k} className="flex items-center rounded-lg border border-line bg-canvas-2 focus-within:border-copper">
+                <div key={k} className="input-shell">
                   <Icon className="ml-3 h-3.5 w-3.5 text-muted" />
                   <input className="w-full bg-transparent px-2.5 py-2 text-cream outline-none" value={socials[k]} onChange={(e) => setSocials({ ...socials, [k]: e.target.value })} placeholder={ph} aria-label={k} />
                 </div>
@@ -438,8 +439,14 @@ function LaunchProgress({ phase, onReset, onView }: { phase: Exclude<Phase, { st
 
 export function CreateModal() {
   const navigate = useNavigate();
+  const [open, setOpen] = useState(true);
+  // Let the 150ms exit transition play before leaving the route.
+  const close = () => {
+    setOpen(false);
+    window.setTimeout(() => navigate(-1), OVERLAY_MS);
+  };
   return (
-    <Modal open onClose={() => navigate(-1)} label="Start a coin" className="max-w-[1100px] overflow-hidden">
+    <Modal open={open} onClose={close} label="Start a coin" className="max-w-[1100px] overflow-hidden">
       <LaunchForm onClose={() => undefined} />
     </Modal>
   );

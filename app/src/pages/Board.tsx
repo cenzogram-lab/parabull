@@ -152,7 +152,7 @@ function Trending() {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {list.map((c) => (
-          <Link key={c.mint} to={`/coin/${c.mint}`} className="flex items-center gap-3 border-b border-line-soft px-3 py-2.5 hover:bg-surface-2">
+          <Link key={c.mint} to={`/coin/${c.mint}`} className="hover-lift flex items-center gap-3 border border-transparent border-b-line-soft px-3 py-2.5">
             <CoinAvatar src={c.image} alt={c.name} size={40} graduated={c.migrated} />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
@@ -215,7 +215,7 @@ function MiniLeaderboard() {
       </div>
       <ol className="min-h-0 flex-1 overflow-y-auto">
         {rows.map(({ t, v }, i) => (
-          <li key={t.handle} className="flex items-center gap-3 border-b border-line-soft px-3 py-2.5">
+          <li key={t.handle} className="hover-lift flex items-center gap-3 border border-transparent border-b-line-soft px-3 py-2.5">
             <span className={cx("num w-5 text-center text-[13px] font-semibold", i < 3 ? "text-gold" : "text-muted")}>{i + 1}</span>
             <TraderAvatar src={t.avatar} size={34} verified={t.verified} ring={i === 0 ? "gold" : i === 1 ? "rose" : i === 2 ? "copper" : undefined} />
             <div className="min-w-0 flex-1">

@@ -135,7 +135,7 @@ export function TradePanel({ coin }: { coin: Coin }) {
       </div>
 
       {side === "buy" ? (
-        <label className="mt-2 flex h-14 items-center gap-2 rounded-xl border border-line bg-canvas-2 px-3 focus-within:border-copper">
+        <label className="input-shell mt-2 h-14 gap-2 rounded-xl px-3">
           <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} className="num w-full bg-transparent text-2xl font-semibold text-cream outline-none" aria-label={`Amount in ${unit}`} />
           <span className="rounded-md bg-surface-2 px-2 py-1 text-xs font-bold text-cream">{unit}</span>
         </label>

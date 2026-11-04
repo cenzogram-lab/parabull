@@ -2,6 +2,7 @@ import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { shortAddr, usdCompact } from "../../lib/format";
+import { backdropClass, dialogClass, usePresence } from "../../hooks/usePresence";
 import { useApp } from "../../state/AppState";
 import { useMarket } from "../../state/Market";
 import { cx } from "../ui/primitives";
@@ -12,6 +13,7 @@ export function SearchPalette() {
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
+  const { mounted, shown } = usePresence(searchOpen);
 
   const results = useMemo(() => {
     const s = q.trim().replace(/^\$/, "").toLowerCase();
@@ -24,7 +26,7 @@ export function SearchPalette() {
   useEffect(() => {
     if (!searchOpen) setQ("");
   }, [searchOpen]);
-  if (!searchOpen) return null;
+  if (!mounted) return null;
 
   const go = (i: number) => {
     const r = results[i];
@@ -34,8 +36,10 @@ export function SearchPalette() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-center bg-black/60 pt-[12vh] backdrop-blur-[2px]" onMouseDown={(e) => e.target === e.currentTarget && setSearchOpen(false)}>
-      <div role="dialog" aria-label="Search" className="panel-raised h-fit w-full max-w-xl overflow-hidden">
+    <div className="fixed inset-0 z-50">
+      <div className={backdropClass(shown)} aria-hidden />
+      <div className="absolute inset-0 flex justify-center pt-[12vh]" onMouseDown={(e) => e.target === e.currentTarget && setSearchOpen(false)}>
+      <div role="dialog" aria-label="Search" className={cx("panel-raised h-fit w-full max-w-xl origin-top overflow-hidden", dialogClass(shown))}>
         <div className="flex items-center gap-3 border-b border-line px-4">
           <Search className="h-4 w-4 text-copper" />
           <input
@@ -57,7 +61,7 @@ export function SearchPalette() {
           {results.length === 0 && <li className="px-3 py-6 text-center text-muted">No coins or creators match “{q}”.</li>}
           {results.map((r, i) => (
             <li key={r.kind === "coin" ? r.c.mint : r.t.handle}>
-              <button onMouseEnter={() => setSel(i)} onClick={() => go(i)} className={cx("flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left", i === sel && "bg-surface-3")}>
+              <button onMouseEnter={() => setSel(i)} onClick={() => go(i)} className={cx("flex w-full items-center gap-3 rounded-lg border border-transparent px-3 py-2 text-left transition-all duration-100 ease-out", i === sel && "border-line-accent bg-surface-2 shadow-[0_4px_16px_rgba(200,125,85,0.08)]")}>
                 {r.kind === "coin" ? (
                   <>
                     <img src={r.c.image} alt="" className="h-8 w-8 rounded-lg" />
@@ -82,6 +86,7 @@ export function SearchPalette() {
             </li>
           ))}
         </ul>
+      </div>
       </div>
     </div>
   );

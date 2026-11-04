@@ -7,8 +7,8 @@
 export const colors = {
   /** Base canvas: Deep Obsidian, and Dark Charcoal Bronze for raised bands. */
   canvas: { DEFAULT: "#0D0C0B", 2: "#141210" },
-  /** Cards and surfaces: Brushed Dark Bronze. `3` is the derived hover step. */
-  surface: { DEFAULT: "#1A1715", 2: "#231D19", 3: "#2A231E" },
+  /** Cards and surfaces: Brushed Dark Bronze. `3` is the derived hover step, `4` the active tab/chip fill. */
+  surface: { DEFAULT: "#1A1715", 2: "#231D19", 3: "#2A231E", 4: "#2D2320" },
   /** Borders: Burnished Copper, Metallic Accent, and a derived soft hairline for rows inside a surface. */
   line: { DEFAULT: "#4A3528", accent: "#6B4C38", soft: "#2E241D" },
   /** Highlights and accents. */

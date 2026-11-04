@@ -22,9 +22,9 @@ Change a color there, never inline.
 - **Metallic strips:** sheen gradients run horizontally, light–dark–light,
   with a warm, narrow highlight. The range goes from rose-gold, through
   chocolate bronze, to red copper.
-- **Metal is for accents.** It's used for the primary CTA, progress fills,
-  active category tabs and the brand mark. Everything else is flat dark
-  bronze, so the metal stays special.
+- **Metal is for accents.** It's used for progress fills, the Buy side,
+  hero bands and the brand mark. Everything else is flat dark bronze, so the
+  metal stays special. CTAs are solid amber-gold (see Motion).
 
 ## Color tokens
 
@@ -85,9 +85,14 @@ requests.
 | `.panel` / `.panel-raised` | Dark bronze card, burnished-copper border, warm top highlight |
 | `.brushed-dark` | Dark brushed bronze (panel headers, hero bands, ticket card) |
 | `.metal-copper` | Bright brushed copper (progress fills, numbered steps) |
-| `.metal-gold` | Radiant amber-gold metal (primary CTA, active category tab, Buy) |
+| `.metal-gold` | Radiant amber-gold metal (Buy side, King of the Bull crown) |
 | `.metal-text` | Copper/gold gradient text (wordmark, `$PARABULL`, rank numerals) |
-| `.btn-gold`, `.btn-copper`, `.btn-ghost`, `.chip`, `.input`, `.kbd` | Controls |
+| `.btn-gold` | Primary CTA: solid `#E5A967`, `#B87333` on hover, obsidian text, `active:scale-[0.98]`, 100ms |
+| `.btn-copper`, `.btn-ghost`, `.kbd` | Secondary controls |
+| `.input` / `.input-shell` | `#141210` fill, `#4A3528` border, `#9E8C82` placeholder; focus: `#C87D55` border + 1px `#E5A967` ring, 100ms. `.input-shell` gives inputs with a prefix or suffix the same focus via `focus-within` |
+| `.tab` / `.tab-active`, `.chip` / `.chip-active` | Inactive: muted text, cream + `#1A1715` on hover. Active: `#2D2320` fill, gold text, `#6B4C38` border, `shadow-sm`. 100ms ease-out |
+| `.hover-lift` | Screener rows and token cards: `#231D19` fill, `#6B4C38` border, `0 4px 16px rgba(200,125,85,0.08)` shadow, 100ms ease-out |
+| `.row-hover` | Table rows: the same fill change, 100ms |
 
 ## Brand mark
 
@@ -118,6 +123,22 @@ requests.
   below with counts and USD in text tokens.
 - **Stat tiles:** sentence-case label, value in Inter semibold, optional
   signed delta.
+
+## Motion
+
+| Element | Behavior |
+| --- | --- |
+| Overlays (launch modal, ⌘K search, slippage settings) | Backdrop `bg-black/80 backdrop-blur-sm`, opacity over 150ms. Dialog scales 95% to 100% and fades in over 150ms ease-out; the exit plays in reverse before unmounting (`usePresence`, `app/src/hooks/usePresence.ts`) |
+| Rows, cards, tabs, chips, inputs | 100ms ease-out color/border/shadow changes |
+| CTAs | 100ms, pressed state `scale(0.98)` |
+| Live data | Ticker marquee, new-trade flash in the ledger, launch-delay ring |
+
+`prefers-reduced-motion: reduce` collapses all animation and transition
+durations to near zero.
+
+Where the backing surface is already `#1A1715` (Explore category tabs and
+the Grid/Table toggle), inactive hover uses `#231D19` instead, so the hover
+is visible.
 
 ## Layout
 

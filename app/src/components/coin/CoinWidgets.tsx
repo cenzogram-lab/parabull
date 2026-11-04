@@ -82,7 +82,7 @@ export function HoldersTable({ coin }: { coin: Coin }) {
       </thead>
       <tbody>
         {rows.map((h, i) => (
-          <tr key={h.address} className="border-b border-line-soft hover:bg-surface-2">
+          <tr key={h.address} className="row-hover border-b border-line-soft">
             <td className="num px-3 py-2 text-muted">{i + 1}</td>
             <td className="py-2">
               <a href={explorer("account", h.address)} target="_blank" rel="noreferrer" className="font-mono text-[12px] hover:text-gold">

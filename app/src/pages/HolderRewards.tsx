@@ -77,7 +77,7 @@ export function HolderRewards() {
             </thead>
             <tbody>
               {payers.map(({ c, toHolders, share: s, trades }, i) => (
-                <tr key={c.mint} className="border-b border-line-soft hover:bg-surface-2">
+                <tr key={c.mint} className="row-hover border-b border-line-soft">
                   <td className="num px-4 py-2.5 text-muted">{i + 1}</td>
                   <td className="py-2.5">
                     <Link to={`/coin/${c.mint}`} className="flex items-center gap-3 hover:text-gold">

@@ -1,5 +1,6 @@
 import { ArrowDown, ArrowUp, BadgeCheck, ChevronDown, Flame, GraduationCap, GripVertical, Lock, Sprout, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { dialogClass, usePresence } from "../../hooks/usePresence";
 import { pct } from "../../lib/format";
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
@@ -36,9 +37,9 @@ export function Segmented<T extends string>({ options, value, onChange, size = "
             aria-selected={on}
             onClick={() => onChange(v)}
             className={cx(
-              "inline-flex items-center gap-1.5 rounded-md font-semibold transition-colors",
+              "inline-flex items-center gap-1.5 rounded-md font-semibold",
               size === "xs" ? "h-6 px-2 text-[11.5px]" : "h-7 px-2.5 text-xs",
-              on ? "bg-surface-3 text-cream shadow-[inset_0_0_0_1px_#6B4C38]" : "text-muted hover:text-cream",
+              on ? "tab-active" : "tab",
             )}
           >
             {l}
@@ -59,7 +60,7 @@ export function CategoryTabs<T extends string>({ options, value, onChange }: { o
           role="tab"
           aria-selected={v === value}
           onClick={() => onChange(v)}
-          className={cx("inline-flex h-9 items-center gap-2 rounded-lg px-3.5 text-[13.5px] font-semibold transition-colors", v === value ? "metal-gold text-canvas" : "text-muted hover:text-cream")}
+          className={cx("inline-flex h-9 items-center gap-2 rounded-lg px-3.5 text-[13.5px] font-semibold", v === value ? "tab-active" : "tab hover:bg-surface-2")}
         >
           <Icon className="h-4 w-4" />
           {label}
@@ -79,7 +80,7 @@ export function UnderlineTabs<T extends string>({ options, value, onChange, size
           role="tab"
           aria-selected={o === value}
           onClick={() => onChange(o)}
-          className={cx("-mb-px border-b-2 pb-2.5 font-semibold transition-colors", size === "lg" ? "text-xl" : "text-[15px]", o === value ? "border-gold text-cream" : "border-transparent text-muted hover:text-cream")}
+          className={cx("-mb-px border-b-2 pb-2.5 font-semibold transition-colors duration-100 ease-out", size === "lg" ? "text-xl" : "text-[15px]", o === value ? "border-gold text-cream" : "border-transparent text-muted hover:text-cream")}
         >
           {o}
         </button>
@@ -152,6 +153,7 @@ export function AgeTag({ ms }: { ms: string }) {
 /** Lightweight click-outside popover. */
 export function Popover({ trigger, children, align = "right", className }: { trigger: (open: boolean) => ReactNode; children: (close: () => void) => ReactNode; align?: "left" | "right"; className?: string }) {
   const [open, setOpen] = useState(false);
+  const { mounted, shown } = usePresence(open);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -167,7 +169,11 @@ export function Popover({ trigger, children, align = "right", className }: { tri
   return (
     <div ref={ref} className="relative">
       <div onClick={() => setOpen((o) => !o)}>{trigger(open)}</div>
-      {open && <div className={cx("panel-raised absolute top-full z-40 mt-2 p-3", align === "right" ? "right-0" : "left-0", className)}>{children(() => setOpen(false))}</div>}
+      {mounted && (
+        <div className={cx("panel-raised absolute top-full z-40 mt-2 p-3", align === "right" ? "right-0 origin-top-right" : "left-0 origin-top-left", dialogClass(shown), className)}>
+          {children(() => setOpen(false))}
+        </div>
+      )}
     </div>
   );
 }

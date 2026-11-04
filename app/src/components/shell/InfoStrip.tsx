@@ -81,7 +81,7 @@ export function InfoStrip() {
     <div className="flex h-10 shrink-0 items-center gap-3 border-b border-line bg-canvas px-4 text-[13px]">
       <div className="flex items-center gap-0.5" role="tablist" aria-label="Quick info">
         {TOGGLES.map(({ id, label, icon: Icon }) => (
-          <button key={id} role="tab" aria-selected={quickInfo === id} title={label} aria-label={label} onClick={() => setQuickInfo(id)} className={cx("flex h-7 w-7 items-center justify-center rounded-md transition-colors", quickInfo === id ? "bg-surface-2 text-copper" : "text-muted hover:text-cream")}>
+          <button key={id} role="tab" aria-selected={quickInfo === id} title={label} aria-label={label} onClick={() => setQuickInfo(id)} className={cx("flex h-7 w-7 items-center justify-center rounded-md", quickInfo === id ? "tab-active" : "tab")}>
             <Icon className="h-4 w-4" />
           </button>
         ))}

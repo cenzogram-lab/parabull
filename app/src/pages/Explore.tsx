@@ -136,7 +136,7 @@ export function Explore() {
                 ["table", Table2, "Table"],
               ] as const
             ).map(([v, Icon, label]) => (
-              <button key={v} onClick={() => setView(v)} aria-pressed={view === v} className={cx("inline-flex h-9 items-center gap-2 rounded-lg px-3 text-[13.5px] font-semibold", view === v ? "bg-surface-3 text-cream" : "text-muted hover:text-cream")}>
+              <button key={v} onClick={() => setView(v)} aria-pressed={view === v} className={cx("inline-flex h-9 items-center gap-2 rounded-lg px-3 text-[13.5px] font-semibold", view === v ? "tab-active" : "tab hover:bg-surface-2")}>
                 <Icon className="h-4 w-4" /> {label}
               </button>
             ))}
@@ -167,7 +167,7 @@ export function Explore() {
               {rows.map((c, i) => {
                 const athRatio = c.mcapUsd / c.athUsd;
                 return (
-                  <tr key={c.mint} onClick={() => navigate(`/coin/${c.mint}`)} className="cursor-pointer border-b border-line-soft transition-colors hover:bg-surface-2">
+                  <tr key={c.mint} onClick={() => navigate(`/coin/${c.mint}`)} className="row-hover cursor-pointer border-b border-line-soft hover:shadow-[0_4px_16px_rgba(200,125,85,0.08)]">
                     <td className="py-2.5 pl-3 pr-2">
                       <div className="flex items-center gap-3">
                         <span className="num w-6 text-right text-muted">{i + 1}</span>
@@ -228,7 +228,7 @@ export function Explore() {
       ) : (
         <div className="mt-5 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-6">
           {rows.map((c) => (
-            <Link key={c.mint} to={`/coin/${c.mint}`} className="panel group overflow-hidden transition-colors hover:border-line-accent">
+            <Link key={c.mint} to={`/coin/${c.mint}`} className="panel hover-lift group overflow-hidden">
               <img src={c.image} alt={c.name} className="aspect-square w-full object-cover" />
               <div className="p-3">
                 <div className="truncate font-semibold group-hover:text-gold">{c.name}</div>

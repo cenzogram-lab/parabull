@@ -28,7 +28,7 @@ export function ActiveLocks({ coin, compact = true }: { coin: Coin; compact?: bo
 export function CoinRow({ coin, preview = false }: { coin: Coin; preview?: boolean }) {
   const now = useNow();
   const body = (
-    <div className={cx("px-3 py-2.5 transition-colors", !preview && "border-b border-line-soft hover:bg-surface-2")}>
+    <div className={cx("px-3 py-2.5", !preview && "hover-lift border border-transparent border-b-line-soft")}>
       <div className="flex items-start gap-3">
         <div className="pl-1 pt-1">
           <CoinAvatar src={coin.image} alt={coin.name} size={42} progress={progressOf(coin)} graduated={coin.migrated} />
@@ -65,7 +65,7 @@ export function CoinRow({ coin, preview = false }: { coin: Coin; preview?: boole
 export function CoinCard({ coin }: { coin: Coin }) {
   const now = useNow();
   return (
-    <Link to={`/coin/${coin.mint}`} className="group flex gap-4 rounded-2xl p-2 transition-colors hover:bg-surface">
+    <Link to={`/coin/${coin.mint}`} className="hover-lift group flex gap-4 rounded-2xl border border-transparent p-2">
       <CoinAvatar src={coin.image} alt={coin.name} size={112} rounded="2xl" />
       <div className="min-w-0 flex-1 py-1">
         <div className="truncate text-[17px] font-semibold leading-6 group-hover:text-gold">{coin.name}</div>
@@ -116,7 +116,7 @@ export function CalloutCard({ callout, trader, coin, dense = false }: { callout:
             </div>
           </div>
           <p className={cx("mt-1.5 text-cream/95", dense ? "text-[13px] leading-5" : "text-[14.5px] leading-6")}>{callout.text}</p>
-          <Link to={`/coin/${coin.mint}`} className="mt-3 flex items-center gap-3 rounded-xl border border-line bg-canvas-2 p-3 transition-colors hover:border-line-accent">
+          <Link to={`/coin/${coin.mint}`} className="hover-lift mt-3 flex items-center gap-3 rounded-xl border border-line bg-canvas-2 p-3">
             <img src={coin.image} alt="" className="h-9 w-9 rounded-lg" />
             <div className="min-w-0 flex-1">
               <div className="truncate text-[13.5px] font-semibold">{coin.ticker}</div>

@@ -73,7 +73,7 @@ export function Dock() {
         ))}
       </div>
 
-      <button onClick={launch} aria-label="Start a coin" title={collapsed ? "Start a coin" : undefined} className={cx("mt-4 rounded-xl bg-gold font-semibold text-canvas transition hover:brightness-110", collapsed ? "flex h-10 w-10 items-center justify-center" : "metal-gold flex h-11 items-center justify-center gap-2 text-[14.5px]")}>
+      <button onClick={launch} aria-label="Start a coin" title={collapsed ? "Start a coin" : undefined} className={cx("btn-gold mt-4 rounded-xl", collapsed ? "h-10 w-10" : "h-11 gap-2 text-[14.5px]")}>
         <Plus className="h-5 w-5" strokeWidth={2.5} />
         {!collapsed && "Start a coin"}
       </button>

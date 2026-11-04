@@ -266,7 +266,7 @@ export function TokenHub() {
                 </thead>
                 <tbody>
                   {[...ledger].reverse().map((d) => (
-                    <tr key={d.date} className="border-b border-line-soft hover:bg-surface-2">
+                    <tr key={d.date} className="row-hover border-b border-line-soft">
                       <td className="px-5 py-2.5">{new Date(d.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</td>
                       <td className="num py-2.5 text-right font-semibold">{Math.round(d.burned).toLocaleString("en-US")}</td>
                       <td className="num py-2.5 text-right">{d.solSpent.toFixed(2)}</td>

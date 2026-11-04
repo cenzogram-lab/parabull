@@ -1,9 +1,11 @@
 import { CheckCircle2, Info, X, XCircle } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
+import { backdropClass, dialogClass, usePresence } from "../../hooks/usePresence";
 import { useApp } from "../../state/AppState";
 import { cx } from "./primitives";
 
 export function Modal({ open, onClose, children, label, className }: { open: boolean; onClose: () => void; children: ReactNode; label: string; className?: string }) {
+  const { mounted, shown } = usePresence(open);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -15,14 +17,17 @@ export function Modal({ open, onClose, children, label, className }: { open: boo
       document.body.style.overflow = prev;
     };
   }, [open, onClose]);
-  if (!open) return null;
+  if (!mounted) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-6 backdrop-blur-[3px]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div role="dialog" aria-modal="true" aria-label={label} className={cx("panel-raised relative my-6 w-full", className)}>
+    <div className="fixed inset-0 z-50">
+      <div className={backdropClass(shown)} aria-hidden />
+      <div className="absolute inset-0 flex items-start justify-center overflow-y-auto p-6" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div role="dialog" aria-modal="true" aria-label={label} className={cx("panel-raised relative my-6 w-full", dialogClass(shown), className)}>
         <button onClick={onClose} className="btn-icon absolute right-3 top-3 z-10" aria-label="Close">
           <X className="h-4 w-4" />
         </button>
         {children}
+      </div>
       </div>
     </div>
   );
