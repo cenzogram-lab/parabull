@@ -69,26 +69,74 @@ export function canonicalSettingsJson(s: SentinelSettings): string {
   });
 }
 
-/** The text the creator's wallet signs (Solana signMessage). `digestHex` is SHA-256 of canonicalSettingsJson. */
-export function settingsMessage(mint: string, issuedAt: string, digestHex: string): string {
-  return ["Parabull X sentinel", "Action: update settings", `Mint: ${mint}`, `Issued: ${issuedAt}`, `Settings SHA-256: ${digestHex}`].join("\n");
+/**
+ * An X web session the creator links for their coin: the account's handle and the `auth_token` and `ct0` cookies of
+ * a signed-in browser. Sent once over HTTPS; the sentinel seals it at rest and never returns it.
+ */
+export interface XSession {
+  username: string;
+  authToken: string;
+  ct0: string;
 }
 
-/** What PUT /api/sentinel/:mint takes. `signature` is base64. */
+/** Validates an untrusted session (the handle may start with @), or returns an error message. */
+export function normalizeSession(input: unknown): { ok: true; value: XSession } | { ok: false; error: string } {
+  if (!input || typeof input !== "object") return { ok: false, error: "the X session must be an object" };
+  const s = input as Record<string, unknown>;
+  const username = typeof s.username === "string" ? s.username.trim().replace(/^@/, "") : "";
+  const authToken = typeof s.authToken === "string" ? s.authToken.trim() : "";
+  const ct0 = typeof s.ct0 === "string" ? s.ct0.trim() : "";
+  if (!/^[A-Za-z0-9_]{1,15}$/.test(username)) return { ok: false, error: "the X handle is 1-15 letters, digits or underscores" };
+  // X's cookies are long hex strings; anything else is a copy-paste mistake.
+  if (!/^[A-Za-z0-9]{20,400}$/.test(authToken)) return { ok: false, error: "auth_token doesn't look like an X session cookie" };
+  if (!/^[A-Za-z0-9]{20,400}$/.test(ct0)) return { ok: false, error: "ct0 doesn't look like an X session cookie" };
+  return { ok: true, value: { username, authToken, ct0 } };
+}
+
+export type SentinelAction = "update settings" | "disconnect";
+
+/**
+ * What the signature covers, in a fixed order: the settings and the session being linked (null when unchanged).
+ * A disconnect signs `{"settings":null,"session":null}`.
+ */
+export function signedPayloadJson(settings: SentinelSettings | null, session: XSession | null): string {
+  const s = settings ? JSON.parse(canonicalSettingsJson(settings)) : null;
+  return JSON.stringify({ settings: s, session: session ? { username: session.username, authToken: session.authToken, ct0: session.ct0 } : null });
+}
+
+/**
+ * The text the creator's wallet signs (Solana signMessage). `digestHex` is SHA-256 of signedPayloadJson, so the
+ * wallet shows the action and a fingerprint, never the cookies themselves.
+ */
+export function sentinelMessage(action: SentinelAction, mint: string, issuedAt: string, digestHex: string): string {
+  return ["Parabull X sentinel", `Action: ${action}`, `Mint: ${mint}`, `Issued: ${issuedAt}`, `Payload SHA-256: ${digestHex}`].join("\n");
+}
+
+/** What PUT /api/sentinel/:mint/settings takes. `session` links or replaces the X session; omit it to keep the current one. `signature` is base64. */
 export interface SignedSettings {
   settings: SentinelSettings;
+  session?: XSession | null;
   issuedAt: string;
   signer: string;
   signature: string;
 }
 
-/** What GET /api/sentinel/:mint returns. */
+/** What DELETE /api/sentinel/:mint/settings takes. */
+export interface SignedDisconnect {
+  issuedAt: string;
+  signer: string;
+  signature: string;
+}
+
+/** What GET /api/sentinel/:mint/settings returns. It never includes session cookies. */
 export interface SentinelStatus {
   mint: string;
   /** "dry-run": posts are logged, not sent. */
   mode: "live" | "dry-run";
-  /** The X account the service posts as for this coin, or null when none is set up. */
-  account: { username: string } | null;
+  /** The X account the service posts as for this coin: linked by the creator, or set up by the operator. Null when none. */
+  account: { username: string; source: "creator" | "operator"; linkedAt: string | null } | null;
+  /** The sentinel is watching this coin (it has saved settings). */
+  active: boolean;
   settings: SentinelSettings | null;
   updatedAt: string | null;
 }

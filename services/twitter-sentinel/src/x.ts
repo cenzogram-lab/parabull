@@ -14,6 +14,8 @@ export interface XClient {
   /** Returns the new post's ID when X reports one. */
   post(text: string, inReplyTo?: string): Promise<string | null>;
   mentions(limit: number): Promise<MentionTweet[]>;
+  /** Signs in and returns the account's real handle; throws when X rejects the session. */
+  verify(): Promise<string>;
 }
 
 export interface XAccount {
@@ -39,6 +41,10 @@ export class DryRunX implements XClient {
   async mentions() {
     return this.fakeMentions();
   }
+  /** A dry run doesn't contact X, so the handle is taken as given. */
+  async verify() {
+    return this.username;
+  }
 }
 
 export class CookieX implements XClient {
@@ -63,6 +69,13 @@ export class CookieX implements XClient {
       throw e;
     });
     return this.ready;
+  }
+
+  async verify() {
+    await this.login();
+    const me = await this.scraper.me();
+    if (!me?.username) throw new Error("X accepted the cookies but didn't say which account they belong to; try fresh cookies");
+    return me.username;
   }
 
   async post(text: string, inReplyTo?: string) {

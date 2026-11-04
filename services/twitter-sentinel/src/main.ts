@@ -1,11 +1,13 @@
 /** Starts the sentinel: reads its config, signs in to each X account, watches every configured coin, serves the API. */
 import { readFileSync } from "node:fs";
 import { Connection } from "@solana/web3.js";
+import { XRegistry } from "./accounts";
 import { Chain } from "./chain";
+import { keyFromSecret } from "./seal";
 import { Sentinel } from "./sentinel";
 import { createApi } from "./server";
 import { Store } from "./store";
-import { CookieX, DryRunX, type XAccount, type XClient } from "./x";
+import { CookieX, DryRunX, type XAccount } from "./x";
 
 const env = process.env;
 const num = (v: string | undefined, d: number) => (v && Number.isFinite(Number(v)) ? Number(v) : d);
@@ -23,7 +25,7 @@ const config = {
   mentionPollSeconds: num(env.SENTINEL_MENTION_POLL_SECONDS, 180),
 };
 
-/** accounts.json: { "<mint>": { "username", "authToken", "ct0", "guestId"? } }. Operator-managed; never sent by the app. */
+/** accounts.json: { "<mint>": { "username", "authToken", "ct0", "guestId"? } }. Operator-managed; a session a creator links from the app takes precedence. */
 function loadAccounts(): Record<string, XAccount> {
   try {
     return JSON.parse(readFileSync(config.accountsFile, "utf8"));
@@ -33,32 +35,27 @@ function loadAccounts(): Record<string, XAccount> {
   }
 }
 
-const accounts = loadAccounts();
-const clients = new Map<string, XClient>();
+const operator = loadAccounts();
 const log = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
-function xFor(mint: string): XClient | null {
-  const acct = accounts[mint];
-  if (!acct?.username) return null;
-  const key = acct.username.toLowerCase();
-  let client = clients.get(key);
-  if (!client) {
-    client = config.dryRun ? new DryRunX(acct.username.replace(/^@/, ""), log) : new CookieX(acct);
-    clients.set(key, client);
-  }
-  return client;
-}
+/** Seals creator-linked sessions; without it, creators can't link an account from the app. */
+const key = keyFromSecret(env.SENTINEL_SECRET);
 
 const store = new Store(config.dataDir);
+const accounts = new XRegistry({ store, key, operator, make: (a) => (config.dryRun ? new DryRunX(a.username, log) : new CookieX(a)), log });
 const chain = new Chain(new Connection(config.rpcUrl, "confirmed"));
-const sentinel = new Sentinel({ store, chain, xFor, coinUrl: (mint) => (config.siteUrl ? `${config.siteUrl}/coin/${mint}` : ""), log });
-const api = createApi({ store, chain, sentinel, xFor, allowedOrigins: config.allowedOrigins });
+const sentinel = new Sentinel({ store, chain, xFor: (mint) => accounts.for(mint), coinUrl: (mint) => (config.siteUrl ? `${config.siteUrl}/coin/${mint}` : ""), log });
+const api = createApi({ store, chain, sentinel, accounts, dryRun: config.dryRun, allowedOrigins: config.allowedOrigins, log });
 
 for (const mint of store.mints()) sentinel.watch(mint);
 const curveTimer = setInterval(() => void sentinel.tick(), config.curvePollSeconds * 1000);
 const mentionTimer = setInterval(() => void sentinel.tickMentions(), config.mentionPollSeconds * 1000);
 void sentinel.tick();
 
-api.listen(config.port, () => log(`X sentinel on :${config.port} (${config.dryRun ? "dry run: posts are logged, not sent" : "live"}), ${store.mints().length} coin(s), ${Object.keys(accounts).length} X account(s), RPC ${config.rpcUrl}`));
+api.listen(config.port, () =>
+  log(
+    `X sentinel on :${config.port} (${config.dryRun ? "dry run: posts are logged, not sent" : "live"}), ${store.mints().length} coin(s), ${Object.keys(operator).length} operator X account(s), creator sessions ${key ? "accepted" : "off (set SENTINEL_SECRET)"}, RPC ${config.rpcUrl}`,
+  ),
+);
 
 const stop = () => {
   clearInterval(curveTimer);
