@@ -9,6 +9,8 @@ import { BPS, bpsLabel, type GlobalView } from "./protocolParams";
 
 /** Raydium's pool-creation fee on mainnet AmmConfig 0; the migration reserve also pays account rent. */
 export const RAYDIUM_POOL_FEE_LAMPORTS = 150_000_000n;
+/** `DEFAULT_MIGRATION_RESERVE_LAMPORTS` in constants.rs: the pool fee plus rent for the pool and lock accounts. */
+export const DEFAULT_MIGRATION_RESERVE_LAMPORTS = 250_000_000n;
 
 /** `MIN_REWARD_CLAIM_WINDOW_SECONDS` in constants.rs. */
 export const MIN_CLAIM_WINDOW_SECONDS = 7 * 86_400;
@@ -186,7 +188,11 @@ export function checkParams(g: GlobalView, f: ParamsForm): ParamsCheck {
   if (reserve! !== g.migrationReserveLamports) {
     update.migrationReserveLamports = reserve!;
     changes.push({ label: "Migration reserve", from: fmtSol(g.migrationReserveLamports), to: fmtSol(reserve!) });
-    if (reserve! <= RAYDIUM_POOL_FEE_LAMPORTS) warnings.push("The migration reserve must cover Raydium's 0.15 SOL pool fee plus rent, or graduations will fail.");
+    if (reserve! <= RAYDIUM_POOL_FEE_LAMPORTS) warnings.push("This doesn't even cover Raydium's 0.15 SOL pool fee, so every graduation will fail.");
+    else if (reserve! < DEFAULT_MIGRATION_RESERVE_LAMPORTS)
+      warnings.push(
+        "The reserve also pays rent for the pool, vault, LP and lock accounts on top of Raydium's 0.15 SOL fee. The 0.25 SOL default covers both; less risks failed graduations.",
+      );
   }
   if (windowSeconds! !== g.rewardClaimWindowSeconds) {
     update.rewardClaimWindowSeconds = BigInt(windowSeconds!);

@@ -146,6 +146,13 @@ test("params: an unchanged form changes nothing; edits produce only the changed 
   assert.ok(w.ok);
   assert.deepEqual(w.update, { rewardClaimWindowSeconds: 1_209_600n, migrationReserveLamports: 100_000_000n });
   assert.equal(w.warnings.length, 2, "a reserve under the pool fee and a new claim window both warn");
+  assert.match(w.warnings[0], /every graduation will fail/);
+
+  // Above the 0.15 SOL pool fee but under the 0.25 SOL default, rent may not be covered: still warns.
+  const thin = checkParams(g, { ...formFromGlobal(g), migrationReserveSol: "0.16" });
+  assert.ok(thin.ok && thin.warnings.length === 1 && /rent/.test(thin.warnings[0]), "0.16 SOL warns about rent");
+  const raised = checkParams(g, { ...formFromGlobal(g), migrationReserveSol: "0.3" });
+  assert.ok(raised.ok && raised.warnings.length === 0, "at or above the default, no warning");
 });
 
 test("params: the program's rules (and the console's slot floor) are refused before signing", () => {

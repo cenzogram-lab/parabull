@@ -24,10 +24,12 @@ const SELL_PRESETS = [25, 50, 100];
 export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced }: { coin: Coin; initialSide?: "buy" | "sell"; framed?: boolean; onPlaced?: () => void }) {
   const client = useParabullProgram();
   const { setVisible } = useWalletModal();
-  const { demoTrade, positions, solUsd } = useMarket();
+  const { demoTrade, positions } = useMarket();
   const { toast, sfx } = useApp();
-  // The fee the program charges: from Global in chain mode, the 1% default in demo mode.
-  const { params } = useProtocol();
+  // The fee the program charges and the SOL/USD used for dollar amounts: from Global and the live price feed in chain
+  // mode, the 1% default and the fixed demo price in demo mode.
+  const { params, solUsd: quote } = useProtocol();
+  const solUsd = quote.price;
   const feeBps = BigInt(params.platformFeeBps);
   const [side, setSide] = useState<"buy" | "sell">(initialSide);
   const [unit, setUnit] = useState<"SOL" | "USD">("SOL");
