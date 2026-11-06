@@ -1,8 +1,11 @@
-import { ChevronsLeft, ChevronsRight, Compass, HandCoins, LayoutDashboard, LayoutGrid, PanelsTopLeft, Plus, Radio, Trophy, Volume2, VolumeX, type LucideIcon } from "lucide-react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { ChevronsLeft, ChevronsRight, Compass, HandCoins, LayoutDashboard, LayoutGrid, PanelsTopLeft, Plus, Radio, ShieldCheck, Trophy, Volume2, VolumeX, type LucideIcon } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { BullMark } from "../brand/BullMark";
 import { ParabullCoin, Wordmark } from "../brand/Wordmark";
+import { mayOpenConsole, rolesOf } from "../../lib/protocolParams";
 import { useApp } from "../../state/AppState";
+import { useProtocol } from "../../state/Protocol";
 import { cx } from "../ui/primitives";
 
 const MAIN: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
@@ -46,6 +49,10 @@ export function Dock() {
   const navigate = useNavigate();
   const location = useLocation();
   const launch = () => navigate("/create", { state: { background: location } });
+  // Only the wallets Global names (admin, crank, nominated admin) see the console link; others can't use it.
+  const { global } = useProtocol();
+  const { publicKey } = useWallet();
+  const showAdmin = !!global && mayOpenConsole(rolesOf(global, publicKey?.toBase58() ?? null));
   const ctrl = "flex h-10 items-center rounded-xl text-muted transition-colors hover:bg-surface hover:text-cream";
   return (
     // The bottom padding clears the home indicator of a phone in landscape (env() is 0 in desktop browsers).
@@ -72,6 +79,7 @@ export function Dock() {
         {DISCOVER.map((m) => (
           <Item key={m.to} {...m} collapsed={collapsed} />
         ))}
+        {showAdmin && <Item to="/admin" label="Admin console" icon={ShieldCheck} collapsed={collapsed} />}
       </div>
 
       <button onClick={launch} aria-label="Start a coin" title={collapsed ? "Start a coin" : undefined} className={cx("btn-gold mt-4 rounded-xl", collapsed ? "h-10 w-10" : "h-11 gap-2 text-[14.5px]")}>

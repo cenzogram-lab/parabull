@@ -26,6 +26,7 @@ npm run dev          # http://localhost:5173
 | `/live` | Spotlight stream with chat, then Most viewers / Highest market cap / Trending clips |
 | `/holder-rewards` | Holder-reward totals, top paying coins, how the fee split works |
 | `/parabull-token` (`/rewards`) | Buyback & burn tracker, daily ledger, earnings-to-valuation calculator, Merkle claims |
+| `/admin` | Operator console for the admin, crank and nominated-admin wallets (chain mode). See [Admin console](#admin-console) |
 
 ## Mobile
 
@@ -100,7 +101,7 @@ for the visit only.
 
 Check a change with `npm run build`, then `npm run audit:mobile` (no
 sideways scrolling, every touch target at least 44x44px, no console errors,
-on 10 routes at 390x844) and `npm run screenshots -- <dir> --mobile` (15
+on 11 routes at 390x844) and `npm run screenshots -- <dir> --mobile` (15
 captures at 390x844). The desktop captures (`npm run screenshots -- <dir>`)
 are the check that a mobile change left the desktop layout alone: compare
 them with a capture from before the change.
@@ -125,8 +126,19 @@ Set these in `app/.env.local` (see `src/config.ts`):
   slippage;
 - `claim_holder_reward`, after verifying the proof in the browser against
   the published root;
-- reads of `Global` (ticket price) and of the ticker, name and tweet
-  registries (lock pre-check).
+- reads of the ticker, name and tweet registries (lock pre-check);
+- the admin console at `/admin`: `set_paused`, `update_global_params` and
+  `propose_admin` / `accept_admin` (see [Admin console](#admin-console)).
+
+**Protocol parameters and SOL/USD** (`src/state/Protocol.tsx`): in chain
+mode the app reads `Global` once on load, and again after an admin change.
+The platform fee, fee split, listing target, ticket price, lock window,
+trading delay and claim window shown on the trade panel, launch flow,
+Holder rewards and $PARABULL pages come from it. Trade quotes use its fee.
+SOL/USD comes from Jupiter's price API, with CoinGecko as a fallback,
+polled every minute; until one answers, the demo price ($162.40) is used
+and the console labels it as a fallback. Demo mode keeps the program
+defaults and the fixed demo price that the seeded data is built on.
 
 **Still demo data in both modes:** coin lists, candles, trades, holders,
 leaderboards, streams, protocol totals and the portfolio (balance,
@@ -136,6 +148,60 @@ wallet). These need the indexer API in
 (header pill and footer; on a phone, the footnote, a Demo tag by the
 header's balance and the portfolio's Demo chip; in both layouts, a Demo tag
 by the Rewards tab's unclaimed figure).
+
+## Admin console
+
+`/admin` (`src/pages/AdminConsole.tsx`, loaded only when visited) is the
+operator view.
+
+**Who sees it.** It opens for the wallets that `Global` names: the admin,
+the crank authority, and a nominated admin, who needs it to accept. Anyone
+else, or a visitor with no wallet connected, gets the locked "Access
+Restricted: Connect Admin Wallet" screen. Demo builds are always locked,
+because there's no `Global` to read. Switching wallets updates the page
+without a reload. Role holders also get an **Admin console** link in the
+dock. This gate only decides what the page shows: the program checks every
+signer, and everything on the page is public on-chain data.
+
+**What it shows (plain RPC reads, no backend):**
+- **Launchpad:** total launches (`Global.launch_count`), tickets waiting,
+  and coins on the curve, graduating or graduated, from every
+  `BondingCurve`.
+- **Liquidity and vaults:**
+  - SOL held for curves and the treasury balance.
+  - The buyback vault: spendable SOL, plus its lifetime spend, $PARABULL
+    burned and buyback count.
+  - The holder-reward vault: spendable SOL, what open epochs still owe,
+    and lifetime claims and epochs.
+- **Unswept fees:** totals for the listing escrow, buyback, holder and
+  treasury shares across all curves.
+- **Configuration:** the program's authorities and the parameters fixed at
+  `initialize`.
+
+It refreshes every minute and after every change.
+
+**Controls, signed by the admin wallet** (the crank sees them read-only):
+- **Emergency pause:** `set_paused`. Pausing asks you to type PAUSE first.
+- **Fees and parameters:** `update_global_params`.
+  - The buyback and holder shares (the treasury gets the rest), the
+    DexScreener target (with a "Set to $299" button that uses the live
+    price), the trading-open delay, the migration reserve and the reward
+    claim window.
+  - Changes are checked against the program's rules before signing, shown
+    as old → new, and only the changed fields are sent.
+  - The console won't set the trading delay to 0 slots, which would allow
+    buying in the creation slot.
+  - The 1% platform fee is shown read-only: `GlobalUpdate` has no field
+    for it, so it can only be set at `initialize`.
+- **Admin transfer:** `propose_admin` (or withdraw the nomination), then
+  `accept_admin` from the nominated wallet.
+
+**Logic:**
+- Validation and KPI maths: `src/lib/admin.ts`.
+- Roles and the parameters shared by every page: `src/lib/protocolParams.ts`.
+- Tests: `test/admin.test.ts`.
+- Some RPC providers turn off `getProgramAccounts`. The console says so when
+  its reads fail.
 
 ## Where the logic comes from
 
@@ -166,7 +232,7 @@ by the Rewards tab's unclaimed figure).
 | `npm run build` | Typecheck (app + tests) and production build into `dist/` |
 | `npm test` | Unit tests: SHA-256, launch rules, quotes, Merkle proofs, formatting, demo-data invariants |
 | `npm run screenshots -- <dir> [--mobile]` | Serves `dist/` and captures every page with Playwright (`?live=0` freezes the demo simulation); `--mobile` captures the phone layout at 390x844 |
-| `npm run audit:mobile` | After a build: checks 10 routes at 390x844 for sideways scrolling, touch targets under 44x44px and console errors |
+| `npm run audit:mobile` | After a build: checks 11 routes at 390x844 for sideways scrolling, touch targets under 44x44px and console errors |
 | `npm run sync-idl` / `check-idl` | Copy or verify the IDL from `../target` |
 
 ## Wallets

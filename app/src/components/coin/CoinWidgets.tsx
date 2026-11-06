@@ -3,11 +3,12 @@ import { useMemo } from "react";
 import { explorer } from "../../config";
 import { useNow } from "../../hooks/useNow";
 import { age, compact, price, shortAddr, sol, usd, usdCompact, usdSigned } from "../../lib/format";
-import { GRADUATION_RAISE_LAMPORTS, PROTOCOL } from "../../lib/protocol";
+import { GRADUATION_RAISE_LAMPORTS } from "../../lib/protocol";
 import type { Coin } from "../../lib/types";
 import { progressOf } from "../../mock/coins";
 import { holders as holderList } from "../../mock/market";
 import { useMarket } from "../../state/Market";
+import { useProtocol } from "../../state/Protocol";
 import { cx, Empty } from "../ui/primitives";
 import { Meter } from "../ui/visuals";
 import { CalloutCard } from "./CoinViews";
@@ -42,7 +43,9 @@ export function MigrationGauge({ coin }: { coin: Coin }) {
 }
 
 export function EscrowGauge({ coin }: { coin: Coin }) {
-  const v = coin.escrowUsd / PROTOCOL.dexListingUsd;
+  // The on-chain lamport target at today's SOL price in chain mode; the flat $299 in demo mode.
+  const target = Math.max(1, Math.round(useProtocol().dexTargetUsd));
+  const v = coin.escrowUsd / target;
   return (
     <div className="panel p-4">
       <div className="flex items-baseline justify-between">
@@ -50,8 +53,8 @@ export function EscrowGauge({ coin }: { coin: Coin }) {
           <Megaphone className="h-4 w-4 text-copper" /> DexScreener listing fund
         </h3>
         <span className="num text-xl font-semibold">
-          {usd(Math.min(coin.escrowUsd, PROTOCOL.dexListingUsd), 0)}
-          <span className="text-sm font-medium text-muted"> / ${PROTOCOL.dexListingUsd}</span>
+          {usd(Math.min(coin.escrowUsd, target), 0)}
+          <span className="text-sm font-medium text-muted"> / ${target}</span>
         </span>
       </div>
       <div className="mt-3">
@@ -60,7 +63,7 @@ export function EscrowGauge({ coin }: { coin: Coin }) {
       <p className="mt-2.5 text-xs leading-5 text-muted">
         {coin.escrowReleased
           ? "Funded and released to the treasury to pay for the DexScreener listing."
-          : "The first platform fees from this coin fill this escrow. Once it reaches $299, anyone can release it to pay for the listing."}
+          : `The first platform fees from this coin fill this escrow. Once it reaches $${target}, anyone can release it to pay for the listing.`}
       </p>
     </div>
   );

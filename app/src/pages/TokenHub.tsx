@@ -12,11 +12,18 @@ import { useIsMobile } from "../hooks/useMediaQuery";
 import { useParabullProgram } from "../hooks/useParabullProgram";
 import { compact, countdown, sol, usd, usdCompact } from "../lib/format";
 import { leafHash, verifyProof } from "../lib/merkle";
-import { PROTOCOL } from "../lib/protocol";
+import { BPS, bpsLabel } from "../lib/protocolParams";
 import { fromHex } from "../lib/sha256";
 import { SOL_USD } from "../mock/coins";
 import { buybackLedger, DEMO_WALLET, PARABULL_PRICE, PARABULL_SUPPLY, walletEpochs, type DemoEpoch } from "../mock/protocol";
 import { useApp } from "../state/AppState";
+import { useProtocol } from "../state/Protocol";
+
+type LedgerSource = "demo" | "events";
+const LEDGER_CAPTION: Record<LedgerSource, string> = { demo: "Simulated burn history · demo data", events: "From BuybackBurned events" };
+
+/** "Half" for the default 50% buyback share, else the percentage. */
+const shareOfFee = (bps: number) => (bps === BPS / 2 ? "Half" : bpsLabel(bps));
 
 function ClaimPanel() {
   const client = useParabullProgram();
@@ -216,10 +223,11 @@ function ClaimPanel() {
 function ValuationCalculator() {
   const [volume, setVolume] = useState(4_500_000);
   const [multiple, setMultiple] = useState(20);
-  const feeRate = Number(PROTOCOL.platformFeeBps) / 10_000;
+  const { params } = useProtocol();
+  const feeRate = params.platformFeeBps / BPS;
   const fees = volume * feeRate * 365;
-  const buyback = fees * (PROTOCOL.buybackBps / 10_000);
-  const holders = fees * (PROTOCOL.holderBps / 10_000);
+  const buyback = fees * (params.buybackBps / BPS);
+  const holders = fees * (params.holderBps / BPS);
   const valuation = (buyback + holders) * multiple;
   const implied = valuation / PARABULL_SUPPLY;
   return (
@@ -244,9 +252,9 @@ function ValuationCalculator() {
       </label>
       <dl className="mt-4 space-y-1.5 text-[13px]">
         {[
-          ["Annual platform fees (1%)", usdCompact(fees)],
-          ["Bought back & burned (50%)", usdCompact(buyback)],
-          ["Paid to holders (40%)", usdCompact(holders)],
+          [`Annual platform fees (${bpsLabel(params.platformFeeBps)})`, usdCompact(fees)],
+          [`Bought back & burned (${bpsLabel(params.buybackBps)})`, usdCompact(buyback)],
+          [`Paid to holders (${bpsLabel(params.holderBps)})`, usdCompact(holders)],
         ].map(([k, v]) => (
           <div key={k} className="flex justify-between">
             <dt className="text-muted">{k}</dt>
@@ -269,11 +277,12 @@ function ValuationCalculator() {
 }
 
 export function TokenHub() {
-  const client = useParabullProgram();
   const { toast } = useApp();
   const isMobile = useIsMobile();
   const { hash, key } = useLocation();
-  const [parabullMint, setParabullMint] = useState<string | null>(null);
+  // Chain mode: the $PARABULL mint and the fee split come from Global (state/Protocol.tsx).
+  const { global, params, dexTargetUsd } = useProtocol();
+  const parabullMint = global?.parabullMint ?? null;
   const [allDays, setAllDays] = useState(false);
   // Router navigation doesn't scroll to a hash, so on a phone do it for links to #claim (Holder rewards, notifications,
   // Portfolio), clear of the sticky header. Desktop keeps the behavior it had.
@@ -285,14 +294,9 @@ export function TokenHub() {
     });
     return () => cancelAnimationFrame(id);
   }, [hash, key, isMobile]);
-  useEffect(() => {
-    if (isDemo) return;
-    client
-      .fetchGlobal()
-      .then((g) => g && setParabullMint(g.parabullMint.toBase58()))
-      .catch(() => undefined);
-  }, [client]);
   const ledger = useMemo(() => buybackLedger(), []);
+  // The ledger is seeded in every mode: nothing reads BuybackBurned events yet. Set "events" only once it's built from them.
+  const ledgerSource: LedgerSource = "demo";
   const totalUsd = ledger.reduce((n, d) => n + d.usd, 0);
   const totalBurned = ledger.reduce((n, d) => n + d.burned, 0);
   const totalSol = ledger.reduce((n, d) => n + d.solSpent, 0);
@@ -328,7 +332,7 @@ export function TokenHub() {
             <span className="metal-text">$PARABULL</span> turns every trade into buy pressure
           </h1>
           <p className="mt-5 max-w-2xl text-[17px] leading-7 text-muted max-md:mt-4 max-md:text-[15px] max-md:leading-6">
-            The native token of the Parabull launchpad. Half of every platform fee buys $PARABULL on the open market and burns it, and 40% is paid to holders in SOL.
+            {`The native token of the Parabull launchpad. ${shareOfFee(params.buybackBps)} of every platform fee buys $PARABULL on the open market and burns it, and ${bpsLabel(params.holderBps)} is paid to holders in SOL.`}
           </p>
           <div className="mt-8 flex gap-3 max-md:mt-6 max-md:w-full">
             <a href={parabullMint ? `https://raydium.io/swap/?inputMint=sol&outputMint=${parabullMint}` : "https://raydium.io/swap/"} target="_blank" rel="noreferrer" className="btn-gold h-12 px-7 text-[15px] max-md:flex-1 max-md:px-4">
@@ -345,7 +349,7 @@ export function TokenHub() {
       <div className="mx-auto max-w-[1400px] space-y-8 px-8 py-10 max-md:space-y-6 max-md:px-4 max-md:py-6">
         <div>
           <h2 className="text-[24px] font-semibold max-md:text-[20px] max-md:leading-7">Every buyback, burned forever</h2>
-          <p className="mt-1 text-[14px] text-muted max-md:text-[13.5px]">Half of every platform fee, after each coin's $299 listing fund, buys $PARABULL from the Raydium pool and burns it in the same transaction.</p>
+          <p className="mt-1 text-[14px] text-muted max-md:text-[13.5px]">{`${shareOfFee(params.buybackBps)} of every platform fee, after each coin's $${Math.round(dexTargetUsd)} listing fund, buys $PARABULL from the Raydium pool and burns it in the same transaction.`}</p>
         </div>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3 max-md:gap-3">
           <StatTile icon={TrendingUp} label="Total USD deployed" value={usdCompact(totalUsd)} foot={<span>{compact(totalSol)} SOL spent · last 30 days</span>} hero />
@@ -358,7 +362,7 @@ export function TokenHub() {
             <div className="flex items-center gap-2 border-b border-line px-5 py-3 max-md:px-4">
               <Flame className="h-4 w-4 text-copper" />
               <h3 className="text-[15px] font-semibold">Daily buyback & burn</h3>
-              <span className="ml-auto text-xs text-muted">{isDemo ? "Demo ledger" : "From BuybackBurned events"}</span>
+              <span className="ml-auto text-xs text-muted">{LEDGER_CAPTION[ledgerSource]}</span>
             </div>
             {/* Below md the page scrolls instead of a nested 440px scroller, and the columns get short labels to fit 390px. */}
             <div className="max-h-[440px] overflow-y-auto max-md:max-h-none max-md:overflow-visible">

@@ -29,7 +29,7 @@ A Solana meme launchpad built on Anchor 0.31.1:
 | Holder rewards: `publish_reward_epoch` / `claim_holder_reward` (Merkle + bitmap, push or pull) | Done |
 | `expire_reward_epoch` (claim window fixed per epoch) | Done |
 | `scripts/`: deploy + init, launch/trade smoke test, reference crank (typechecked against the IDL) | Done, not yet run against a live cluster |
-| `app/`: web app, desktop with a phone layout below 768px (board, explore, launch, trading terminal, leaderboard, portfolio, search, live, holder rewards, $PARABULL hub) | Done on demo data; launches, trades and claims are wired to the program but not yet run against a live cluster |
+| `app/`: web app, desktop with a phone layout below 768px (board, explore, launch, trading terminal, leaderboard, portfolio, search, live, holder rewards, $PARABULL hub, admin console) | Done on demo data; launches, trades, claims and admin controls are wired to the program (tested against a mock RPC) but not yet run against a live cluster |
 | SBF build + devnet run against real Raydium; LP-fee amount source; holder snapshot job | Not started |
 
 ## Development
