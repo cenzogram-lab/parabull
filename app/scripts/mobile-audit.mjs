@@ -43,7 +43,7 @@ try {
 
   await page.goto(`${base}/?live=0`, { waitUntil: "networkidle" });
   const mint = (await page.locator('a[href^="/coin/"]').first().getAttribute("href"))?.split("/coin/")[1];
-  const routes = ["/", "/explore", "/leaderboard", "/portfolio", "/search", "/create", `/coin/${mint}`, "/parabull-token", "/holder-rewards", "/live"];
+  const routes = ["/", "/explore", "/leaderboard", "/portfolio", "/search", "/create", `/coin/${mint}`, "/parabull-token", "/holder-rewards", "/live", "/admin"];
 
   for (const route of routes) {
     errors = [];

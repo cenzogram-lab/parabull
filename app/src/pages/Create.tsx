@@ -15,12 +15,17 @@ import { useParabullProgram } from "../hooks/useParabullProgram";
 import { coinArt } from "../lib/art";
 import { canonicalTicker, nameHash, normalizeName, parseTweetId, socialLink, tweetIdHash } from "../lib/launchRules";
 import { checkUri, uploadMetadata } from "../lib/metadata";
-import { initialReserves, mcapSol, priceSol, PROTOCOL } from "../lib/protocol";
+import { durationLabel } from "../lib/protocolParams";
+import { initialReserves, mcapSol, priceSol } from "../lib/protocol";
 import { toHex } from "../lib/sha256";
 import type { Coin } from "../lib/types";
 import { SOL_USD } from "../mock/coins";
 import { useApp } from "../state/AppState";
 import { useMarket } from "../state/Market";
+import { useProtocol } from "../state/Protocol";
+
+/** "0.230 SOL": the ticket price as the launch flow shows it. */
+const solTicket = (lamports: bigint) => `${(Number(lamports) / 1e9).toFixed(3)} SOL`;
 
 type Phase = { step: "form" } | { step: "running"; at: number; delayMs: number; started: number; ticket?: string; signature?: string } | { step: "done"; mint: string; name: string } | { step: "failed"; error: string };
 
@@ -57,17 +62,12 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
   const [socials, setSocials] = useState({ website: "", x: "", telegram: "" });
   const [manualUri, setManualUri] = useState("");
   const [phase, setPhase] = useState<Phase>({ step: "form" });
-  const [fees, setFees] = useState<{ deposit: bigint; fee: bigint }>({ deposit: PROTOCOL.ticketDepositLamports, fee: PROTOCOL.launchFeeLamports });
+  // The ticket price and lock window in force: from Global in chain mode, the program defaults in demo mode.
+  const { params } = useProtocol();
+  const fees = { deposit: params.ticketDepositLamports, fee: params.launchFeeLamports };
+  const lockSeconds = params.registryLockSeconds;
+  const lockFor = durationLabel(lockSeconds);
   const fileInput = useRef<HTMLInputElement>(null);
-
-  // Chain mode: show the live ticket price from Global.
-  useEffect(() => {
-    if (isDemo) return;
-    client
-      .fetchGlobal()
-      .then((g) => g && setFees({ deposit: BigInt(g.ticketDepositLamports.toString()), fee: BigInt(g.launchFeeLamports.toString()) }))
-      .catch(() => undefined);
-  }, [client]);
 
   const t = canonicalTicker(ticker);
   const n = normalizeName(name);
@@ -89,7 +89,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
     const id = window.setTimeout(async () => {
       const locked = async (fetch: () => Promise<{ launchTimestamp: { toNumber: () => number } } | null>) => {
         const r = await fetch().catch(() => null);
-        return !!r && Date.now() / 1000 < r.launchTimestamp.toNumber() + PROTOCOL.registryLockSeconds;
+        return !!r && Date.now() / 1000 < r.launchTimestamp.toNumber() + lockSeconds;
       };
       setChainLocks({
         ticker: t.ok ? await locked(() => client.program.account.tickerRegistry.fetchNullable(client.pdas.tickerRegistry(t.value))) : false,
@@ -98,15 +98,15 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
       });
     }, 400);
     return () => window.clearTimeout(id);
-  }, [client, t.ok, t.ok ? t.value : "", hash ? toHex(hash) : "", tw?.ok ? tw.value.toString() : ""]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [client, lockSeconds, t.ok, t.ok ? t.value : "", hash ? toHex(hash) : "", tw?.ok ? tw.value.toString() : ""]); // eslint-disable-line react-hooks/exhaustive-deps
   const locks = isDemo ? demoLocks : chainLocks;
 
   const needsUri = !isDemo && !CONFIG.metadataUploadUrl;
   const uriError = needsUri && manualUri ? checkUri(manualUri) : null;
   const errors = {
-    name: name && !n.ok ? n.error : locks.name ? "This name (ignoring case, spaces and symbols) is locked for 3 days" : null,
-    ticker: ticker && !t.ok ? t.error : locks.ticker ? "This ticker is locked for 3 days" : null,
-    tweet: tw && !tw.ok ? tw.error : locks.tweet ? "This tweet already backed a launch in the last 3 days" : null,
+    name: name && !n.ok ? n.error : locks.name ? `This name (ignoring case, spaces and symbols) is locked for ${lockFor}` : null,
+    ticker: ticker && !t.ok ? t.error : locks.ticker ? `This ticker is locked for ${lockFor}` : null,
+    tweet: tw && !tw.ok ? tw.error : locks.tweet ? `This tweet already backed a launch in the last ${lockFor}` : null,
   };
   // Social links are creator input shown as links on the coin page: only http(s) URLs are accepted.
   const links = { website: socialLink(socials.website), x: socialLink(socials.x), telegram: socialLink(socials.telegram) };
@@ -117,7 +117,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
 
   const draft: Coin = useMemo(() => {
     const r = initialReserves();
-    const lock = Date.now() + PROTOCOL.registryLockSeconds * 1000;
+    const lock = Date.now() + lockSeconds * 1000;
     return {
       mint: "preview",
       name: name.trim() || "Your coin",
@@ -154,7 +154,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
       socials: {},
       hot: false,
     };
-  }, [name, t, image, description, tw, client.publicKey]);
+  }, [name, t, image, description, tw, client.publicKey, lockSeconds]);
 
   function pickFile(f: File | undefined) {
     if (!f || !f.type.startsWith("image/")) return;
@@ -187,7 +187,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
       const req = await client.requestLaunch({ name: name.trim(), symbol: t.value, uri, tweetId: tw?.ok ? tw.value : null });
       setPhase({ step: "running", at: 2, delayMs: 15000, started: Date.now(), ticket: req.ticket.toBase58(), signature: req.signature });
       const mint = await client.waitForLaunch(req.ticket, t.value, req.requestedAt);
-      if (!mint) throw new Error("The launch worker refunded your ticket (the metadata or tweet didn't pass its checks). The 0.230 SOL is back in your wallet.");
+      if (!mint) throw new Error(`The launch worker refunded your ticket (the metadata or tweet didn't pass its checks). The ${solTicket(fees.deposit)} is back in your wallet.`);
       sfx("launch");
       setPhase({ step: "done", mint: mint.toBase58(), name: name.trim() });
     } catch (e) {
@@ -359,8 +359,12 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
             {[
               [Ticket, "You pay the flat ticket", "request_launch stores a hash of the exact name, ticker and URI, so nothing can be swapped later."],
               [Clock, "Random 3-15 s anti-bundle delay", "The launch authority co-signs create with a fresh mint keypair at an unpredictable moment."],
-              [ShieldCheck, "Trading opens 2 slots after creation", "Nobody, including you, can buy in the creation block. Your first buy is an ordinary buy."],
-              [Lock, "Ticker, name and tweet lock for 3 days", "Copycats can't reuse them, enforced on-chain."],
+              [
+                ShieldCheck,
+                `Trading opens ${params.tradingOpenDelaySlots} slot${params.tradingOpenDelaySlots === 1 ? "" : "s"} after creation`,
+                "Nobody, including you, can buy in the creation block. Your first buy is an ordinary buy.",
+              ],
+              [Lock, `Ticker, name and tweet lock for ${lockFor}`, "Copycats can't reuse them, enforced on-chain."],
             ].map(([Icon, title, body], i) => {
               const I = Icon as typeof Ticket;
               return (
@@ -383,6 +387,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
 }
 
 function LaunchProgress({ phase, onReset, onView }: { phase: Exclude<Phase, { step: "form" }>; onReset: () => void; onView: (mint: string) => void }) {
+  const { ticketDepositLamports: ticketLamports, tradingOpenDelaySlots: openDelay } = useProtocol().params;
   const [tick, setTick] = useState(Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setTick(Date.now()), 100);
@@ -392,9 +397,9 @@ function LaunchProgress({ phase, onReset, onView }: { phase: Exclude<Phase, { st
   const elapsed = phase.step === "running" && phase.at === 2 ? (tick - phase.started) / 1000 : 0;
   const steps = [
     ["Uploading metadata", isDemo ? "Pinned" : "Image and JSON pinned"],
-    ["Paying launch ticket", "0.230 SOL escrowed in your ticket"],
+    ["Paying launch ticket", `${solTicket(ticketLamports)} escrowed in your ticket`],
     ["Anti-bundle delay", "Launch authority co-signs at a random moment (3-15 s)"],
-    ["Coin is live", "Trading opens 2 slots after creation"],
+    ["Coin is live", `Trading opens ${openDelay} slot${openDelay === 1 ? "" : "s"} after creation`],
   ];
   return (
     <div className="relative overflow-hidden p-10 max-md:px-4 max-md:py-8">

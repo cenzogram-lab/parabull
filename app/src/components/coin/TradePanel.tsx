@@ -5,16 +5,16 @@ import { useMemo, useState } from "react";
 import { explorer, isDemo } from "../../config";
 import { useParabullProgram } from "../../hooks/useParabullProgram";
 import { compact, pct, sol, tokens as fmtTokens, usd, usdCompact } from "../../lib/format";
-import { PROTOCOL } from "../../lib/protocol";
+import { bpsLabel } from "../../lib/protocolParams";
 import type { Coin } from "../../lib/types";
 import { useApp } from "../../state/AppState";
 import { raydiumSell, useMarket } from "../../state/Market";
+import { useProtocol } from "../../state/Protocol";
 import { cx, Popover } from "../ui/primitives";
 import { RatioBar } from "../ui/visuals";
 
 const BUY_PRESETS = [0.1, 0.5, 1, 5];
 const SELL_PRESETS = [25, 50, 100];
-const FEE_BPS = PROTOCOL.platformFeeBps;
 
 /**
  * Buy / Sell ticket. The mobile trade sheet opens it on the side that was
@@ -26,6 +26,9 @@ export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced 
   const { setVisible } = useWalletModal();
   const { demoTrade, positions, solUsd } = useMarket();
   const { toast, sfx } = useApp();
+  // The fee the program charges: from Global in chain mode, the 1% default in demo mode.
+  const { params } = useProtocol();
+  const feeBps = BigInt(params.platformFeeBps);
   const [side, setSide] = useState<"buy" | "sell">(initialSide);
   const [unit, setUnit] = useState<"SOL" | "USD">("SOL");
   const [amount, setAmount] = useState("0.5");
@@ -44,8 +47,8 @@ export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced 
   }, [amount, unit, solUsd]);
   const sellTokens = (held * BigInt(sellPct)) / 100n;
 
-  const buyQ = useMemo(() => (side === "buy" && !coin.migrated ? client.quoteBuyWithSol(coin.reserves, lamports, FEE_BPS, slippageBps) : null), [side, coin, lamports, slippageBps, client]);
-  const sellQ = useMemo(() => (side === "sell" && !coin.migrated ? client.quoteSellTokens(coin.reserves, sellTokens, FEE_BPS, slippageBps) : null), [side, coin, sellTokens, slippageBps, client]);
+  const buyQ = useMemo(() => (side === "buy" && !coin.migrated ? client.quoteBuyWithSol(coin.reserves, lamports, feeBps, slippageBps) : null), [side, coin, lamports, feeBps, slippageBps, client]);
+  const sellQ = useMemo(() => (side === "sell" && !coin.migrated ? client.quoteSellTokens(coin.reserves, sellTokens, feeBps, slippageBps) : null), [side, coin, sellTokens, feeBps, slippageBps, client]);
   // Graduated coins trade on Raydium; the estimate uses the pool price, and a sale is quoted as it will book (raydiumSell).
   const poolEstimate = coin.migrated ? (side === "buy" ? (Number(lamports) / 1e9) * solUsd * 0.99 / coin.priceUsd : raydiumSell(coin, Number(sellTokens) / 1e6).usd) : 0;
 
@@ -189,7 +192,7 @@ export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced 
               <dd className={cx("num", ((buyQ ?? sellQ)?.priceImpact ?? 0) > 0.05 ? "text-ember" : "text-cream")}>{pct((buyQ ?? sellQ)?.priceImpact ?? 0, 2, false)}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-muted">Platform fee (1%) · creator fee 0%</dt>
+              <dt className="text-muted">{`Platform fee (${bpsLabel(params.platformFeeBps)}) · creator fee 0%`}</dt>
               <dd className="num text-cream">{sol((buyQ ?? sellQ)?.fee ?? 0n, 4)}</dd>
             </div>
             <div className="flex justify-between">

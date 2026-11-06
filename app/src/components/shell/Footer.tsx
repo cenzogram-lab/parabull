@@ -1,10 +1,11 @@
 import { Send } from "lucide-react";
 import { isDemo } from "../../config";
-import { useMarket } from "../../state/Market";
+import { useProtocol } from "../../state/Protocol";
 import { XLogo } from "../brand/Wordmark";
 
 export function Footer() {
-  const { solUsd } = useMarket();
+  // The live SOL/USD in chain mode; the fixed demo price in demo mode.
+  const solUsd = useProtocol().solUsd.price;
   return (
     // Grows by the bottom safe area, so a phone in landscape keeps the links clear of the home indicator (env() is 0 in desktop browsers).
     <footer className="hidden md:flex h-[calc(2.5rem+env(safe-area-inset-bottom))] shrink-0 items-center gap-6 border-t border-line bg-canvas px-5 pb-[env(safe-area-inset-bottom)] text-[12.5px] text-muted">

@@ -1,7 +1,7 @@
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { BrowserRouter, Navigate, NavigationType, Outlet, Route, Routes, useLocation, useNavigate, useNavigationType, type Location } from "react-router-dom";
 import { MobileCreateFab } from "./components/mobile/MobileCreateFab";
 import { MobileFootnote } from "./components/mobile/MobileFootnote";
@@ -30,6 +30,10 @@ import { SearchPage } from "./pages/Search";
 import { TokenHub } from "./pages/TokenHub";
 import { AppStateProvider, useApp } from "./state/AppState";
 import { MarketProvider } from "./state/Market";
+import { ProtocolProvider } from "./state/Protocol";
+
+// Loaded on first visit: only the admin and crank wallets use it, so it stays out of everyone else's bundle.
+const AdminConsole = lazy(() => import("./pages/AdminConsole"));
 
 /**
  * On mobile, search is the /search page: anything that opens the desktop palette (such as ⌘K) goes there instead.
@@ -122,6 +126,14 @@ function AppRoutes() {
           <Route path="holder-rewards" element={<HolderRewards />} />
           <Route path="parabull-token" element={<TokenHub />} />
           <Route path="rewards" element={<Navigate to="/parabull-token" replace />} />
+          <Route
+            path="admin"
+            element={
+              <Suspense fallback={<div className="min-h-[60vh]" aria-busy="true" />}>
+                <AdminConsole />
+              </Suspense>
+            }
+          />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>
@@ -142,13 +154,15 @@ export function App() {
     <ConnectionProvider endpoint={CONFIG.rpcUrl}>
       <WalletProvider wallets={wallets} autoConnect>
         <WalletModalProvider>
-          <AppStateProvider>
-            <MarketProvider>
-              <BrowserRouter>
-                <AppRoutes />
-              </BrowserRouter>
-            </MarketProvider>
-          </AppStateProvider>
+          <ProtocolProvider>
+            <AppStateProvider>
+              <MarketProvider>
+                <BrowserRouter>
+                  <AppRoutes />
+                </BrowserRouter>
+              </MarketProvider>
+            </AppStateProvider>
+          </ProtocolProvider>
         </WalletModalProvider>
       </WalletProvider>
     </ConnectionProvider>

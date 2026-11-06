@@ -6,7 +6,7 @@
 import { useCallback, useMemo } from "react";
 import { AnchorProvider, BN, Program, type Wallet } from "@coral-xyz/anchor";
 import { useAnchorWallet, useConnection } from "@solana/wallet-adapter-react";
-import { PublicKey, SystemProgram, type Transaction, type VersionedTransaction } from "@solana/web3.js";
+import { PublicKey, SystemProgram, type Connection, type Transaction, type VersionedTransaction } from "@solana/web3.js";
 import { CONFIG } from "../config";
 import idlJson from "../idl/parabull.json";
 import type { Parabull } from "../idl/parabull";
@@ -25,6 +25,9 @@ const READ_ONLY: Wallet = {
     throw new Error("Connect a wallet to sign");
   },
 } as unknown as Wallet;
+
+/** A program client that can only read: for app-wide state that shouldn't wait for, or change with, the wallet. */
+export const readOnlyProgram = (connection: Connection) => new Program<Parabull>(idl, new AnchorProvider(connection, READ_ONLY, { commitment: "confirmed" }));
 
 const bn = (v: bigint | number) => new BN(v.toString());
 

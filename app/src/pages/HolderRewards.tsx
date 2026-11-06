@@ -5,38 +5,43 @@ import { ParabullCoin } from "../components/brand/Wordmark";
 import { cx } from "../components/ui/primitives";
 import { CoinAvatar, StatTile } from "../components/ui/visuals";
 import { useIsMobile } from "../hooks/useMediaQuery";
+import { BPS, bpsLabel, durationLabel, splitLabel } from "../lib/protocolParams";
 import { compact, pct, usdCompact } from "../lib/format";
-import { PROTOCOL } from "../lib/protocol";
 import { SOL_USD } from "../mock/coins";
 import { DEMO_WALLET, walletEpochs } from "../mock/protocol";
 import { useMarket } from "../state/Market";
+import { useProtocol } from "../state/Protocol";
 
 const DAY = 86_400_000;
-const INTRO = "40% of every platform fee, once a coin's DexScreener listing fund is full, goes to $PARABULL holders. It's paid in SOL through weekly snapshot epochs you claim with a Merkle proof.";
 
 export function HolderRewards() {
   const { coins } = useMarket();
   const isMobile = useIsMobile();
+  // The fee, split, listing target and claim window in force: from Global in chain mode, the defaults in demo mode.
+  const { params, dexTargetUsd } = useProtocol();
+  const target = Math.round(dexTargetUsd);
+  const INTRO = `${bpsLabel(params.holderBps)} of every platform fee, once a coin's DexScreener listing fund is full, goes to $PARABULL holders. It's paid in SOL through weekly snapshot epochs you claim with a Merkle proof.`;
   const epochs = walletEpochs(DEMO_WALLET);
   const totalSol = epochs.reduce((n, e) => n + Number(e.totalLamports) / 1e9, 0);
   const usdThen = epochs.reduce((n, e) => n + (Number(e.totalLamports) / 1e9) * e.solPriceAtPublish, 0);
   const wallets = epochs.reduce((n, e) => n + e.numLeaves, 0);
-  const share = PROTOCOL.holderBps / 10_000;
+  const share = params.holderBps / BPS;
+  const feeRate = params.platformFeeBps / BPS;
 
-  // Coins whose 1% fees funded the most holder rewards (after their DexScreener escrow filled).
+  // Coins whose platform fees funded the most holder rewards (after their DexScreener escrow filled).
   const payers = useMemo(() => {
     const rows = coins
       .map((c) => {
         const days = Math.min(30, Math.max(1, (Date.now() - c.createdAt) / DAY));
-        const feesUsd = c.vol24hUsd * days * 0.6 * (Number(PROTOCOL.platformFeeBps) / 10_000);
-        const toHolders = Math.max(0, feesUsd - PROTOCOL.dexListingUsd) * share;
+        const feesUsd = c.vol24hUsd * days * 0.6 * feeRate;
+        const toHolders = Math.max(0, feesUsd - target) * share;
         return { c, toHolders, trades: Math.round((c.buys24h + c.sells24h) * days * 0.6) };
       })
       .filter((r) => r.toHolders > 0)
       .sort((a, b) => b.toHolders - a.toHolders);
     const sum = rows.reduce((n, r) => n + r.toHolders, 0);
     return rows.slice(0, 20).map((r) => ({ ...r, share: r.toHolders / sum }));
-  }, [coins, share]);
+  }, [coins, share, feeRate, target]);
 
   return (
     <div className="mx-auto max-w-[1400px] px-8 py-6 max-md:px-4 max-md:py-4">
@@ -151,10 +156,16 @@ export function HolderRewards() {
           </h3>
           <ol className="mt-4 space-y-4 text-[13px]">
             {[
-              ["1% platform fee", "On every bonding-curve trade. Creators pay and earn 0%."],
-              ["$299 listing fund first", "Each coin's first fees fill its DexScreener escrow, released to the treasury to pay for the listing."],
-              ["Then 50 / 40 / 10", "50% buys back and burns $PARABULL, 40% goes to $PARABULL holders, 10% to the treasury."],
-              ["Weekly epochs", "A snapshot of $PARABULL balances becomes a Merkle root on-chain. The crank pushes payouts, or you claim yourself, within 30 days; unclaimed rewards then fund later epochs."],
+              [`${bpsLabel(params.platformFeeBps)} platform fee`, "On every bonding-curve trade. Creators pay and earn 0%."],
+              [`$${target} listing fund first`, "Each coin's first fees fill its DexScreener escrow, released to the treasury to pay for the listing."],
+              [
+                `Then ${splitLabel(params)}`,
+                `${bpsLabel(params.buybackBps)} buys back and burns $PARABULL, ${bpsLabel(params.holderBps)} goes to $PARABULL holders, ${bpsLabel(BPS - params.buybackBps - params.holderBps)} to the treasury.`,
+              ],
+              [
+                "Weekly epochs",
+                `A snapshot of $PARABULL balances becomes a Merkle root on-chain. The crank pushes payouts, or you claim yourself, within ${durationLabel(params.rewardClaimWindowSeconds)}; unclaimed rewards then fund later epochs.`,
+              ],
             ].map(([t, b], i) => (
               <li key={t} className="flex gap-3">
                 <span className="metal-copper flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] font-bold text-canvas">{i + 1}</span>
