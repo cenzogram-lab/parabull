@@ -16,7 +16,7 @@ import { payloadDigest } from "./auth";
 import type { ChainSource, CurveState } from "./chain";
 import { graduationRaise } from "./milestones";
 import type { MentionTweet } from "./replies";
-import { keyFromSecret } from "./seal";
+import { keyFromSecret, seal, secretProblem, unseal } from "./seal";
 import { Sentinel } from "./sentinel";
 import { createApi } from "./server";
 import { Store } from "./store";
@@ -217,4 +217,24 @@ test("unsigned, stale, replayed and forged writes are refused before any RPC cal
   } finally {
     await h.stop();
   }
+});
+
+test("SENTINEL_SECRET: at least 32 characters, sealing is mint-bound and tamper-evident", () => {
+  assert.equal(secretProblem(undefined), null, "unset just turns creator sessions off");
+  assert.equal(secretProblem(""), null);
+  assert.match(secretProblem("too-short-secret")!, /only 16 characters/, "set but short refuses to start");
+  assert.equal(secretProblem("x".repeat(32)), null);
+  assert.equal(keyFromSecret("x".repeat(31)), null);
+  const key = keyFromSecret("correct horse battery staple, 32+ chars")!;
+  const mint = Keypair.generate().publicKey.toBase58();
+  const session: XSession = { username: "ParabullBot", authToken: "a".repeat(40), ct0: "b".repeat(64) };
+  const sealed = seal(key, mint, session);
+  assert.ok(!Buffer.from(sealed, "base64").toString("latin1").includes("aaaa"), "ciphertext only");
+  assert.notEqual(seal(key, mint, session), sealed, "a fresh IV each time");
+  assert.deepEqual(unseal(key, mint, sealed), session);
+  assert.throws(() => unseal(key, Keypair.generate().publicKey.toBase58(), sealed), "bound to its mint");
+  assert.throws(() => unseal(keyFromSecret("y".repeat(40))!, mint, sealed), "the wrong key can't open it");
+  const raw = Buffer.from(sealed, "base64");
+  raw[raw.length - 1] ^= 1;
+  assert.throws(() => unseal(key, mint, raw.toString("base64")), "a flipped bit is detected");
 });

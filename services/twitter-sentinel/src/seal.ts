@@ -7,10 +7,22 @@ import type { XSession } from "../../../app/src/lib/sentinelMessage";
 
 export type Key = Buffer;
 
+export const MIN_SECRET_LENGTH = 32;
+
 /** A 32-byte key from any secret of at least 32 characters. */
 export function keyFromSecret(secret: string | undefined): Key | null {
-  if (!secret || secret.length < 32) return null;
+  if (!secret || secret.length < MIN_SECRET_LENGTH) return null;
   return createHash("sha256").update(`parabull-sentinel:${secret}`).digest();
+}
+
+/**
+ * Why `SENTINEL_SECRET` can't be used, or null when it's fine or unset. Unset only turns creator sessions off; a value
+ * that is set but too short is a mistake, so the service refuses to start instead of quietly running without it.
+ */
+export function secretProblem(secret: string | undefined): string | null {
+  if (secret === undefined || secret === "") return null;
+  if (secret.length < MIN_SECRET_LENGTH) return `SENTINEL_SECRET is set but only ${secret.length} characters long; use at least ${MIN_SECRET_LENGTH} random characters (e.g. openssl rand -base64 48), or unset it to turn creator sessions off`;
+  return null;
 }
 
 /** Base64 of iv (12) || tag (16) || ciphertext. The mint is bound in as associated data, so a sealed session can't be moved to another coin. */

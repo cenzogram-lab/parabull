@@ -209,6 +209,26 @@ test("SOL/USD: first plausible source wins, bad answers fall through, all failin
   assert.equal(await fetchSolUsd(sources, fake({ a: new Error("x"), b: { nope: 1 } })), null);
 });
 
+test("SOL/USD: rate limits, hung requests and bad JSON fall through without throwing", async () => {
+  const src = (name: string): PriceSource => ({ name, url: name, read: (j) => (j as { p?: number }).p });
+  let aborted = 0;
+  const fetchImpl = (async (url: string, init?: RequestInit) => {
+    if (url === "ratelimited") return { ok: false, status: 429, json: async () => ({ p: 999 }) } as Response;
+    if (url === "hangs")
+      // Never answers; only the timeout's abort ends it.
+      return new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => (aborted++, reject(new DOMException("aborted", "AbortError")))));
+    if (url === "badjson") return { ok: true, json: async () => JSON.parse("<html>") } as Response;
+    return { ok: true, json: async () => ({ p: 150 }) } as Response;
+  }) as unknown as typeof fetch;
+
+  const t0 = Date.now();
+  assert.deepEqual(await fetchSolUsd([src("ratelimited"), src("hangs"), src("badjson"), src("good")], fetchImpl, 50), { price: 150, source: "good" });
+  assert.equal(aborted, 1, "the hung request was aborted by the timeout");
+  assert.ok(Date.now() - t0 < 2_000, "a hung source costs one timeout, not forever");
+  // Every source failing resolves to null (the provider keeps its fallback price); it never rejects.
+  assert.equal(await fetchSolUsd([src("ratelimited"), src("hangs"), src("badjson")], fetchImpl, 50), null);
+});
+
 test("SOL/USD: the real sources read their documented shapes", async () => {
   const { PRICE_SOURCES, WSOL_MINT } = await import("../src/lib/price");
   const [jup, gecko] = PRICE_SOURCES;
