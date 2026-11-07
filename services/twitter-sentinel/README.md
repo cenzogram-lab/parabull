@@ -47,7 +47,8 @@ keys or fees. A coin's account comes from one of two places, the creator's first
    - The session is sealed with AES-256-GCM under a key from `SENTINEL_SECRET`, bound to its mint, and stored in
      `data/sentinel.json` (written with mode 600).
    - It is never returned by the API. Replacing it swaps the coin's X client in place; disconnecting deletes it.
-   - Without `SENTINEL_SECRET`, the service refuses creator sessions.
+   - Without `SENTINEL_SECRET`, the service refuses creator sessions. If it's set but shorter than 32 characters,
+     the service won't start, so a weak secret can't be used by mistake.
 2. **Set up by the operator** in `accounts.json` (git-ignored), keyed by mint:
 
 ```json
@@ -77,7 +78,7 @@ Things to know before running it live:
 | `SENTINEL_PORT` | `8787` | HTTP port |
 | `SENTINEL_RPC_URL` | devnet | Solana RPC for the Parabull program (the IDL's address) |
 | `SENTINEL_ACCOUNTS` | `./accounts.json` | X accounts by mint (see above) |
-| `SENTINEL_SECRET` | unset | At least 32 characters. Seals the X sessions creators link; unset, creators can't link one |
+| `SENTINEL_SECRET` | unset | At least 32 random characters (e.g. `openssl rand -base64 48`). Seals the X sessions creators link; unset, creators can't link one; set but shorter, the service won't start |
 | `SENTINEL_DATA_DIR` | `./data` | Where settings and progress are kept |
 | `SENTINEL_SITE_URL` | unset | Base URL for coin links in posts, e.g. `https://parabull.app` |
 | `SENTINEL_ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated origins allowed to call the API (CORS) |

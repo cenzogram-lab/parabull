@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { Connection } from "@solana/web3.js";
 import { XRegistry } from "./accounts";
 import { Chain } from "./chain";
-import { keyFromSecret } from "./seal";
+import { keyFromSecret, secretProblem } from "./seal";
 import { Sentinel } from "./sentinel";
 import { createApi } from "./server";
 import { Store } from "./store";
@@ -38,6 +38,11 @@ function loadAccounts(): Record<string, XAccount> {
 const operator = loadAccounts();
 const log = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
 /** Seals creator-linked sessions; without it, creators can't link an account from the app. */
+const secretIssue = secretProblem(env.SENTINEL_SECRET);
+if (secretIssue) {
+  console.error(secretIssue);
+  process.exit(1);
+}
 const key = keyFromSecret(env.SENTINEL_SECRET);
 
 const store = new Store(config.dataDir);

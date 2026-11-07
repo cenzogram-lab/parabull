@@ -6,10 +6,12 @@
  * says the sentinel is off. On a phone it opens as a bottom sheet, like the app's other phone dialogs.
  */
 import { useWallet } from "@solana/wallet-adapter-react";
+import { PublicKey } from "@solana/web3.js";
 import { AlertTriangle, Loader2, PlugZap, RefreshCw, Unplug } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isDemo } from "../../config";
 import { useIsMobile } from "../../hooks/useMediaQuery";
+import { useParabullProgram } from "../../hooks/useParabullProgram";
 import { canonicalSettingsJson, CONTEXT_MAX, DEFAULT_SETTINGS, normalizeSession, SENTINEL_MILESTONES, SENTINEL_TONES, type SentinelSettings, type SentinelStatus } from "../../lib/sentinelMessage";
 import type { Coin } from "../../lib/types";
 import { useApp } from "../../state/AppState";
@@ -19,10 +21,37 @@ import { Modal } from "../ui/overlay";
 import { cx } from "../ui/primitives";
 import { disconnectSentinel, fetchSentinelStatus, saveSentinelSettings, sentinelConfigured } from "./sentinelClient";
 
-/** True only when a wallet is connected and it is the coin's creator. */
+/**
+ * True only when a wallet is connected and it is the coin's creator. In chain mode that is the `creator` recorded on
+ * the coin's bonding curve (the wallet that paid the launch ticket), read from the chain, not the coin list, which is
+ * still demo data; a coin with no curve on-chain has no creator. Demo mode compares with the demo coin's creator. The
+ * sentinel checks the on-chain creator again for every signed change; this only decides whether the button shows.
+ */
 function useIsCreator(coin: Coin) {
   const { publicKey } = useWallet();
-  return !!publicKey && publicKey.toBase58() === coin.creator;
+  const { fetchCurve } = useParabullProgram();
+  const wallet = publicKey?.toBase58() ?? null;
+  const [onChain, setOnChain] = useState<{ mint: string; creator: string | null } | null>(null);
+  useEffect(() => {
+    if (isDemo || !wallet) return;
+    let mint: PublicKey;
+    try {
+      mint = new PublicKey(coin.mint);
+    } catch {
+      return setOnChain({ mint: coin.mint, creator: null });
+    }
+    let live = true;
+    fetchCurve(mint).then(
+      (c) => live && setOnChain({ mint: coin.mint, creator: c ? c.creator.toBase58() : null }),
+      () => live && setOnChain({ mint: coin.mint, creator: null }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [coin.mint, wallet, fetchCurve]);
+  if (!wallet) return false;
+  if (isDemo) return wallet === coin.creator;
+  return onChain?.mint === coin.mint && onChain.creator === wallet;
 }
 
 /** What the button's badge says about the sentinel for this coin. */
