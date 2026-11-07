@@ -25,6 +25,9 @@ const RPC_PROVIDERS = [
   "wss://*.helius-rpc.com",
   "https://*.quiknode.pro",
   "wss://*.quiknode.pro",
+  // Triton One
+  "https://*.rpcpool.com",
+  "wss://*.rpcpool.com",
 ];
 
 /** SOL/USD price APIs (src/lib/price.ts). */

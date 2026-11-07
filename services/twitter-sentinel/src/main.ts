@@ -5,7 +5,7 @@ import { XRegistry } from "./accounts";
 import { Chain } from "./chain";
 import { keyFromSecret, secretProblem } from "./seal";
 import { Sentinel } from "./sentinel";
-import { createApi } from "./server";
+import { createApi, DEFAULT_LIMITS } from "./server";
 import { Store } from "./store";
 import { CookieX, DryRunX, type XAccount } from "./x";
 
@@ -23,6 +23,12 @@ const config = {
   allowedOrigins: (env.SENTINEL_ALLOWED_ORIGINS ?? "http://localhost:5173").split(",").map((s) => s.trim()).filter(Boolean),
   curvePollSeconds: num(env.SENTINEL_CURVE_POLL_SECONDS, 60),
   mentionPollSeconds: num(env.SENTINEL_MENTION_POLL_SECONDS, 180),
+  /** Set to "1" when a reverse proxy sits in front, so clients are told apart by the address it forwards. */
+  trustProxy: env.SENTINEL_TRUST_PROXY === "1",
+  limits: {
+    writesPerClientPerMinute: num(env.SENTINEL_WRITES_PER_MINUTE, DEFAULT_LIMITS.writesPerClientPerMinute),
+    chainReadsPerMinute: num(env.SENTINEL_RPC_READS_PER_MINUTE, DEFAULT_LIMITS.chainReadsPerMinute),
+  },
 };
 
 /** accounts.json: { "<mint>": { "username", "authToken", "ct0", "guestId"? } }. Operator-managed; a session a creator links from the app takes precedence. */
@@ -49,7 +55,7 @@ const store = new Store(config.dataDir);
 const accounts = new XRegistry({ store, key, operator, make: (a) => (config.dryRun ? new DryRunX(a.username, log) : new CookieX(a)), log });
 const chain = new Chain(new Connection(config.rpcUrl, "confirmed"));
 const sentinel = new Sentinel({ store, chain, xFor: (mint) => accounts.for(mint), coinUrl: (mint) => (config.siteUrl ? `${config.siteUrl}/coin/${mint}` : ""), log });
-const api = createApi({ store, chain, sentinel, accounts, dryRun: config.dryRun, allowedOrigins: config.allowedOrigins, log });
+const api = createApi({ store, chain, sentinel, accounts, dryRun: config.dryRun, allowedOrigins: config.allowedOrigins, limits: config.limits, trustProxy: config.trustProxy, log });
 
 for (const mint of store.mints()) sentinel.watch(mint);
 const curveTimer = setInterval(() => void sentinel.tick(), config.curvePollSeconds * 1000);

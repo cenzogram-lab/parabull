@@ -35,6 +35,8 @@ test("IC hosting: connect-src covers the configured endpoints, hosted RPCs, webs
     "wss://*.helius-rpc.com",
     "https://*.quiknode.pro",
     "wss://*.quiknode.pro",
+    "https://*.rpcpool.com",
+    "wss://*.rpcpool.com",
     "https://lite-api.jup.ag",
     "https://api.coingecko.com",
     "ws://localhost:*",

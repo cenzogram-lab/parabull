@@ -260,7 +260,7 @@ no security headers of its own.
   - A **Content-Security-Policy** (`script-src 'self'`, no `eval`, `frame-ancestors 'none'`). Its `connect-src`
     allows:
     - the build's own RPC (plus the websocket web3.js derives from it: `wss://`, or port + 1);
-    - `api.devnet` / `api.mainnet-beta.solana.com`, Helius and QuickNode (HTTPS and WSS);
+    - `api.devnet` / `api.mainnet-beta.solana.com`, Helius, QuickNode and Triton (`*.rpcpool.com`) (HTTPS and WSS);
     - the sentinel, metadata-upload and rewards URLs when they are set;
     - the Jupiter and CoinGecko price APIs;
     - Solflare and the Mobile Wallet Adapter's local socket.

@@ -4,7 +4,8 @@
  *   GET    /api/sentinel/:mint/settings   status and settings; never any session cookies
  *   PUT    /api/sentinel/:mint/settings   settings, and optionally a new X session, signed by the coin's creator
  *   DELETE /api/sentinel/:mint/settings   stop watching the coin and forget its session, signed by the creator
- * Writes are signed requests (app/src/lib/sentinelMessage.ts), checked against the curve's on-chain creator.
+ * Writes are signed requests (app/src/lib/sentinelMessage.ts), checked against the curve's on-chain creator. They are
+ * rate-limited per client, and the curve reads they cause have a global ceiling, so signed spam can't drain the RPC.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { PublicKey } from "@solana/web3.js";
@@ -13,6 +14,7 @@ import { AccountError, type XRegistry } from "./accounts";
 import { NOT_CREATOR, verifySignedDisconnect, verifySignedSettings } from "./auth";
 import type { ChainSource } from "./chain";
 import type { Sentinel } from "./sentinel";
+import { RateLimiter } from "./rateLimit";
 import type { Store } from "./store";
 
 export interface ServerDeps {
@@ -26,7 +28,19 @@ export interface ServerDeps {
   allowedOrigins: string[];
   now?: () => number;
   log?: (line: string) => void;
+  limits?: Partial<ApiLimits>;
+  /** Behind a reverse proxy: identify clients by the last X-Forwarded-For entry (the one the proxy added). */
+  trustProxy?: boolean;
 }
+
+export interface ApiLimits {
+  /** PUT/DELETE requests one client may make per minute. */
+  writesPerClientPerMinute: number;
+  /** Curve reads all writes together may cause per minute (the RPC budget). */
+  chainReadsPerMinute: number;
+}
+
+export const DEFAULT_LIMITS: ApiLimits = { writesPerClientPerMinute: 20, chainReadsPerMinute: 120 };
 
 const MAX_BODY = 16 * 1024;
 
@@ -63,6 +77,17 @@ function validMint(s: string) {
 export function createApi(deps: ServerDeps): Server {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => {});
+  const limits = { ...DEFAULT_LIMITS, ...deps.limits };
+  const writes = new RateLimiter(limits.writesPerClientPerMinute, 60_000, now);
+  const chainReads = new RateLimiter(limits.chainReadsPerMinute, 60_000, now);
+  const clientOf = (req: IncomingMessage) => {
+    if (deps.trustProxy) {
+      const xff = req.headers["x-forwarded-for"];
+      const last = (Array.isArray(xff) ? xff.join(",") : (xff ?? "")).split(",").map((s) => s.trim()).filter(Boolean).pop();
+      if (last) return last;
+    }
+    return req.socket.remoteAddress ?? "unknown";
+  };
   const status = (mint: string): SentinelStatus => {
     const rec = deps.store.get(mint);
     const source = deps.accounts.source(mint);
@@ -85,8 +110,8 @@ export function createApi(deps: ServerDeps): Server {
       res.setHeader("Access-Control-Allow-Methods", "GET, PUT, DELETE, OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     }
-    const send = (code: number, body: unknown) => {
-      res.writeHead(code, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    const send = (code: number, body: unknown, headers: Record<string, string> = {}) => {
+      res.writeHead(code, { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers });
       res.end(JSON.stringify(body));
     };
     try {
@@ -99,11 +124,19 @@ export function createApi(deps: ServerDeps): Server {
       if (!validMint(mint)) return send(400, { error: "not a mint address" });
       if (req.method === "GET") return send(200, status(mint));
       if (req.method !== "PUT" && req.method !== "DELETE") return send(405, { error: "method not allowed" });
+      const tooMany = (waitMs: number) => {
+        const s = Math.max(1, Math.ceil(waitMs / 1000));
+        return send(429, { error: `too many requests; try again in ${s}s` }, { "Retry-After": String(s) });
+      };
+      const wait = writes.take(clientOf(req));
+      if (wait) return tooMany(wait);
 
       const body = await readBody(req);
       // The signature, timestamp and replay checks need no RPC, so they run first: unsigned, stale, replayed or forged
       // requests never reach the chain. Only a validly signed request reads the curve, to learn its on-chain creator.
       const creatorOf = async (signer: string) => {
+        const waitRead = chainReads.take("rpc");
+        if (waitRead) return { error: tooMany(waitRead) };
         const curve = await deps.chain.curve(mint);
         if (!curve) return { error: send(404, { error: "no Parabull bonding curve for this mint" }) };
         if (curve.creator !== signer) return { error: send(NOT_CREATOR.status, { error: NOT_CREATOR.error }) };

@@ -18,7 +18,7 @@ import { graduationRaise } from "./milestones";
 import type { MentionTweet } from "./replies";
 import { keyFromSecret, seal, secretProblem, unseal } from "./seal";
 import { Sentinel } from "./sentinel";
-import { createApi } from "./server";
+import { createApi, type ApiLimits } from "./server";
 import { Store } from "./store";
 import { DryRunX } from "./x";
 
@@ -26,7 +26,7 @@ const RAISE = graduationRaise({ virtualToken: 1_073_000_000_000_000n, virtualSol
 const at = (f: number, migrated = false): Omit<CurveState, "creator"> => ({ realSol: (RAISE * BigInt(Math.round(f * 1000)) + 999n) / 1000n, complete: f >= 1, migrated });
 const cookie = (c: string) => c.repeat(40);
 
-function harness(opts: { secret?: string; operatorUsername?: string } = {}) {
+function harness(opts: { secret?: string; operatorUsername?: string; limits?: Partial<ApiLimits>; trustProxy?: boolean } = {}) {
   const creator = Keypair.generate();
   const mint = Keypair.generate().publicKey.toBase58();
   const operator = opts.operatorUsername ? { [mint]: { username: opts.operatorUsername, authToken: cookie("e"), ct0: cookie("f") } } : {};
@@ -57,7 +57,7 @@ function harness(opts: { secret?: string; operatorUsername?: string } = {}) {
     },
   });
   const sentinel = new Sentinel({ store, chain, xFor: (m) => accounts.for(m), coinUrl: (m) => `https://parabull.app/coin/${m}`, now, log: () => {} });
-  const api = createApi({ store, chain, sentinel, accounts, dryRun: true, allowedOrigins: ["https://parabull.app"], now });
+  const api = createApi({ store, chain, sentinel, accounts, dryRun: true, allowedOrigins: ["https://parabull.app"], now, limits: opts.limits, trustProxy: opts.trustProxy });
   const signed = (action: "update settings" | "disconnect", settings: SentinelSettings | null, session: XSession | null, signer: Keypair, issuedAt: string) =>
     Buffer.from(ed25519.sign(new TextEncoder().encode(sentinelMessage(action, mint, issuedAt, payloadDigest(settings, session ? { ...session, username: session.username.replace(/^@/, "") } : null))), signer.secretKey.slice(0, 32))).toString("base64");
   let base = "";
@@ -77,9 +77,10 @@ function harness(opts: { secret?: string; operatorUsername?: string } = {}) {
     },
     stop: () => (sentinel.stop(), new Promise((ok) => api.close(ok))),
     get: async () => (await (await fetch(base)).json()) as SentinelStatus,
-    put(settings: SentinelSettings, session: XSession | null = null, signer = creator, issuedAt = new Date(clock).toISOString()) {
+    getText: async () => (await fetch(base)).text(),
+    put(settings: SentinelSettings, session: XSession | null = null, signer = creator, issuedAt = new Date(clock).toISOString(), headers: Record<string, string> = {}) {
       const body = { settings, ...(session ? { session } : {}), issuedAt, signer: signer.publicKey.toBase58(), signature: signed("update settings", settings, session, signer, issuedAt) };
-      return fetch(base, { method: "PUT", headers: { "Content-Type": "application/json", Origin: "https://parabull.app" }, body: JSON.stringify(body) });
+      return fetch(base, { method: "PUT", headers: { "Content-Type": "application/json", Origin: "https://parabull.app", ...headers }, body: JSON.stringify(body) });
     },
     del(signer = creator, issuedAt = new Date(clock).toISOString()) {
       const body = { issuedAt, signer: signer.publicKey.toBase58(), signature: signed("disconnect", null, null, signer, issuedAt) };
@@ -114,6 +115,10 @@ test("a creator links, updates and disconnects X automation after launch, live, 
     assert.equal(st.active, true);
     assert.deepEqual({ ...st.account, linkedAt: typeof st.account?.linkedAt }, { username: "ParabullBot", source: "creator", linkedAt: "string" });
     assert.doesNotMatch(readFileSync(join(h.dir, "sentinel.json"), "utf8"), /aaaaaaaa|bbbbbbbb/, "sealed at rest");
+    const sealed = h.store.get(h.mint)?.session?.sealed ?? "";
+    assert.ok(sealed.length > 40, "the store holds the sealed session");
+    const shown = await h.getText();
+    assert.ok(!shown.includes(sealed) && !/aaaaaaaa|bbbbbbbb|sealed|authToken|ct0/.test(shown), "GET shows neither the cookies nor the sealed blob");
     assert.equal(h.state.watching, 1);
 
     h.state.curve = { ...h.state.curve, ...at(0.52) };
@@ -214,6 +219,35 @@ test("unsigned, stale, replayed and forged writes are refused before any RPC cal
     assert.equal((await h.del(stranger)).status, 403);
     assert.equal(reads() - before, 2, "one read each, to learn the on-chain creator");
     assert.equal((await h.get()).active, true, "the stranger changed nothing");
+  } finally {
+    await h.stop();
+  }
+});
+
+test("writes are rate-limited per client, and the curve reads they cause have a global ceiling", async () => {
+  const h = harness({ secret: SECRET, limits: { writesPerClientPerMinute: 3, chainReadsPerMinute: 2 }, trustProxy: true });
+  await h.start();
+  try {
+    const from = (ip: string) => ({ "X-Forwarded-For": `203.0.113.9, ${ip}` });
+    // One client: three writes, then 429 with Retry-After, without reading the body or the chain.
+    for (let i = 0; i < 3; i++) assert.equal((await h.put(DEFAULT_SETTINGS, null, Keypair.generate(), h.nowIso(), from("198.51.100.1"))).status, i < 2 ? 403 : 429);
+    const limited = await h.put(DEFAULT_SETTINGS, null, h.creator, h.nowIso(), from("198.51.100.1"));
+    assert.equal(limited.status, 429);
+    assert.equal(limited.headers.get("retry-after"), "60");
+    assert.match(((await limited.json()) as { error: string }).error, /too many requests/);
+    assert.equal(h.state.curveReads, 2, "only the first two strangers reached the chain; the third hit the read ceiling");
+
+    // The ceiling is global: a fresh client's signed write is refused too, before any read.
+    assert.equal((await h.put(DEFAULT_SETTINGS, null, h.creator, h.nowIso(), from("198.51.100.2"))).status, 429);
+    assert.equal(h.state.curveReads, 2);
+    // A minute later both budgets are back. Use up one client's writes with stale requests (refused before any read)...
+    h.tick(60_000);
+    const stale = new Date(Date.parse(h.nowIso()) - 10 * 60_000).toISOString();
+    for (let i = 0; i < 3; i++) assert.equal((await h.put(DEFAULT_SETTINGS, null, h.creator, stale, from("198.51.100.1"))).status, 401);
+    assert.equal((await h.put(DEFAULT_SETTINGS, null, h.creator, h.nowIso(), from("198.51.100.1"))).status, 429, "out of writes");
+    // ...and claiming its address in the first X-Forwarded-For entry doesn't matter: only the proxy's own (last) entry counts.
+    assert.equal((await h.put(DEFAULT_SETTINGS, null, h.creator, h.nowIso(), { "X-Forwarded-For": "198.51.100.1, 198.51.100.3" })).status, 200);
+    assert.equal(h.state.curveReads, 3, "the creator's save read the curve once");
   } finally {
     await h.stop();
   }

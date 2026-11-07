@@ -84,6 +84,9 @@ Things to know before running it live:
 | `SENTINEL_ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated origins allowed to call the API (CORS) |
 | `SENTINEL_CURVE_POLL_SECONDS` | `60` | Curve poll interval, on top of the websocket |
 | `SENTINEL_MENTION_POLL_SECONDS` | `180` | Mention poll interval |
+| `SENTINEL_WRITES_PER_MINUTE` | `20` | Settings changes (PUT/DELETE) one client may make per minute; more get `429` with `Retry-After` |
+| `SENTINEL_RPC_READS_PER_MINUTE` | `120` | Curve reads all settings changes together may cause per minute, so signed spam can't drain the RPC quota |
+| `SENTINEL_TRUST_PROXY` | unset | Set to `1` behind a reverse proxy: clients are told apart by the last `X-Forwarded-For` entry. Leave unset when the service is reachable directly, or anyone can pick their own address |
 
 In the app, set `VITE_SENTINEL_URL` to the service's address. Without it, the modal says the sentinel isn't
 connected and its controls stay off.
