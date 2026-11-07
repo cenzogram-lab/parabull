@@ -7,6 +7,7 @@
  *   VITE_METADATA_UPLOAD_URL  backend that pins image + metadata JSON and returns { uri }
  *   VITE_REWARDS_BASE_URL     where epoch-<n>.json snapshot artifacts are served
  *   VITE_SENTINEL_URL         the X sentinel service (services/twitter-sentinel); unset, the X automation modal says it is off
+ *   VITE_II_SIGNER_CANISTER_ID  Chain Fusion signer canister for Internet Identity users (src/lib/auth/solana_signer.did)
  */
 import { clusterApiUrl } from "@solana/web3.js";
 
@@ -22,6 +23,7 @@ export const CONFIG = {
   metadataUploadUrl: env.VITE_METADATA_UPLOAD_URL as string | undefined,
   rewardsBaseUrl: env.VITE_REWARDS_BASE_URL as string | undefined,
   sentinelUrl: (env.VITE_SENTINEL_URL as string | undefined)?.replace(/\/$/, ""),
+  iiSignerCanisterId: env.VITE_II_SIGNER_CANISTER_ID as string | undefined,
 };
 
 export const isDemo = CONFIG.mode === "demo";

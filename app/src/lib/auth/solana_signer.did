@@ -1,0 +1,19 @@
+// Chain Fusion signer for Internet Identity users (Path A): an ICP canister holds no Solana keys of its own. Each user's
+// Solana address is a threshold Ed25519 public key (`schnorr_public_key`, algorithm ed25519) derived from their
+// principal, and transactions are signed with `sign_with_schnorr` under the same derivation path. Both methods are
+// update calls (they call the management canister). The app's client is app/src/lib/auth/chainFusionSigner.ts.
+//
+// Security contract (the canister MUST enforce it; the frontend cannot):
+//   * sign_solana_transaction derives the key ONLY from msg.caller. It never signs with a key chosen by an argument.
+//     The anonymous principal is rejected.
+//   * Its second argument is the 32-byte Solana public key the client expects to sign as. The canister derives the
+//     caller's key, compares, and traps on a mismatch, so a client can never sign as someone else, and a stale
+//     address is caught instead of producing a signature for the wrong account.
+//   * Its first argument is the serialized Solana transaction message (the bytes Ed25519 signs over); the result is the
+//     64-byte signature. The canister should bound the message size, charge or rate-limit callers (every signature
+//     costs cycles), and may decode the message to refuse transactions it doesn't recognise.
+//   * get_solana_address only reads a public key, so any principal can be looked up.
+service : {
+  "get_solana_address" : (principal) -> (text);
+  "sign_solana_transaction" : (blob, vec nat8) -> (blob);
+}

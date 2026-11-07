@@ -1,8 +1,8 @@
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
-import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { BrowserRouter, Navigate, NavigationType, Outlet, Route, Routes, useLocation, useNavigate, useNavigationType, type Location } from "react-router-dom";
+import { ConnectModalProvider } from "./components/ConnectModal";
 import { MobileCreateFab } from "./components/mobile/MobileCreateFab";
 import { MobileFootnote } from "./components/mobile/MobileFootnote";
 import { MobileHeader } from "./components/mobile/MobileHeader";
@@ -31,6 +31,8 @@ import { TokenHub } from "./pages/TokenHub";
 import { AppStateProvider, useApp } from "./state/AppState";
 import { MarketProvider } from "./state/Market";
 import { ProtocolProvider } from "./state/Protocol";
+import { importedKeyAdapter, internetIdentityAdapter } from "./wallet/adapters";
+import { UnifiedWalletProvider } from "./wallet/UnifiedWallet";
 
 // Loaded on first visit: only the admin and crank wallets use it, so it stays out of everyone else's bundle.
 const AdminConsole = lazy(() => import("./pages/AdminConsole"));
@@ -147,23 +149,27 @@ function AppRoutes() {
 }
 
 export function App() {
-  // Wallet Standard wallets (Phantom, Solflare, Backpack, ...) register themselves;
-  // the Solflare adapter adds its web and mobile fallback.
-  const wallets = useMemo(() => [new SolflareWalletAdapter()], []);
+  // Wallet Standard wallets (Phantom, Solflare, Backpack, ...) register themselves; the Solflare adapter adds its web
+  // and mobile fallback. The app's own two: an imported key (this tab's memory) and Internet Identity (Chain Fusion).
+  const wallets = useMemo(() => [new SolflareWalletAdapter(), importedKeyAdapter, internetIdentityAdapter], []);
   return (
     <ConnectionProvider endpoint={CONFIG.rpcUrl}>
-      <WalletProvider wallets={wallets} autoConnect>
-        <WalletModalProvider>
+      {/* Reconnecting on load is best effort: an imported key is gone after a reload and an expired Internet Identity
+          session needs a fresh sign-in, so those failures are expected, not errors. The connect dialog shows its own. */}
+      <WalletProvider wallets={wallets} autoConnect onError={(e) => console.warn(`Wallet: ${e.message || e.name}`)}>
+        <UnifiedWalletProvider>
           <ProtocolProvider>
             <AppStateProvider>
-              <MarketProvider>
-                <BrowserRouter>
-                  <AppRoutes />
-                </BrowserRouter>
-              </MarketProvider>
+              <ConnectModalProvider>
+                <MarketProvider>
+                  <BrowserRouter>
+                    <AppRoutes />
+                  </BrowserRouter>
+                </MarketProvider>
+              </ConnectModalProvider>
             </AppStateProvider>
           </ProtocolProvider>
-        </WalletModalProvider>
+        </UnifiedWalletProvider>
       </WalletProvider>
     </ConnectionProvider>
   );

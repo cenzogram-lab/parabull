@@ -5,13 +5,14 @@
  */
 import { useCallback, useMemo } from "react";
 import { AnchorProvider, BN, Program, type Wallet } from "@coral-xyz/anchor";
-import { useAnchorWallet, useConnection } from "@solana/wallet-adapter-react";
+import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey, SystemProgram, type Connection, type Transaction, type VersionedTransaction } from "@solana/web3.js";
 import { CONFIG } from "../config";
 import idlJson from "../idl/parabull.json";
 import type { Parabull } from "../idl/parabull";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, ata2022, Pdas, TOKEN_2022_PROGRAM_ID } from "../lib/pdas";
 import { quoteBuyWithSol, quoteSellTokens } from "../lib/quote";
+import { useUnifiedWallet } from "../wallet/UnifiedWallet";
 
 const idl = idlJson as unknown as Parabull;
 
@@ -40,10 +41,16 @@ export interface LaunchRequest {
 
 export function useParabullProgram() {
   const { connection } = useConnection();
-  const wallet = useAnchorWallet();
+  // Whichever path the user connected with (browser wallet, imported key, Internet Identity) signs through this.
+  const unified = useUnifiedWallet();
+  const { publicKey, signTransaction, signAllTransactions } = unified;
+  const wallet = useMemo<Wallet | undefined>(
+    () => (publicKey ? ({ publicKey, signTransaction, signAllTransactions } as unknown as Wallet) : undefined),
+    [publicKey, signTransaction, signAllTransactions],
+  );
 
   const program = useMemo(
-    () => new Program<Parabull>(idl, new AnchorProvider(connection, (wallet as Wallet | undefined) ?? READ_ONLY, { commitment: "confirmed" })),
+    () => new Program<Parabull>(idl, new AnchorProvider(connection, wallet ?? READ_ONLY, { commitment: "confirmed" })),
     [connection, wallet],
   );
   const pdas = useMemo(() => new Pdas(program.programId), [program]);
@@ -141,6 +148,7 @@ export function useParabullProgram() {
 
   return {
     mode: CONFIG.mode,
+    walletType: unified.walletType,
     program,
     pdas,
     connected: Boolean(wallet),

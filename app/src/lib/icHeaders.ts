@@ -34,6 +34,16 @@ const PRICE_APIS = ["https://lite-api.jup.ag", "https://api.coingecko.com"];
 const WALLET_CONNECT = ["https://*.solflare.com", "ws://localhost:*", "ws://127.0.0.1:*"];
 const WALLET_FRAMES = ["https://connect.solflare.com"];
 
+/**
+ * Internet Identity (Path A sign-in) and the IC API agent-js calls: the II sign-in page (id.ai, and the legacy
+ * identity.ic0.app), and the boundary-node API hosts that carry delegation minting and the Chain Fusion signer
+ * canister's calls (icp-api.io by default; icp0.io / ic0.app / icp.net gateway domains). II opens in a popup window, so
+ * frame-src only matters if it is ever embedded; the popup's postMessage is not governed by the CSP, and no
+ * Cross-Origin-Opener-Policy is set, which would cut the popup off from this page.
+ */
+const IDENTITY_CONNECT = ["https://id.ai", "https://identity.ic0.app", "https://icp-api.io", "https://icp0.io", "https://*.icp0.io", "https://ic0.app", "https://*.ic0.app", "https://*.icp.net"];
+const IDENTITY_FRAMES = ["https://id.ai", "https://identity.ic0.app"];
+
 /** Origin of a URL ("https://host:port"), or null when it isn't an absolute http(s) URL. */
 export function originOf(url: string | undefined): string | null {
   if (!url) return null;
@@ -74,7 +84,7 @@ export interface HeaderEnv {
 export function connectSources(env: HeaderEnv): string[] {
   const rpc = env.VITE_RPC_URL || CLUSTER_RPC[env.VITE_CLUSTER ?? "devnet"] || CLUSTER_RPC.devnet;
   const configured = [originOf(rpc), rpcWebsocketOrigin(rpc), originOf(env.VITE_SENTINEL_URL), originOf(env.VITE_METADATA_UPLOAD_URL), originOf(env.VITE_REWARDS_BASE_URL)];
-  return [...new Set(["'self'", ...configured.filter((s): s is string => !!s), ...RPC_PROVIDERS, ...PRICE_APIS, ...WALLET_CONNECT])];
+  return [...new Set(["'self'", ...configured.filter((s): s is string => !!s), ...RPC_PROVIDERS, ...PRICE_APIS, ...WALLET_CONNECT, ...IDENTITY_CONNECT])];
 }
 
 export function contentSecurityPolicy(env: HeaderEnv): string {
@@ -87,7 +97,7 @@ export function contentSecurityPolicy(env: HeaderEnv): string {
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
     `connect-src ${connectSources(env).join(" ")}`,
-    `frame-src ${WALLET_FRAMES.join(" ")}`,
+    `frame-src ${[...WALLET_FRAMES, ...IDENTITY_FRAMES].join(" ")}`,
     "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",

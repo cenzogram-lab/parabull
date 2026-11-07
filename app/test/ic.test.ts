@@ -38,6 +38,10 @@ test("IC hosting: connect-src covers the configured endpoints, hosted RPCs, webs
     "https://lite-api.jup.ag",
     "https://api.coingecko.com",
     "ws://localhost:*",
+    "https://id.ai",
+    "https://identity.ic0.app",
+    "https://icp-api.io",
+    "https://*.icp0.io",
   ])
     assert.ok(src.includes(s), s);
   assert.ok(!src.join(" ").includes("secret"), "only origins: an RPC URL's path or query (API keys) never lands in the header");
@@ -53,6 +57,8 @@ test("IC hosting: the CSP stays strict and the _headers file is well formed", ()
   assert.match(csp, /frame-ancestors 'none'/);
   assert.match(csp, /object-src 'none'/);
   assert.doesNotMatch(csp, /googleapis|gstatic/, "no third-party fonts");
+  assert.match(csp, /frame-src [^;]*https:\/\/id\.ai[^;]*https:\/\/identity\.ic0\.app/, "Internet Identity can be framed if ever embedded");
+  assert.doesNotMatch(headersFile({}), /Cross-Origin-Opener-Policy/, "no COOP: it would cut the II popup off from the page");
   const file = headersFile({});
   const blocks = file.split("\n").filter((l) => l && !l.startsWith(" ") && !l.startsWith("#"));
   assert.deepEqual(blocks, ["/*", "/assets/*", "/*.html"]);
