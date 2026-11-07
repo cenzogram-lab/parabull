@@ -1,0 +1,5 @@
+# Internet Computer hosting (@dfinity/static-site, see icp.yaml). Rules match in file order; a real file always wins.
+# A missing build asset gets a real 404 instead of the app shell served as text/html.
+/assets/*  /404.html    404
+# Single-page app: every other path is a client route, so serve the shell (a 200 rewrite, not a redirect).
+/*         /index.html  200

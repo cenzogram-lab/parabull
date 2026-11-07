@@ -13,3 +13,6 @@ app/screenshots/
 .env
 .env.*
 !.env.example
+
+# Internet Computer: keep .icp/data/ (mainnet canister IDs), ignore the rebuildable cache
+.icp/cache/

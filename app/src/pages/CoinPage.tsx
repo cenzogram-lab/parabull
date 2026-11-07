@@ -13,6 +13,7 @@ import { explorer } from "../config";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { useNow } from "../hooks/useNow";
 import { age, compact, countdown, shortAddr, usdCompact } from "../lib/format";
+import { dexScreenerUrl, raydiumSwapUrl } from "../lib/links";
 import type { Coin } from "../lib/types";
 import { progressOf } from "../mock/coins";
 import { useApp } from "../state/AppState";
@@ -113,6 +114,17 @@ export function CoinPage() {
                 <a href={explorer("token", coin.mint)} target="_blank" rel="noreferrer" className="inline-flex h-7 items-center gap-1 rounded-full border border-line px-2.5 text-[12px] text-muted hover:text-cream">
                   Solscan <ExternalLink className="h-3 w-3" />
                 </a>
+                {/* After graduation the coin trades on its Raydium CPMM pool; DexScreener charts it. */}
+                {coin.migrated && (
+                  <>
+                    <a href={raydiumSwapUrl(coin.mint)} target="_blank" rel="noreferrer" className="inline-flex h-7 items-center gap-1 rounded-full border border-gold/40 px-2.5 text-[12px] font-semibold text-gold hover:border-gold/70">
+                      Raydium <ExternalLink className="h-3 w-3" />
+                    </a>
+                    <a href={dexScreenerUrl(coin.mint)} target="_blank" rel="noreferrer" className="inline-flex h-7 items-center gap-1 rounded-full border border-line px-2.5 text-[12px] text-muted hover:text-cream">
+                      DexScreener <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </>
+                )}
                 {safeLink(coin.socials.x) && (
                   <a href={safeLink(coin.socials.x)} target="_blank" rel="noreferrer" className="btn-icon h-7 w-7 rounded-full border border-line" aria-label="X">
                     <XLogo className="h-3.5 w-3.5" />

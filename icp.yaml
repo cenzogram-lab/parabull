@@ -1,0 +1,22 @@
+# Internet Computer hosting for the web app: the built app/ is served by a certified-assets canister through the
+# @dfinity/static-site recipe (skills.internetcomputer.org "static-site" skill). The IC only hosts the frontend; the
+# Parabull program, trades and launches stay on Solana, and the app talks to Solana RPC from the browser as usual.
+#
+#   npm install -g @icp-sdk/icp-cli @icp-sdk/ic-wasm   # icp-cli >= 1.0.0, Node.js >= 22
+#   icp network start -d && icp deploy                  # local: http://frontend.local.localhost:8000
+#   icp deploy -e ic frontend                           # mainnet (needs cycles): https://<canister-id>.icp.net
+#
+# Build configuration comes from app/.env.production.local (VITE_PARABULL_MODE, VITE_CLUSTER, VITE_RPC_URL, ...),
+# read by Vite during `npm run build`. SPA routing is app/public/_redirects; security headers and the CSP are generated
+# into dist/_headers by app/vite.config.ts (src/lib/icHeaders.ts), so connect-src follows the configured endpoints.
+# Commit .icp/data/ (mainnet canister IDs); .icp/cache/ is ignored.
+canisters:
+  - name: frontend
+    recipe:
+      type: "@dfinity/static-site@v0.4.0"
+      configuration:
+        # Inline canisters build from the project root, so target the app's package explicitly.
+        build:
+          - npm --prefix app ci
+          - npm --prefix app run build
+        dir: app/dist

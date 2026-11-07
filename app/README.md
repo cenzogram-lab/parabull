@@ -118,6 +118,7 @@ Set these in `app/.env.local` (see `src/config.ts`):
 | `VITE_METADATA_UPLOAD_URL` | unset | Backend that pins the image and metadata JSON and returns `{ uri }`. Without it, chain mode asks for a metadata URI |
 | `VITE_REWARDS_BASE_URL` | unset | Where `epoch-<n>.json` snapshot artifacts (from `scripts/src/snapshot.ts`) are served |
 | `VITE_SENTINEL_URL` | unset | The X sentinel ([`services/twitter-sentinel`](../services/twitter-sentinel/README.md)). When the connected wallet launched the coin, its page shows an **X automation** button with a status dot. It opens a modal (a bottom sheet on a phone) to link, replace or disconnect the project's X account and set milestone posts, cashtag replies, persona and project context, any time after launch. Every change is signed by the wallet. Unset, the modal says the sentinel isn't connected; demo coins can't be saved, since they aren't on-chain |
+| `VITE_II_SIGNER_CANISTER_ID` | unset | The Chain Fusion signer canister for Internet Identity users ([`src/lib/auth/solana_signer.did`](src/lib/auth/solana_signer.did)). Unset, "Continue with Google / Passkey / Email" uses a development key in demo builds and on the dev server, a local test identity on localnet, and is disabled in a production chain build (see [Connecting](#connecting)) |
 
 **Wired to the program** (`src/hooks/useParabullProgram.ts`):
 - `request_launch`, then waiting for the launch worker (the ticket closes,
@@ -224,6 +225,53 @@ It refreshes every minute and after every change.
     root, then `npm run sync-idl` here.
   - CI fails if the copy drifts (`npm run check-idl`).
 
+## Hosting on the Internet Computer
+
+The built app can be served from a **certified-assets canister** on the Internet Computer, configured in the
+repository's [`icp.yaml`](../icp.yaml) with the `@dfinity/static-site` recipe (ICP skills: `static-site`, `icp-cli`).
+The IC only hosts the frontend: the program, launches and trades stay on Solana, and the browser talks to Solana RPC
+directly, as it does from any other host.
+
+```bash
+npm install -g @icp-sdk/icp-cli @icp-sdk/ic-wasm   # icp-cli >= 1.0.0, Node.js >= 22
+```
+
+```bash
+icp network start -d && icp deploy                  # local: http://frontend.local.localhost:8000
+```
+
+```bash
+icp deploy -e ic frontend                           # mainnet (needs cycles): https://<canister-id>.icp.net
+```
+
+**Build settings.** Put the build's settings in `app/.env.production.local` (git-ignored); `npm run build` reads them.
+A chain deployment usually sets `VITE_PARABULL_MODE=chain`, `VITE_CLUSTER` and an origin-restricted `VITE_RPC_URL`.
+
+**Routing and headers.** The canister reads two files from the root of `dist/`. It ignores `.ic-assets.json5` and adds
+no security headers of its own.
+- `public/_redirects`
+  - Every client route (`/coin/:mint`, `/admin`, `/create`, ...) is served `index.html` with a `200` rewrite, so deep
+    links and reloads work.
+  - A missing file under `/assets/` returns a real `404` (`public/404.html`) instead of the app shell.
+- `dist/_headers`
+  - Written at build time by `vite.config.ts` from `src/lib/icHeaders.ts`.
+  - `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, long-lived caching for `/assets/*`, and
+    revalidation for HTML.
+  - A **Content-Security-Policy** (`script-src 'self'`, no `eval`, `frame-ancestors 'none'`). Its `connect-src`
+    allows:
+    - the build's own RPC (plus the websocket web3.js derives from it: `wss://`, or port + 1);
+    - `api.devnet` / `api.mainnet-beta.solana.com`, Helius and QuickNode (HTTPS and WSS);
+    - the sentinel, metadata-upload and rewards URLs when they are set;
+    - the Jupiter and CoinGecko price APIs;
+    - Solflare and the Mobile Wallet Adapter's local socket.
+  - The policy only lists origins, so an RPC URL's path or query string (an API key) never ends up in the header.
+- `vite.config.ts` also drops the wallet modal's Google Fonts `@import`. Every wallet element is restyled in the
+  bundled Inter, so DM Sans was never shown, and the CSP can keep `style-src 'self'`.
+- To use another RPC provider, add its origin in `src/lib/icHeaders.ts` and rebuild.
+
+Link to `https://<canister-id>.icp.net` (or a custom domain), never `raw.icp.net`: the raw gateway skips the
+certificate check.
+
 ## Scripts
 
 | Command | What it does |
@@ -234,6 +282,58 @@ It refreshes every minute and after every change.
 | `npm run screenshots -- <dir> [--mobile]` | Serves `dist/` and captures every page with Playwright (`?live=0` freezes the demo simulation); `--mobile` captures the phone layout at 390x844 |
 | `npm run audit:mobile` | After a build: checks 11 routes at 390x844 for sideways scrolling, touch targets under 44x44px and console errors |
 | `npm run sync-idl` / `check-idl` | Copy or verify the IDL from `../target` |
+
+## Connecting
+
+The connect dialog (`src/components/ConnectModal.tsx`) replaces the wallet adapter's modal and offers two paths. Every
+`useWalletModal().setVisible(true)` call and the header's wallet button open it, and it is a bottom sheet on a phone.
+
+**Path A: "Continue with Google / Passkey / Email" (Internet Identity).**
+- **Sign-in.** Uses `@icp-sdk/auth` 11 with `@icp-sdk/core` 6, per the ICP `internet-identity` skill.
+  - `signIn()` opens `https://id.ai` straight from the click; the SDK loads when the dialog opens, so the popup isn't
+    blocked.
+  - A session is restored after a reload with no popup.
+- **Solana account.** The address is a threshold Ed25519 key that the **signer canister** derives from the user's
+  principal (`sign_with_schnorr`). Each signature is an update call to that canister.
+- **Client (`src/lib/auth/chainFusionSigner.ts`).** For each transaction it:
+  - sends the canister the transaction message together with the address it expects to sign as;
+  - checks the 64-byte signature against that address;
+  - attaches the signature to the transaction.
+- **The canister's contract is in `src/lib/auth/solana_signer.did`.** The frontend cannot enforce it:
+  - derive the key from `msg.caller` only, never from an argument;
+  - refuse the anonymous principal;
+  - trap if the expected address doesn't match the caller's key;
+  - bound the message size and rate-limit or charge callers, since every signature costs cycles.
+- **Without a signer canister** (`VITE_II_SIGNER_CANISTER_ID` unset):
+  - demo builds and the dev server sign with a development key derived from the principal, and the dialog says so;
+  - localnet builds skip II and use a random per-tab test principal;
+  - a production chain build shows the option disabled.
+  - Anyone who knows a principal can rebuild its development key, so never fund one.
+
+**Path B: native Solana.**
+- **Browser wallets.** Detected Wallet Standard wallets (Phantom, Solflare, Backpack) are listed, plus Solflare's web
+  wallet.
+- **"Import Private Key (Disposable / Fast Execution)".**
+  - Accepts a base58 private key or a `solana-keygen` JSON array, checked with `Keypair.fromSecretKey`.
+  - The key is held only in this tab's memory: it is never written to localStorage or sessionStorage, and reloading or
+    closing the tab forgets it.
+  - It signs every transaction with no popup. Anything running in the page could use it too, so it is for small,
+    disposable balances only, and the dialog says so.
+
+**One signing interface.** All three are wallet adapters under `WalletProvider` (`src/wallet/adapters.ts`).
+`useUnifiedWallet()` (`src/wallet/UnifiedWallet.tsx`) gives:
+- `publicKey`;
+- `signTransaction` and `signAllTransactions`;
+- `signMessage`;
+- `walletType` (`native`, `imported` or `internet_identity`);
+- `disconnect`.
+
+`useParabullProgram` signs through it, so trading, launching, claims, the admin console and the X automation modal work
+the same whichever way the user connected.
+
+**CSP.** The `_headers` CSP (`src/lib/icHeaders.ts`) allows `id.ai`, `identity.ic0.app` and the IC API hosts
+(`icp-api.io`, `icp0.io`, `ic0.app`). It sets no `Cross-Origin-Opener-Policy`, which would cut the II popup off from
+the page.
 
 ## Wallets
 

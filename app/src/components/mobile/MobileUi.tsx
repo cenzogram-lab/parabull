@@ -268,14 +268,14 @@ export function BottomSheet({ open, onClose, title, children }: { open: boolean;
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") {
         // Esc closes the top layer first: a popover open in the sheet (Slippage) or the wallet picker over it closes on its own.
-        if (panel.current?.querySelector("[data-popover-open]") || document.querySelector(".wallet-adapter-modal")) return;
+        if (panel.current?.querySelector("[data-popover-open]") || document.querySelector("[data-wallet-picker]")) return;
         return closeRef.current();
       }
       // Keep Tab inside the sheet.
       const p = panel.current;
       if (e.key !== "Tab" || !p) return;
       // The wallet picker over the sheet keeps Tab inside itself; it never takes focus on its own, so hand it over.
-      const picker = document.querySelector<HTMLElement>(".wallet-adapter-modal");
+      const picker = document.querySelector<HTMLElement>("[data-wallet-picker]");
       if (picker) {
         if (!picker.contains(document.activeElement)) {
           e.preventDefault();

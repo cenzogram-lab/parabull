@@ -23,7 +23,7 @@ export function Modal({ open, onClose, children, label, className, manageFocus =
   });
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !(managed.current && document.querySelector(".wallet-adapter-modal")) && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !(managed.current && document.querySelector("[data-wallet-picker]")) && onClose();
     document.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -41,7 +41,7 @@ export function Modal({ open, onClose, children, label, className, manageFocus =
       const d = dialog.current;
       if (e.key !== "Tab" || !d) return;
       // The wallet picker over the dialog keeps Tab inside itself; it never takes focus on its own, so hand it over.
-      const picker = document.querySelector<HTMLElement>(".wallet-adapter-modal");
+      const picker = document.querySelector<HTMLElement>("[data-wallet-picker]");
       if (picker) {
         if (!picker.contains(document.activeElement)) {
           e.preventDefault();
