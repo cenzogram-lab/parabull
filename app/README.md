@@ -224,6 +224,53 @@ It refreshes every minute and after every change.
     root, then `npm run sync-idl` here.
   - CI fails if the copy drifts (`npm run check-idl`).
 
+## Hosting on the Internet Computer
+
+The built app can be served from a **certified-assets canister** on the Internet Computer, configured in the
+repository's [`icp.yaml`](../icp.yaml) with the `@dfinity/static-site` recipe (ICP skills: `static-site`, `icp-cli`).
+The IC only hosts the frontend: the program, launches and trades stay on Solana, and the browser talks to Solana RPC
+directly, as it does from any other host.
+
+```bash
+npm install -g @icp-sdk/icp-cli @icp-sdk/ic-wasm   # icp-cli >= 1.0.0, Node.js >= 22
+```
+
+```bash
+icp network start -d && icp deploy                  # local: http://frontend.local.localhost:8000
+```
+
+```bash
+icp deploy -e ic frontend                           # mainnet (needs cycles): https://<canister-id>.icp.net
+```
+
+**Build settings.** Put the build's settings in `app/.env.production.local` (git-ignored); `npm run build` reads them.
+A chain deployment usually sets `VITE_PARABULL_MODE=chain`, `VITE_CLUSTER` and an origin-restricted `VITE_RPC_URL`.
+
+**Routing and headers.** The canister reads two files from the root of `dist/`. It ignores `.ic-assets.json5` and adds
+no security headers of its own.
+- `public/_redirects`
+  - Every client route (`/coin/:mint`, `/admin`, `/create`, ...) is served `index.html` with a `200` rewrite, so deep
+    links and reloads work.
+  - A missing file under `/assets/` returns a real `404` (`public/404.html`) instead of the app shell.
+- `dist/_headers`
+  - Written at build time by `vite.config.ts` from `src/lib/icHeaders.ts`.
+  - `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, long-lived caching for `/assets/*`, and
+    revalidation for HTML.
+  - A **Content-Security-Policy** (`script-src 'self'`, no `eval`, `frame-ancestors 'none'`). Its `connect-src`
+    allows:
+    - the build's own RPC (plus the websocket web3.js derives from it: `wss://`, or port + 1);
+    - `api.devnet` / `api.mainnet-beta.solana.com`, Helius and QuickNode (HTTPS and WSS);
+    - the sentinel, metadata-upload and rewards URLs when they are set;
+    - the Jupiter and CoinGecko price APIs;
+    - Solflare and the Mobile Wallet Adapter's local socket.
+  - The policy only lists origins, so an RPC URL's path or query string (an API key) never ends up in the header.
+- `vite.config.ts` also drops the wallet modal's Google Fonts `@import`. Every wallet element is restyled in the
+  bundled Inter, so DM Sans was never shown, and the CSP can keep `style-src 'self'`.
+- To use another RPC provider, add its origin in `src/lib/icHeaders.ts` and rebuild.
+
+Link to `https://<canister-id>.icp.net` (or a custom domain), never `raw.icp.net`: the raw gateway skips the
+certificate check.
+
 ## Scripts
 
 | Command | What it does |

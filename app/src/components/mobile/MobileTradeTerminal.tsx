@@ -9,6 +9,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { explorer } from "../../config";
 import { useNow } from "../../hooks/useNow";
 import { age, compact, countdown, shortAddr, usdCompact } from "../../lib/format";
+import { dexScreenerUrl, raydiumSwapUrl } from "../../lib/links";
 import type { Coin } from "../../lib/types";
 import { progressOf } from "../../mock/coins";
 import { useApp } from "../../state/AppState";
@@ -203,6 +204,17 @@ export function MobileTradeTerminal({ coin }: { coin: Coin }) {
               Solscan <ExternalLink className="h-3.5 w-3.5" aria-hidden />
             </a>
           </div>
+          {/* After graduation the coin trades on its Raydium CPMM pool; DexScreener charts it. */}
+          {coin.migrated && (
+            <div className="mt-2 flex gap-2">
+              <a href={raydiumSwapUrl(coin.mint)} target="_blank" rel="noreferrer" className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full border border-gold/40 text-[13px] font-semibold text-gold active:border-gold/70">
+                Trade on Raydium <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+              </a>
+              <a href={dexScreenerUrl(coin.mint)} target="_blank" rel="noreferrer" className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full border border-line text-[13px] font-medium text-muted active:border-line-accent active:text-cream">
+                DexScreener <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+              </a>
+            </div>
+          )}
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {socials.map((s) => (
               <a key={s.label} href={s.href} target="_blank" rel="noreferrer" aria-label={`${coin.name} on ${s.label}`} className={roundLink}>

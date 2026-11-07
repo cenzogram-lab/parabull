@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { explorer, isDemo } from "../../config";
 import { useParabullProgram } from "../../hooks/useParabullProgram";
 import { compact, pct, sol, tokens as fmtTokens, usd, usdCompact } from "../../lib/format";
+import { raydiumSwapUrl } from "../../lib/links";
 import { bpsLabel } from "../../lib/protocolParams";
 import type { Coin } from "../../lib/types";
 import { useApp } from "../../state/AppState";
@@ -59,7 +60,7 @@ export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced 
   async function place() {
     if (!isDemo && !client.connected) return setVisible(true);
     if (!isDemo && coin.migrated) {
-      window.open(`https://raydium.io/swap/?inputMint=sol&outputMint=${coin.mint}`, "_blank", "noopener");
+      window.open(raydiumSwapUrl(coin.mint), "_blank", "noopener");
       return;
     }
     setBusy(true);
