@@ -106,6 +106,28 @@ jobs:
         working-directory: app
         run: npm run build
 
+  sentinel:
+    name: sentinel (typecheck + tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/twitter-sentinel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: services/twitter-sentinel/package-lock.json
+      - name: npm ci
+        run: npm ci
+      # Also checks the files it shares with the app (app/src/lib/sentinelMessage.ts, app/src/idl/parabull.json).
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tests (milestones, replies, signed settings, sealing, rate limits)
+        run: npm test
+
   canister:
     name: canister (Motoko build + tests, PocketIC)
     runs-on: ubuntu-latest

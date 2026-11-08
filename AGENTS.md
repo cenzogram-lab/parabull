@@ -325,8 +325,14 @@ pins both index-0 addresses.
   `scripts/`. It also checks that `app/src/idl/` matches the generated IDL.
 - **`app`:** `npm ci`, `npm test` and `npm run build` (typecheck + Vite) in
   `app/`.
+- **`sentinel`:** `npm ci`, `npm run typecheck` and `npm test` in
+  `services/twitter-sentinel/`.
+- **`canister`:** in `canisters/solana_signer/`, `mops install --locked`,
+  `mops check -- -Werror`, `mops test`, `mops build`, `icp build
+  solana_signer`, then the PocketIC integration tests in `e2e/` (they drive
+  the app's own Chain Fusion client).
 
-Both jobs use `line-tables-only` debug info, because each runtime-test
+The Rust jobs use `line-tables-only` debug info, because each runtime-test
 binary is about 440 MB with full debug info.
 
 ## Verified commands
