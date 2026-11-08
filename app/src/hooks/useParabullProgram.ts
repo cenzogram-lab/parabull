@@ -10,6 +10,7 @@ import { PublicKey, SystemProgram, type Connection, type Transaction, type Versi
 import { CONFIG } from "../config";
 import idlJson from "../idl/parabull.json";
 import type { Parabull } from "../idl/parabull";
+import { launchWaitDeadline } from "../lib/launchRules";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, ata2022, Pdas, TOKEN_2022_PROGRAM_ID } from "../lib/pdas";
 import { quoteBuyWithSol, quoteSellTokens } from "../lib/quote";
 import { useUnifiedWallet } from "../wallet/UnifiedWallet";
@@ -81,14 +82,18 @@ export function useParabullProgram() {
   /**
    * Wait for the launch worker: the ticket closes (create or refund), then
    * the ticker registry tells which. Resolves to the new mint, or null if the
-   * ticket was refunded.
+   * ticket was refunded. Gives up at the ticket's own on-chain expiry (plus a
+   * short grace), since the program refuses `create` after it.
    */
   const waitForLaunch = useCallback(
     async (ticket: PublicKey, symbol: string, requestedAt: number, opts: { signal?: AbortSignal; pollMs?: number } = {}) => {
-      const deadline = Date.now() + 11 * 60_000;
-      while (await program.account.launchTicket.fetchNullable(ticket)) {
+      let deadline: number | null = null;
+      for (;;) {
+        const open = await program.account.launchTicket.fetchNullable(ticket);
+        if (!open) break;
         if (opts.signal?.aborted) throw new Error("cancelled");
-        if (Date.now() > deadline) throw new Error("The launch worker did not respond before the ticket expired; refund it from your wallet.");
+        deadline ??= launchWaitDeadline(open.expiresAt.toNumber());
+        if (Date.now() > deadline) throw new Error("The ticket expired before the launch worker created the coin. Its full deposit can now be refunded to the wallet that paid.");
         await new Promise((r) => setTimeout(r, opts.pollMs ?? 1500));
       }
       const reg = await program.account.tickerRegistry.fetchNullable(pdas.tickerRegistry(symbol));

@@ -5,6 +5,7 @@
 import { Lock, SlidersHorizontal } from "lucide-react";
 import { useId, useState, type ChangeEvent } from "react";
 import { useKeyboardInset } from "../../hooks/useKeyboardInset";
+import { fullyLocked } from "../../lib/launchRules";
 import type { Coin } from "../../lib/types";
 import { cx } from "../ui/primitives";
 import { BottomSheet, IconButton } from "./MobileUi";
@@ -27,14 +28,13 @@ const thousands = (s: string) => {
 export const filterCount = (f: CoinFilters) => [f.minMcap, f.maxMcap, f.minVol].filter((v) => thousands(v) !== null).length + (f.lockedOnly ? 1 : 0);
 
 /** Ticker, name and announcement tweet all still locked on-chain. */
-export const fullyLocked = (c: Coin, now: number) => c.locks.ticker > now && c.locks.name > now && c.locks.tweet !== null && c.locks.tweet > now;
 
 export function passesFilters(c: Coin, f: CoinFilters, now: number): boolean {
   const [lo, hi, vol] = [thousands(f.minMcap), thousands(f.maxMcap), thousands(f.minVol)];
   if (lo !== null && c.mcapUsd < lo) return false;
   if (hi !== null && c.mcapUsd > hi) return false;
   if (vol !== null && c.vol24hUsd < vol) return false;
-  return !f.lockedOnly || fullyLocked(c, now);
+  return !f.lockedOnly || fullyLocked(c.locks, now);
 }
 
 /** Digits and a single decimal point. */

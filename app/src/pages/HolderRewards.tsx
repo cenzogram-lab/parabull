@@ -7,7 +7,6 @@ import { CoinAvatar, StatTile } from "../components/ui/visuals";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { BPS, bpsLabel, durationLabel, splitLabel } from "../lib/protocolParams";
 import { compact, pct, usdCompact } from "../lib/format";
-import { SOL_USD } from "../mock/coins";
 import { DEMO_WALLET, walletEpochs } from "../mock/protocol";
 import { useMarket } from "../state/Market";
 import { useProtocol } from "../state/Protocol";
@@ -18,7 +17,8 @@ export function HolderRewards() {
   const { coins } = useMarket();
   const isMobile = useIsMobile();
   // The fee, split, listing target and claim window in force: from Global in chain mode, the defaults in demo mode.
-  const { params, dexTargetUsd } = useProtocol();
+  const { params, dexTargetUsd, solUsd: feed } = useProtocol();
+  const solUsd = feed.price;
   const target = Math.round(dexTargetUsd);
   const INTRO = `${bpsLabel(params.holderBps)} of every platform fee, once a coin's DexScreener listing fund is full, goes to $PARABULL holders. It's paid in SOL through weekly snapshot epochs you claim with a Merkle proof.`;
   const epochs = walletEpochs(DEMO_WALLET);
@@ -71,7 +71,7 @@ export function HolderRewards() {
 
       <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3 max-md:mt-5 max-md:gap-3">
         <StatTile icon={HandCoins} label="Total holder rewards distributed" value={`${compact(totalSol)} SOL`} foot={<span>{usdCompact(usdThen)} when paid · {epochs.length} epochs</span>} />
-        <StatTile icon={CircleDollarSign} label="Value at today's prices" value={usdCompact(totalSol * SOL_USD)} delta={<span className={cx("num font-semibold", totalSol * SOL_USD >= usdThen ? "text-gold" : "text-ember")}>{pct(totalSol * SOL_USD / usdThen - 1)}</span>} foot={<span>vs. value when paid, at SOL ${SOL_USD.toFixed(2)}</span>} />
+        <StatTile icon={CircleDollarSign} label="Value at today's prices" value={usdCompact(totalSol * solUsd)} delta={<span className={cx("num font-semibold", totalSol * solUsd >= usdThen ? "text-gold" : "text-ember")}>{pct(totalSol * solUsd / usdThen - 1)}</span>} foot={<span>vs. value when paid, at SOL ${solUsd.toFixed(2)}</span>} />
         <StatTile icon={Users} label="Total wallets rewarded" value={wallets.toLocaleString("en-US")} foot={<span>allocations across all epochs</span>} />
       </div>
 
@@ -98,7 +98,7 @@ export function HolderRewards() {
                     </span>
                     <span className="shrink-0 text-right">
                       <span className="num block text-[14px] font-semibold leading-5 text-cream">{usdCompact(toHolders)}</span>
-                      <span className="num block text-xs text-muted">{(toHolders / SOL_USD).toFixed(2)} SOL</span>
+                      <span className="num block text-xs text-muted">{(toHolders / solUsd).toFixed(2)} SOL</span>
                     </span>
                   </Link>
                 </li>
@@ -131,7 +131,7 @@ export function HolderRewards() {
                       </Link>
                     </td>
                     <td className="num py-2.5 text-right font-semibold">{usdCompact(toHolders)}</td>
-                    <td className="num py-2.5 text-right">{(toHolders / SOL_USD).toFixed(2)}</td>
+                    <td className="num py-2.5 text-right">{(toHolders / solUsd).toFixed(2)}</td>
                     <td className="py-2.5 text-right">
                       <span className="inline-flex items-center gap-2">
                         <span className="h-1.5 w-14 overflow-hidden rounded-full bg-[#2A211B]">

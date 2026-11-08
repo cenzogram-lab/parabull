@@ -7,6 +7,7 @@ import { CoinAvatar, Meter, Sparkline } from "../components/ui/visuals";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { useNow } from "../hooks/useNow";
 import { age, compact, usdCompact } from "../lib/format";
+import { fullyLocked } from "../lib/launchRules";
 import type { Coin } from "../lib/types";
 import { progressOf } from "../mock/coins";
 import { useApp } from "../state/AppState";
@@ -66,7 +67,7 @@ function DesktopExplore() {
       if (maxM !== null && c.mcapUsd > maxM) return false;
       if (minV !== null && c.vol24hUsd < minV) return false;
       if (maxV !== null && c.vol24hUsd > maxV) return false;
-      if (filters.lockedOnly && !(c.locks.tweet && c.locks.tweet > now)) return false;
+      if (filters.lockedOnly && !fullyLocked(c.locks, now)) return false;
       return true;
     });
     list = cat === "new" ? list.sort((a, b) => b.createdAt - a.createdAt) : cat === "graduated" ? list.sort((a, b) => b.mcapUsd - a.mcapUsd) : list.sort((a, b) => b.change1h - a.change1h);
