@@ -104,13 +104,15 @@ function ConnectBody({ onDone }: { onDone: () => void }) {
   const brandNames: readonly string[] = WALLET_BRANDS.map((b) => b.name);
   const installed = (name: string) => wallets.some((w) => w.adapter.name === name && w.readyState === WalletReadyState.Installed);
   // Other usable wallets: anything detected besides Phantom and Solflare (Backpack, Mobile Wallet Adapter, ...), plus
-  // Solflare's web wallet when its extension isn't installed (it needs no install).
+  // Solflare's web wallet when its extension isn't there (it needs no install). An injected extension the adapter hasn't
+  // noticed yet already makes the Solflare button one click, so it isn't listed a second time as the web wallet.
   const otherWallets = wallets.filter((w) => {
     const name = w.adapter.name;
     if (name === IMPORTED_WALLET_NAME || name === II_WALLET_NAME) return false;
     if (w.readyState !== WalletReadyState.Installed && w.readyState !== WalletReadyState.Loadable) return false;
     if (!brandNames.includes(name)) return true;
-    return name === "Solflare" && w.readyState === WalletReadyState.Loadable && !installed(name);
+    const brand = WALLET_BRANDS.find((b) => b.name === name)!;
+    return name === "Solflare" && w.readyState === WalletReadyState.Loadable && !installed(name) && !brandConnectable(w.readyState, brand.injected());
   });
 
   const iiOff = ii.mode.kind === "off";
