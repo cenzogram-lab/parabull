@@ -46,7 +46,7 @@ A controller can switch the key with `configure` only while no address exists ye
 - changing the key would change every user's address;
 - redeploying under a new canister ID gives every user a new address.
 
-## Build, test, deploy
+## Build and test
 
 Toolchain: Node.js 22+ and the tools in the first command below. `mops` downloads the `moc` version pinned in `mops.toml`.
 
@@ -68,11 +68,47 @@ The integration tests need the build above, the app's dependencies, and PocketIC
 npm ci --prefix app && cd canisters/solana_signer/e2e && npm ci && npm test
 ```
 
+### Devnet smoke test (against the deployed canister)
+
+`e2e/devnet-smoke.ts` runs Path A for real, against the deployed canister on Solana devnet. Addresses don't depend on
+the Solana cluster, so the mainnet canister serves devnet too. It:
+- makes a fresh principal (or reuses one with `SIGNER_IDENTITY_SEED`) and gets its address, checking it is stable and
+  that `lookup_solana_address` returns it;
+- checks a request to sign as another address is refused before any signature;
+- funds the address from your devnet wallet, then has the canister sign a legacy and a v0 transfer back, which devnet
+  confirms. The address ends empty.
+
+It refuses a mainnet-beta RPC. Each run costs the canister two signatures (about 52B cycles) and counts against its
+rate limits.
+
+```bash
+cd canisters/solana_signer/e2e && npm ci && SIGNER_CANISTER_ID=<canister id> npm run devnet-smoke
+```
+
+Optional settings:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `FUNDER_KEYPAIR` | `~/.config/solana/id.json` | Devnet wallet that funds the test address |
+| `FUND_LAMPORTS` | `20000000` (0.02 SOL) | Amount sent to the test address; all of it except fees comes back |
+| `SOLANA_RPC_URL` | `https://api.devnet.solana.com` | Devnet RPC |
+| `IC_HOST` | `https://icp-api.io` | IC API host |
+| `SIGNER_IDENTITY_SEED` | random | 64 hex characters, to keep one principal and address across runs |
+
+## Deploy
+
 To deploy, run this from the repository root. `icp.yaml` lists this directory, and the `@dfinity/motoko` recipe builds it from `canister.yaml` and `mops.toml`:
 
 ```bash
 icp deploy -e ic solana_signer
 ```
+
+With no ID recorded, `icp deploy` creates the canister. To install into one created elsewhere (for example in the
+NNS app):
+1. In the NNS app, add the icp-cli identity's principal (`icp identity principal`) as a controller. The NNS principal
+   created the canister and is its only controller until then, and `icp deploy` is refused without that.
+2. Record the ID in `.icp/data/mappings/ic.ids.json` as `{ "solana_signer": "<canister id>" }`, so `icp deploy`
+   installs into it instead of creating a new one. Commit that file.
 
 After the first deploy:
 - run `mops deployed init solana_signer` once;

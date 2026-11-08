@@ -59,6 +59,9 @@ CLUSTER=devnet npm run crank -- --once
 CLUSTER=devnet SKIP_METADATA_FETCH=1 npm run worker
 ```
 
+Path A (Internet Identity accounts) has its own devnet smoke test, which drives the deployed Chain Fusion signer
+canister: see "Devnet smoke test" in [`canisters/solana_signer/README.md`](../canisters/solana_signer/README.md).
+
 ### Devnet test curve
 
 The mainnet curve graduates at about 85 SOL. To test graduation, Raydium
