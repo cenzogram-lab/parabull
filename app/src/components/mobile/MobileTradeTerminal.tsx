@@ -15,6 +15,7 @@ import { progressOf } from "../../mock/coins";
 import { useApp } from "../../state/AppState";
 import { useMarket } from "../../state/Market";
 import { XLogo } from "../brand/Wordmark";
+import { CoinChat } from "../coin/CoinChat";
 import { CoinCallouts, EscrowGauge, MigrationGauge } from "../coin/CoinWidgets";
 import { PriceChart } from "../coin/PriceChart";
 import { TradeStats } from "../coin/TradePanel";
@@ -26,8 +27,8 @@ import { HolderList, TradeFeed } from "./MobileTradeLists";
 import { XAutomationButton } from "../coin/XAutomationModal";
 import { safeLink } from "../../lib/launchRules";
 
-type Tab = "Trades" | "Holders" | "Callouts";
-const TABS = ["Trades", "Holders", "Callouts"] as const;
+type Tab = "Trades" | "Holders" | "Callouts" | "Chat";
+const TABS = ["Trades", "Holders", "Callouts", "Chat"] as const;
 /** The mobile header's height: where the sticky tab row pins. */
 const HEADER_PX = 56;
 
@@ -251,6 +252,8 @@ export function MobileTradeTerminal({ coin }: { coin: Coin }) {
         {tab === "Trades" && <TradeFeed coin={coin} />}
         {tab === "Holders" && <HolderList coin={coin} />}
         {tab === "Callouts" && <CoinCallouts coin={coin} />}
+        {/* A fixed-height panel that scrolls inside, so the composer stays above the Buy / Sell bar. */}
+        {tab === "Chat" && <CoinChat mint={coin.mint} className="mx-4 mt-3 h-[60vh] min-h-[320px] rounded-2xl border border-line bg-surface" />}
       </div>
 
       <MobileTradeBar coin={coin} />

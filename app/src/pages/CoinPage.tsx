@@ -2,6 +2,7 @@ import { Check, Copy, ExternalLink, Globe, Lock, Send, Star } from "lucide-react
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { XLogo } from "../components/brand/Wordmark";
+import { CoinChat } from "../components/coin/CoinChat";
 import { XAutomationButton } from "../components/coin/XAutomationModal";
 import { CoinCallouts, EscrowGauge, HoldersTable, MigrationGauge, TradesTable } from "../components/coin/CoinWidgets";
 import { PriceChart } from "../components/coin/PriceChart";
@@ -67,7 +68,7 @@ export function CoinPage() {
   const now = useNow();
   const isMobile = useIsMobile();
   const coin = byMint.get(mint);
-  const [tab, setTab] = useState<"Holders" | "Trades" | "Callouts">("Trades");
+  const [tab, setTab] = useState<"Holders" | "Trades" | "Callouts" | "Chat">("Trades");
   useEffect(() => {
     if (coin) markViewed(coin.mint);
   }, [coin?.mint]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -185,9 +186,14 @@ export function CoinPage() {
 
         <div className="panel">
           <div className="px-4 pt-3">
-            <UnderlineTabs options={["Trades", "Holders", "Callouts"] as const} value={tab} onChange={setTab} />
+            <UnderlineTabs options={["Trades", "Holders", "Callouts", "Chat"] as const} value={tab} onChange={setTab} />
           </div>
-          <div className="max-h-[520px] overflow-y-auto">{tab === "Holders" ? <HoldersTable coin={coin} /> : tab === "Trades" ? <TradesTable coin={coin} /> : <CoinCallouts coin={coin} />}</div>
+          {/* The chat scrolls its own message list, with the composer pinned under it. */}
+          {tab === "Chat" ? (
+            <CoinChat mint={coin.mint} className="h-[520px] border-t border-line" />
+          ) : (
+            <div className="max-h-[520px] overflow-y-auto">{tab === "Holders" ? <HoldersTable coin={coin} /> : tab === "Trades" ? <TradesTable coin={coin} /> : <CoinCallouts coin={coin} />}</div>
+          )}
         </div>
       </div>
 
