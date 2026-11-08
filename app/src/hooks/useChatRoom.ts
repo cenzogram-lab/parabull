@@ -11,17 +11,12 @@
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CONFIG } from "../config";
-import { chatEndpoints, chatSignIn, reconnectDelay } from "../lib/chatClient";
+import { chatEndpoints, reconnectDelay } from "../lib/chatClient";
+import { dropSession, signInToEdge, validSession } from "../lib/edgeSession";
 import { CHAT_COOLDOWN_MS, CHAT_HISTORY, checkText, type ChatMessage, type ChatSessionResponse, type ServerFrame } from "../lib/chatMessage";
 
 export type ChatStatus = "off" | "connecting" | "open" | "reconnecting";
 
-/** Session tokens by wallet, for this tab only. */
-const sessions = new Map<string, ChatSessionResponse>();
-const validSession = (wallet: string) => {
-  const s = sessions.get(wallet);
-  return s && s.expiresAt - Date.now() > 60_000 ? s : null;
-};
 
 export interface ChatRoom {
   status: ChatStatus;
@@ -116,7 +111,7 @@ export function useChatRoom(mint: string): ChatRoom {
           readyWaiters.current.splice(0).forEach((r) => r(f.wallet));
         } else if (f.type === "error") {
           if (f.code === "session_expired" || f.code === "sign_in_required") {
-            if (walletRef.current) sessions.delete(walletRef.current);
+            if (walletRef.current) dropSession(walletRef.current);
             socketToken.current = null;
             setSignedInAs(null);
             readyWaiters.current.splice(0).forEach((r) => r(null));
@@ -164,14 +159,8 @@ export function useChatRoom(mint: string): ChatRoom {
       if (!signMessage) throw new Error("This wallet can't sign messages, so it can't chat");
       setSigningIn(true);
       try {
-        const nonce = crypto.getRandomValues(new Uint8Array(16));
-        const { message, body } = chatSignIn(wallet, new Date(), nonce);
-        const signature = await signMessage(new TextEncoder().encode(message));
-        const res = await fetch(endpoints.session, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body(signature)) });
-        const json = (await res.json().catch(() => ({}))) as Partial<ChatSessionResponse> & { error?: string };
-        if (!res.ok || !json.token || json.wallet !== wallet || !json.expiresAt) throw new Error(json.error ? `Chat sign-in failed: ${json.error}` : `Chat sign-in failed (${res.status})`);
-        s = { token: json.token, wallet, expiresAt: json.expiresAt };
-        sessions.set(wallet, s);
+        // One sign-in serves the chat and going live (lib/edgeSession.ts).
+        s = await signInToEdge(endpoints.session, wallet, signMessage);
       } finally {
         setSigningIn(false);
       }

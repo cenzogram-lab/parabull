@@ -27,6 +27,7 @@ import { HolderList, TradeFeed } from "./MobileTradeLists";
 import { XAutomationButton } from "../coin/XAutomationModal";
 import { safeLink } from "../../lib/launchRules";
 import { useLiveStreams } from "../../hooks/useLiveStreams";
+import { GoLiveButton } from "../live/GoLive";
 import { CoinLivePanel } from "../live/LiveViews";
 
 type Tab = "Trades" | "Holders" | "Callouts" | "Chat";
@@ -201,8 +202,10 @@ export function MobileTradeTerminal({ coin }: { coin: Coin }) {
 
           <Blurb text={coin.description} />
 
-          <div className="mt-3 flex gap-2">
+          {/* Wraps: the creator also gets Go live and X automation, which don't fit one 390px row with the rest. */}
+          <div className="mt-3 flex flex-wrap gap-2">
             <CaPill mint={coin.mint} />
+            <GoLiveButton coin={coin} variant="phone" />
             <XAutomationButton coin={coin} variant="phone" />
             <a href={explorer("token", coin.mint)} target="_blank" rel="noreferrer" className="flex h-11 shrink-0 items-center gap-1.5 rounded-full border border-line px-4 text-[13px] font-medium text-muted transition-colors duration-100 ease-out active:border-line-accent active:text-cream">
               Solscan <ExternalLink className="h-3.5 w-3.5" aria-hidden />
