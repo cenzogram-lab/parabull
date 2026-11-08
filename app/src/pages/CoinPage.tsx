@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { XLogo } from "../components/brand/Wordmark";
 import { CoinChat } from "../components/coin/CoinChat";
+import { CoinLivePanel } from "../components/live/LiveViews";
+import { useLiveStreams } from "../hooks/useLiveStreams";
 import { XAutomationButton } from "../components/coin/XAutomationModal";
 import { CoinCallouts, EscrowGauge, HoldersTable, MigrationGauge, TradesTable } from "../components/coin/CoinWidgets";
 import { PriceChart } from "../components/coin/PriceChart";
@@ -64,6 +66,7 @@ function LockTimers({ coin }: { coin: Coin }) {
 export function CoinPage() {
   const { mint = "" } = useParams();
   const { byMint, solUsd } = useMarket();
+  const live = useLiveStreams();
   const { markViewed, watchlist, toggleWatch } = useApp();
   const now = useNow();
   const isMobile = useIsMobile();
@@ -176,6 +179,9 @@ export function CoinPage() {
             </div>
           ))}
         </div>
+
+        {/* While the coin's creator is streaming (Cloudflare Stream), the stream sits above the chart. */}
+        <CoinLivePanel live={live} mint={coin.mint} />
 
         <PriceChart coin={coin} />
 

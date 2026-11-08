@@ -26,6 +26,8 @@ import { MobileTradeBar } from "./MobileTradeBar";
 import { HolderList, TradeFeed } from "./MobileTradeLists";
 import { XAutomationButton } from "../coin/XAutomationModal";
 import { safeLink } from "../../lib/launchRules";
+import { useLiveStreams } from "../../hooks/useLiveStreams";
+import { CoinLivePanel } from "../live/LiveViews";
 
 type Tab = "Trades" | "Holders" | "Callouts" | "Chat";
 const TABS = ["Trades", "Holders", "Callouts", "Chat"] as const;
@@ -144,6 +146,7 @@ function Metric({ label, value, sub, change }: { label: string; value: string; s
 
 export function MobileTradeTerminal({ coin }: { coin: Coin }) {
   const { solUsd } = useMarket();
+  const live = useLiveStreams();
   const { watchlist, toggleWatch } = useApp();
   const now = useNow();
   const [tab, setTab] = useState<Tab>("Trades");
@@ -239,6 +242,7 @@ export function MobileTradeTerminal({ coin }: { coin: Coin }) {
           <Metric label="All-time high" value={usdCompact(coin.athUsd)} sub={`${((coin.mcapUsd / coin.athUsd) * 100).toFixed(0)}% of ATH`} />
         </div>
 
+        <CoinLivePanel live={live} mint={coin.mint} />
         <PriceChart coin={coin} />
         <MigrationGauge coin={coin} />
         <EscrowGauge coin={coin} />

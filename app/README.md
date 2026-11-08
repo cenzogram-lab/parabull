@@ -23,7 +23,7 @@ npm run dev          # http://localhost:5173
 | `/leaderboard` | Traders / Squads / Rewards / Best Callouts, top-4 podium, 1D/1W/1M, Profit/Volume, Best callouts rail |
 | `/portfolio` | Your profile, net equity with a 1D / 1W / 1M / ALL curve, then Open / Closed / Replies / Rewards and Deposit / Receive. On desktop it's a centered column |
 | `/search` | Recent searches and recently viewed coins at rest, coin and creator results as you type. On desktop it's a centered column; ⌘K still opens the overlay there |
-| `/live` | Spotlight stream with the spotlight coin's live chat, then Most viewers / Highest market cap / Trending clips |
+| `/live` | With Cloudflare Stream configured: the live coin's stream (`hls.js` player) beside its chat, and the other coins live now. Otherwise the demo: spotlight stream with chat, then Most viewers / Highest market cap / Trending clips |
 | `/holder-rewards` | Holder-reward totals, top paying coins, how the fee split works |
 | `/parabull-token` (`/rewards`) | Buyback & burn tracker, daily ledger, earnings-to-valuation calculator, Merkle claims |
 | `/admin` | Operator console for the admin, crank and nominated-admin wallets (chain mode). See [Admin console](#admin-console) |
@@ -124,8 +124,20 @@ Set these in `app/.env.local` (see `src/config.ts`):
 | `VITE_SENTINEL_URL` | unset | The X sentinel ([`services/twitter-sentinel`](../services/twitter-sentinel/README.md)). When the connected wallet launched the coin, its page shows an **X automation** button with a status dot. It opens a modal (a bottom sheet on a phone) to link, replace or disconnect the project's X account and set milestone posts, cashtag replies, persona and project context, any time after launch. Every change is signed by the wallet. Unset, the modal says the sentinel isn't connected; demo coins can't be saved, since they aren't on-chain |
 | `VITE_MEDIA_URL` | unset | The public R2 domain media is served from (`services/parabull-edge`). Added to the CSP's `connect-src` and `media-src` |
 | `VITE_CHAT_URL` | unset | The edge Worker's origin for coin chat (`wss://edge.parabull.xyz`; `https://` works too). Each coin's chat is a `ChatRoom` Durable Object ([`services/parabull-edge`](../services/parabull-edge/README.md)). Its `wss://` and `https://` origins are added to `connect-src`. Unset, the Chat tab and `/live` say live chat isn't connected; there's no simulated feed |
-| `VITE_STREAM_HOST` | unset | Cloudflare Stream playback host (`customer-<code>.cloudflarestream.com`; the player isn't built yet). Added to `connect-src` (hls.js) and `media-src` |
+| `VITE_STREAM_HOST` | unset | Cloudflare Stream playback host (`customer-<code>.cloudflarestream.com`). With `VITE_CHAT_URL` (the edge Worker) it turns on real live streams: `/live`, the coin page's stream panel and the phone's Live chip and Live now row read the Worker's `GET /live`. Added to `connect-src` (hls.js) and `media-src`. Unset, `/live` shows the demo streams |
 | `VITE_II_SIGNER_CANISTER_ID` | unset | The Chain Fusion signer canister for Internet Identity users ([`src/lib/auth/solana_signer.did`](src/lib/auth/solana_signer.did)). Unset, "Continue with Google / Passkey / Email" uses a development key in demo builds and on the dev server, a local test identity on localnet, and is disabled in a production chain build (see [Connecting](#connecting)) |
+
+**Live streams** (`src/components/live/`, `src/hooks/useLiveStreams.ts`) need `VITE_STREAM_HOST` and `VITE_CHAT_URL`:
+- **Which coins are live:** one poll of the edge Worker's `GET /live` every 20 seconds, shared by the whole app and
+  paused while the tab is hidden.
+- **The player** (`StreamPlayer`) plays a live input's HLS manifest with `hls.js`. It loads the light build on demand
+  (a separate ~118 KB gzip chunk), or the browser's own HLS on iOS. It starts muted with "Tap to unmute", and has
+  play/pause, mute and full-screen controls (44px on a phone). A broadcast that drops shows "Stream offline" and
+  reconnects on its own. The manifest URL is rebuilt from `VITE_STREAM_HOST`, never taken from the response.
+- **Where it shows:**
+  - `/live`: the live coin's stream beside its chat, with any other live coins under it, or "Nobody is live right now";
+  - each live coin's page: the stream above the chart;
+  - on a phone: the Live chip counts real streams, and the board's Live now row lists them.
 
 **Coin chat** (`src/components/coin/CoinChat.tsx`, `src/hooks/useChatRoom.ts`) is on the coin page's Chat tab and on
 `/live`:

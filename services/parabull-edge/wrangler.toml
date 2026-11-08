@@ -9,6 +9,10 @@ MEDIA_PUBLIC_URL = "https://media.example.com"
 # Origins allowed to call the Worker (uploads, chat sign-in, chat sockets): the frontend canister's URL and any custom
 # domain, comma-separated. Anything else is refused, so until this is set everything fails closed.
 ALLOWED_ORIGINS = "https://frontend-canister-id.icp0.io"
+# Cloudflare Stream (GET /live): the account's id (32 hex characters) and its Stream customer host. The API token
+# (Stream Read) is a secret: npx wrangler@4 secret put CF_STREAM_TOKEN. Without all three, /live answers 503.
+CF_ACCOUNT_ID = "00000000000000000000000000000000"
+STREAM_HOST = "customer-CODE.cloudflarestream.com"
 
 [[r2_buckets]]
 binding = "MEDIA"

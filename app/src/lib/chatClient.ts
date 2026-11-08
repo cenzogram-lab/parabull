@@ -9,6 +9,8 @@ export interface ChatEndpoints {
   room(mint: string): string;
   session: string;
   upload: string;
+  /** GET: coins streaming now (Cloudflare Stream), from the same Worker. */
+  live: string;
 }
 
 /**
@@ -28,7 +30,7 @@ export function chatEndpoints(raw: string | undefined): ChatEndpoints | null {
   const path = u.pathname.replace(/\/+$/, "").replace(/\/chat$/, "");
   const ws = `${secure ? "wss" : "ws"}://${u.host}${path}`;
   const http = `${secure ? "https" : "http"}://${u.host}${path}`;
-  return { room: (mint) => `${ws}/chat/${encodeURIComponent(mint)}`, session: `${http}/chat/session`, upload: `${http}/chat/upload` };
+  return { room: (mint) => `${ws}/chat/${encodeURIComponent(mint)}`, session: `${http}/chat/session`, upload: `${http}/chat/upload`, live: `${http}/live` };
 }
 
 export const bytesToBase64 = (b: Uint8Array) => btoa(Array.from(b, (x) => String.fromCharCode(x)).join(""));

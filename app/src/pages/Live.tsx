@@ -2,6 +2,8 @@ import { ArrowRight, ChevronLeft, ChevronRight, Eye, Film, Radio, Users } from "
 import { useRef } from "react";
 import { Link } from "react-router-dom";
 import { CoinChat } from "../components/coin/CoinChat";
+import { StreamLivePage } from "../components/live/LiveViews";
+import { useLiveStreams } from "../hooks/useLiveStreams";
 import { ChangePill } from "../components/ui/primitives";
 import { TraderAvatar } from "../components/ui/visuals";
 import { useIsMobile } from "../hooks/useMediaQuery";
@@ -130,7 +132,13 @@ function MobileSpotlight({ s, coin, trader }: { s: Stream; coin: Coin; trader?: 
   );
 }
 
+/** Real streams when Cloudflare Stream is configured (VITE_CHAT_URL + VITE_STREAM_HOST); the demo page otherwise. */
 export function Live() {
+  const live = useLiveStreams();
+  return live.configured ? <StreamLivePage live={live} /> : <DemoLive />;
+}
+
+function DemoLive() {
   const { streams, byMint, traders } = useMarket();
   const now = useNow();
   const isMobile = useIsMobile();
