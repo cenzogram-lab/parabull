@@ -446,11 +446,14 @@ export class Indexer extends EventEmitter {
           return this.applyTrade(signature, index, d);
         case "TokenCreated":
           return this.applyCreated(d);
-        case "LaunchRequested":
+        case "LaunchRequested": {
+          // A replayed event (the backfill) keeps the on-chain created_at the ticket snapshot already gave it.
+          const cur = this.store.tickets.get(d.ticket as string);
           return this.upsertTicket(
-            { ticket: d.ticket as string, payer: d.payer as string, ticker: d.ticker as string, depositLamports: d.deposit_lamports as bigint, createdAt: this.nowSec(), expiresAt: Number(d.expires_at) },
+            { ticket: d.ticket as string, payer: d.payer as string, ticker: d.ticker as string, depositLamports: d.deposit_lamports as bigint, createdAt: cur?.createdAt ?? this.nowSec(), expiresAt: Number(d.expires_at) },
             "pending",
           );
+        }
         case "TicketRefunded": {
           const t = this.store.tickets.get(d.ticket as string);
           return this.upsertTicket(t ?? { ticket: d.ticket as string, payer: d.payer as string, ticker: "", depositLamports: d.lamports as bigint, createdAt: 0, expiresAt: 0 }, "refunded");

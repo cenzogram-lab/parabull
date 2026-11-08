@@ -440,9 +440,28 @@ function IndexerMarketProvider({ children }: { children: ReactNode }) {
     };
   }, [client, upsert]);
 
-  // Live updates: coin changes, trades (the ticker, the watched coin's tape and holders, your positions).
+  // Live updates: coin changes, trades (the ticker, the watched coin's tape and holders, your positions). The stream
+  // doesn't replay what it missed while disconnected, so a reconnect re-reads the list, the watched coin's trades and
+  // holders, and your positions; other coins' trades are refetched when next opened.
   useEffect(() => {
     if (!client) return;
+    let connected = false;
+    const resync = () => {
+      if (!connected) return void (connected = true);
+      client
+        .coins(200)
+        .then(upsert)
+        .catch(() => undefined);
+      const mint = watched.current;
+      tradesLoaded.current = new Set(mint ? [mint] : []);
+      if (mint)
+        client
+          .trades(mint)
+          .then((ts) => setRawTrades((prev) => new Map([[mint, mergeTrades(ts, prev.get(mint))]])))
+          .catch(() => undefined);
+      if (mint) loadHolders(mint);
+      refreshPositions();
+    };
     return client.stream((m) => {
       if (m.type === "coin") return upsert([m.coin]);
       if (m.type !== "trade") return;
@@ -454,7 +473,7 @@ function IndexerMarketProvider({ children }: { children: ReactNode }) {
         window.clearTimeout(holdersTimer.current);
         holdersTimer.current = window.setTimeout(() => loadHolders(t.mint), 3_000);
       }
-    });
+    }, resync);
   }, [client, upsert, refreshPositions, loadHolders]);
 
   // The connected wallet's positions: on connect and every 30 s.

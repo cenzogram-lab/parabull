@@ -9,12 +9,12 @@ export const MAX_TRADES_PER_COIN = 5_000;
 export const MAX_TRADES_PER_USER = 1_000;
 const MAX_SEEN_SIGNATURES = 50_000;
 
-/** Newest first: by slot, then by arrival within a slot (a later event in the same transaction comes first). */
-function insertNewestFirst(list: TradeRecord[], t: TradeRecord, cap: number) {
+/** Newest first: by slot, then by arrival within a slot. Returns what fell off the end past `cap`. */
+function insertNewestFirst(list: TradeRecord[], t: TradeRecord, cap: number): TradeRecord[] {
   let i = 0;
   while (i < list.length && (list[i].slot > t.slot || (list[i].slot === t.slot && list[i].timestamp > t.timestamp))) i++;
   list.splice(i, 0, t);
-  if (list.length > cap) list.length = cap;
+  return list.length > cap ? list.splice(cap) : [];
 }
 
 export class Store {
@@ -44,12 +44,18 @@ export class Store {
     if (this.tradeKeys.has(key)) return false;
     this.tradeKeys.add(key);
     const byMint = this.tradesByMint.get(t.mint) ?? [];
-    insertNewestFirst(byMint, t, MAX_TRADES_PER_COIN);
+    // A trade that falls off its coin's list is forgotten entirely, so the dedupe keys stay bounded by what's kept.
+    for (const old of insertNewestFirst(byMint, t, MAX_TRADES_PER_COIN)) this.tradeKeys.delete(tradeCursor(old));
     this.tradesByMint.set(t.mint, byMint);
     const byUser = this.tradesByUser.get(t.user) ?? [];
     insertNewestFirst(byUser, t, MAX_TRADES_PER_USER);
     this.tradesByUser.set(t.user, byUser);
     return true;
+  }
+
+  /** How many trade keys are held (bounded by the per-coin caps). */
+  get tradeKeyCount() {
+    return this.tradeKeys.size;
   }
 
   trades(mint: string): TradeRecord[] {

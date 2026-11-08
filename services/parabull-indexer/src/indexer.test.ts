@@ -288,3 +288,23 @@ test("indexer: an event for an unknown coin while the RPC is down doesn't crash 
     process.off("unhandledRejection", onUnhandled);
   }
 });
+
+test("store: trades past a coin's cap are forgotten with their dedupe keys (memory stays bounded)", async () => {
+  const { Store, MAX_TRADES_PER_COIN } = await import("./store");
+  const s = new Store();
+  const n = MAX_TRADES_PER_COIN + 250;
+  for (let i = 0; i < n; i++)
+    s.addTrade({ signature: `sig${i}`, index: 0, mint: "M", user: `u${i % 7}`, isBuy: true, tokenAmount: 1n, solAmount: 1n, fee: 0n, slot: i, timestamp: i, virtualToken: 1n, virtualSol: 1n, realToken: 1n, realSol: 1n });
+  assert.equal(s.trades("M").length, MAX_TRADES_PER_COIN);
+  assert.equal(s.tradeKeyCount, MAX_TRADES_PER_COIN, "keys for evicted trades are dropped");
+  assert.equal(s.trades("M").at(-1)!.signature, "sig250", "the oldest go first");
+});
+
+test("indexer: replaying a ticket's LaunchRequested keeps its on-chain creation time", async () => {
+  const { chain, ix } = await setup();
+  const createdOnChain = chain.time; // request_launch's created_at
+  const t = chain.requestLaunch(ALICE, "TIME");
+  chain.time += 5_000; // the indexer starts much later and backfills the request
+  await ix.start();
+  assert.equal(ix.store.tickets.get(t)?.createdAt, createdOnChain);
+});
