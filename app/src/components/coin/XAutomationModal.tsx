@@ -13,6 +13,7 @@ import { isDemo } from "../../config";
 import { useIsMobile } from "../../hooks/useMediaQuery";
 import { useParabullProgram } from "../../hooks/useParabullProgram";
 import { canonicalSettingsJson, CONTEXT_MAX, DEFAULT_SETTINGS, normalizeSession, SENTINEL_MILESTONES, SENTINEL_TONES, type SentinelSettings, type SentinelStatus } from "../../lib/sentinelMessage";
+import { saveBlocker } from "../../lib/xAutomation";
 import type { Coin } from "../../lib/types";
 import { useApp } from "../../state/AppState";
 import { XLogo } from "../brand/Wordmark";
@@ -89,7 +90,7 @@ export function XAutomationButton({ coin, variant }: { coin: Coin; variant: "des
           className={cx("ml-0.5 h-2 w-2 shrink-0 rounded-full", badge.tone === "on" ? "bg-gold shadow-[0_0_6px_rgba(229,169,103,0.7)]" : badge.tone === "dry" ? "bg-rosebronze" : "border border-line-accent bg-transparent")}
         />
       </button>
-      <XAutomationModal open={open} onClose={() => setOpen(false)} coin={coin} onStatus={setStatus} />
+      <XAutomationModal open={open} onClose={() => setOpen(false)} coin={coin} isCreator={isCreator} onStatus={setStatus} />
     </>
   );
 }
@@ -97,7 +98,8 @@ export function XAutomationButton({ coin, variant }: { coin: Coin; variant: "des
 type Load = { kind: "off" } | { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; status: SentinelStatus };
 const EMPTY_SESSION = { username: "", authToken: "", ct0: "" };
 
-export function XAutomationModal({ open, onClose, coin, onStatus }: { open: boolean; onClose: () => void; coin: Coin; onStatus?: (s: SentinelStatus) => void }) {
+/** `isCreator`: the connected wallet created the coin, by the on-chain curve in chain mode (see useIsCreator). */
+export function XAutomationModal({ open, onClose, coin, isCreator, onStatus }: { open: boolean; onClose: () => void; coin: Coin; isCreator: boolean; onStatus?: (s: SentinelStatus) => void }) {
   const { publicKey, signMessage } = useWallet();
   const { toast } = useApp();
   const [load, setLoad] = useState<Load>({ kind: sentinelConfigured() ? "loading" : "off" });
@@ -141,18 +143,9 @@ export function XAutomationModal({ open, onClose, coin, onStatus }: { open: bool
   const dirty = settingsDirty || (sessionCheck?.ok ?? false) || !status?.active;
   const signer = publicKey?.toBase58();
   // A demo-mode coin was simulated in this browser and has no bonding curve on-chain, so the sentinel can't watch it
-  // (and refuses its settings): the modal shows what X automation offers, but can't save.
-  const blocker = isDemo
-    ? `$${coin.ticker} is a demo coin, simulated in this browser, so the sentinel has no on-chain curve to watch. X automation saves for coins launched on-chain (chain mode).`
-    : load.kind !== "ready"
-      ? null
-      : !signer
-        ? `Connect the wallet that launched $${coin.ticker} to save.`
-        : signer !== coin.creator
-          ? `Only the wallet that launched $${coin.ticker} can change this.`
-          : !signMessage
-            ? "This wallet can't sign messages."
-            : null;
+  // (and refuses its settings): the modal shows what X automation offers, but can't save. In chain mode the creator
+  // check is the on-chain one, not the coin list's `creator`, which is still demo data.
+  const blocker = saveBlocker({ demo: isDemo, ready: load.kind === "ready", ticker: coin.ticker, signer: signer ?? null, isCreator, canSignMessages: !!signMessage });
   const editable = load.kind === "ready" && !busy;
 
   const save = async () => {

@@ -13,6 +13,7 @@ import { HANDLES } from "../mock/catalog";
 import { address, generateCoins, progressOf, SOL_USD } from "../mock/coins";
 import { fakeSignature, tradeHistory } from "../mock/market";
 import type { ClosedPosition } from "../mock/portfolio";
+import { useProtocol } from "./Protocol";
 import { generateCallouts, generateSquads, generateStreams, generateTraders } from "../mock/social";
 
 const SUPPLY_TOKENS = Number(PROTOCOL.totalSupply) / 1e6;
@@ -97,6 +98,9 @@ function reprice(c: Coin, reserves: Coin["reserves"]): Coin {
 }
 
 export function MarketProvider({ children }: { children: ReactNode }) {
+  // SOL/USD for display: the live feed in chain mode (Protocol polls it), the demo price in demo mode. The seeded demo
+  // data and its simulation stay priced at SOL_USD, the price they were generated with.
+  const solUsd = useProtocol().solUsd.price;
   const [coins, setCoins] = useState<Coin[]>(() => generateCoins());
   const [liveTrades, setLiveTrades] = useState<Trade[]>([]);
   const historyCache = useRef(new Map<string, Trade[]>());
@@ -315,8 +319,8 @@ export function MarketProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<MarketState>(
-    () => ({ coins, byMint, liveTrades, tradesFor, ...social, solUsd: SOL_USD, positions, startPositions, demoSolDelta, demoClosed, demoTradeCount, following, toggleFollow, demoTrade, demoLaunch }),
-    [coins, byMint, liveTrades, tradesFor, social, positions, startPositions, demoSolDelta, demoClosed, demoTradeCount, following, toggleFollow, demoTrade, demoLaunch],
+    () => ({ coins, byMint, liveTrades, tradesFor, ...social, solUsd, positions, startPositions, demoSolDelta, demoClosed, demoTradeCount, following, toggleFollow, demoTrade, demoLaunch }),
+    [coins, byMint, liveTrades, tradesFor, social, solUsd, positions, startPositions, demoSolDelta, demoClosed, demoTradeCount, following, toggleFollow, demoTrade, demoLaunch],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

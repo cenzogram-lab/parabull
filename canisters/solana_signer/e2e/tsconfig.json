@@ -7,8 +7,15 @@
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "skipLibCheck": true,
-    "typeRoots": ["../../../app/node_modules/@types"],
-    "types": ["node"]
+    "typeRoots": [
+      "../../../app/node_modules/@types"
+    ],
+    "types": [
+      "node"
+    ]
   },
-  "files": ["signer.test.ts"]
+  "files": [
+    "signer.test.ts",
+    "devnet-smoke.ts"
+  ]
 }

@@ -14,7 +14,6 @@ import { compact, countdown, sol, usd, usdCompact } from "../lib/format";
 import { leafHash, verifyProof } from "../lib/merkle";
 import { BPS, bpsLabel } from "../lib/protocolParams";
 import { fromHex } from "../lib/sha256";
-import { SOL_USD } from "../mock/coins";
 import { buybackLedger, DEMO_WALLET, PARABULL_PRICE, PARABULL_SUPPLY, walletEpochs, type DemoEpoch } from "../mock/protocol";
 import { useApp } from "../state/AppState";
 import { useProtocol } from "../state/Protocol";
@@ -281,7 +280,7 @@ export function TokenHub() {
   const isMobile = useIsMobile();
   const { hash, key } = useLocation();
   // Chain mode: the $PARABULL mint and the fee split come from Global (state/Protocol.tsx).
-  const { global, params, dexTargetUsd } = useProtocol();
+  const { global, params, dexTargetUsd, solUsd } = useProtocol();
   const parabullMint = global?.parabullMint ?? null;
   const [allDays, setAllDays] = useState(false);
   // Router navigation doesn't scroll to a hash, so on a phone do it for links to #claim (Holder rewards, notifications,
@@ -397,7 +396,7 @@ export function TokenHub() {
         </div>
 
         <ClaimPanel />
-        <p className="text-center text-xs text-muted">SOL ${SOL_USD.toFixed(2)} · $PARABULL ${PARABULL_PRICE}</p>
+        <p className="text-center text-xs text-muted">SOL ${solUsd.price.toFixed(2)} · $PARABULL ${PARABULL_PRICE}</p>
       </div>
     </div>
   );

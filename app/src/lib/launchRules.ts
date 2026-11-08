@@ -3,6 +3,7 @@
  * The program enforces all of these; the app mirrors them for live previews.
  */
 import { concatBytes, sha256, toHex } from "./sha256";
+import type { Locks } from "./types";
 
 const utf8 = new TextEncoder();
 const isAlnum = (b: number) => (b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5a) || (b >= 0x61 && b <= 0x7a);
@@ -91,3 +92,18 @@ export const safeLink = (input: string | undefined) => {
   const c = socialLink(input);
   return c.ok && c.value ? c.value : undefined;
 };
+
+/**
+ * "Verified locks only": the ticker, name and announcement-tweet locks are all still held at `now` (ms). A coin
+ * launched without a tweet has no tweet lock, so it doesn't qualify.
+ */
+export const fullyLocked = (locks: Locks, now: number) => locks.ticker > now && locks.name > now && locks.tweet !== null && locks.tweet > now;
+
+/** Past the ticket's expiry, how long to keep watching for a `create` that landed just before it (clock skew, confirmation lag). */
+export const LAUNCH_WAIT_GRACE_MS = 30_000;
+
+/**
+ * When to stop waiting for the launch worker, in ms: the ticket's on-chain `expires_at` (unix seconds) plus the grace
+ * period. After `expires_at` the program refuses `create`, so the ticket can only be refunded.
+ */
+export const launchWaitDeadline = (expiresAtSec: number, graceMs = LAUNCH_WAIT_GRACE_MS) => expiresAtSec * 1000 + graceMs;

@@ -19,7 +19,6 @@ import { durationLabel } from "../lib/protocolParams";
 import { initialReserves, mcapSol, priceSol } from "../lib/protocol";
 import { toHex } from "../lib/sha256";
 import type { Coin } from "../lib/types";
-import { SOL_USD } from "../mock/coins";
 import { useApp } from "../state/AppState";
 import { useMarket } from "../state/Market";
 import { useProtocol } from "../state/Protocol";
@@ -62,8 +61,10 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
   const [socials, setSocials] = useState({ website: "", x: "", telegram: "" });
   const [manualUri, setManualUri] = useState("");
   const [phase, setPhase] = useState<Phase>({ step: "form" });
-  // The ticket price and lock window in force: from Global in chain mode, the program defaults in demo mode.
-  const { params } = useProtocol();
+  // The ticket price and lock window in force: from Global in chain mode, the program defaults in demo mode; SOL/USD
+  // from the price feed (the demo price in demo mode).
+  const { params, solUsd: feed } = useProtocol();
+  const solUsd = feed.price;
   const fees = { deposit: params.ticketDepositLamports, fee: params.launchFeeLamports };
   const lockSeconds = params.registryLockSeconds;
   const lockFor = durationLabel(lockSeconds);
@@ -131,9 +132,9 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
       reserves: r,
       complete: false,
       migrated: false,
-      priceUsd: priceSol(r) * SOL_USD,
-      mcapUsd: mcapSol(r) * SOL_USD,
-      athUsd: mcapSol(r) * SOL_USD,
+      priceUsd: priceSol(r) * solUsd,
+      mcapUsd: mcapSol(r) * solUsd,
+      athUsd: mcapSol(r) * solUsd,
       vol24hUsd: 0,
       buyVolUsd: 0,
       sellVolUsd: 0,
@@ -154,7 +155,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
       socials: {},
       hot: false,
     };
-  }, [name, t, image, description, tw, client.publicKey, lockSeconds]);
+  }, [name, t, image, description, tw, client.publicKey, lockSeconds, solUsd]);
 
   function pickFile(f: File | undefined) {
     if (!f || !f.type.startsWith("image/")) return;
@@ -328,7 +329,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
               <dd className="num text-gold max-md:shrink-0 max-md:whitespace-nowrap max-md:pl-3">{deposit.toFixed(3)} SOL</dd>
             </div>
           </dl>
-          <p className="mt-2 text-xs text-muted">≈ ${(deposit * SOL_USD).toFixed(2)}. Any unused allowance goes to the protocol treasury. If the coin isn't created, the ticket is refunded in full. Creator fee: 0%.</p>
+          <p className="mt-2 text-xs text-muted">≈ ${(deposit * solUsd).toFixed(2)}. Any unused allowance goes to the protocol treasury. If the coin isn't created, the ticket is refunded in full. Creator fee: 0%.</p>
         </div>
 
         <button onClick={submit} disabled={!ready} className="btn-gold h-12 w-full text-[15px]">
