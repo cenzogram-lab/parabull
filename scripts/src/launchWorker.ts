@@ -129,7 +129,9 @@ export function findRequestArgs(
 export function isTransientCheckFailure(reason: string): boolean {
   if (/refusing non-public address|EBLOCKED|too many redirects|response too large|refusing \w+: URL|bad URL/i.test(reason)) return false;
   if (/(returned|X API returned) (408|425|429|5\d\d)\b/.test(reason)) return true;
-  return /(unreachable|X API error):.*(timeout|timed out|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|socket hang up|fetch failed|network)/i.test(reason);
+  // A body cut off mid-download surfaces as "aborted". ENOTFOUND (the name doesn't exist) is final; EAI_AGAIN (the
+  // resolver didn't answer) is not.
+  return /(unreachable|X API error):.*(timeout|timed out|aborted|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|socket hang up|fetch failed|network)/i.test(reason);
 }
 
 const ALLOWED_URI = /^(https:\/\/|ipfs:\/\/|ar:\/\/)/i;

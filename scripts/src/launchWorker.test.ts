@@ -185,6 +185,7 @@ test("isTransientCheckFailure: retry timeouts, dropped connections, 408/425/429/
   for (const r of [
     "metadata URI unreachable: timeout",
     "image unreachable: read ECONNRESET",
+    "image unreachable: aborted",
     "metadata URI unreachable: getaddrinfo EAI_AGAIN host",
     "metadata URI returned 503",
     "image returned 429",
@@ -195,6 +196,7 @@ test("isTransientCheckFailure: retry timeouts, dropped connections, 408/425/429/
   ]) assert.equal(isTransientCheckFailure(r), true, r);
   for (const r of [
     "metadata URI returned 404",
+    "metadata URI unreachable: getaddrinfo ENOTFOUND no-such-host.example",
     "image returned 403",
     "metadata JSON has no image",
     "metadata URI unreachable: Unexpected token < in JSON at position 0",

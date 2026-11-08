@@ -1,7 +1,7 @@
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { PublicKey } from "@solana/web3.js";
 import { ArrowDownUp, CircleAlert, ExternalLink, Info, Loader2, Megaphone, Settings2, ShieldCheck, Zap } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { explorer, isDemo } from "../../config";
 import { liveCurveOf, useLiveCurve } from "../../hooks/useLiveCurve";
 import { useParabullProgram } from "../../hooks/useParabullProgram";
@@ -48,6 +48,9 @@ export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced 
   const slippageBps = BigInt(Math.round(slippage * 100));
   // Chain mode: the curve as the chain has it (subscribed), ahead of the indexer's copy, for quoting.
   const [live, setLive] = useLiveCurve(coin.mint, !coin.migrated);
+  // The coin on screen now: a curve read that returns after a switch to another coin must not land on it.
+  const shownMint = useRef(coin.mint);
+  shownMint.current = coin.mint;
   const reserves = live?.reserves ?? coin.reserves;
   // The last token sold: the program refuses buys and sells (CurveComplete) until the crank migrates to Raydium.
   const complete = !coin.migrated && (coin.complete || !!live?.complete);
@@ -90,7 +93,7 @@ export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced 
         const account = await client.fetchCurve(mint);
         if (!account) throw new Error("This coin's bonding curve wasn't found on-chain");
         const fresh = liveCurveOf(account as unknown as Parameters<typeof liveCurveOf>[0]);
-        setLive(fresh);
+        if (shownMint.current === coin.mint) setLive(fresh);
         if (fresh.complete) throw new Error("The bonding curve just completed: trading resumes on Raydium once the coin migrates");
         if (side === "buy" && buyQ) {
           const r = requoteBuy(fresh.reserves, lamports, buyQ, feeBps, slippageBps);

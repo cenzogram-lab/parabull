@@ -79,8 +79,26 @@ export class TxUnconfirmedError extends Error {
 
 export interface ConfirmRpc {
   sendRaw(raw: Uint8Array): Promise<string>;
-  status(signature: string): Promise<{ err: unknown; confirmationStatus?: string | null } | null>;
+  /** `history`: search the whole transaction history, not just recent statuses (the final check before "expired"). */
+  status(signature: string, history?: boolean): Promise<{ err: unknown; confirmationStatus?: string | null } | null>;
   blockHeight(): Promise<number>;
+}
+
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+/** Base58 of bytes (a transaction signature). */
+export function base58(bytes: Uint8Array): string {
+  let n = 0n;
+  for (const b of bytes) n = n * 256n + BigInt(b);
+  let out = "";
+  while (n > 0n) {
+    out = B58[Number(n % 58n)] + out;
+    n /= 58n;
+  }
+  for (const b of bytes) {
+    if (b !== 0) break;
+    out = "1" + out;
+  }
+  return out;
 }
 
 export interface ConfirmOptions {
@@ -94,17 +112,19 @@ export interface ConfirmOptions {
 }
 
 /**
- * Sends `raw` and watches it: confirmed (returns the signature), failed on-chain (TxFailedError), expired
- * (TxExpiredError, once the block height is past `lastValidBlockHeight` and a last status check finds nothing), or
- * unconfirmed (TxUnconfirmedError, when nothing can be read for `maxWaitMs`). Rebroadcasts while it waits.
+ * Sends `raw` (whose first signature is `signature`) and watches it: confirmed (returns the signature), failed on-chain
+ * (TxFailedError), expired (TxExpiredError, once the block height is past `lastValidBlockHeight` and two final status
+ * checks over the whole history, a poll apart, find nothing), or unconfirmed (TxUnconfirmedError, when nothing can be
+ * read for `maxWaitMs`). Rebroadcasts while it waits. A send that errors is treated like a lost rebroadcast: the RPC
+ * may have forwarded the transaction before failing, so only its status decides.
  */
-export async function sendAndConfirm(rpc: ConfirmRpc, raw: Uint8Array, lastValidBlockHeight: number, o: ConfirmOptions = {}): Promise<string> {
+export async function sendAndConfirm(rpc: ConfirmRpc, raw: Uint8Array, signature: string, lastValidBlockHeight: number, o: ConfirmOptions = {}): Promise<string> {
   const pollMs = o.pollMs ?? 1_500;
   const rebroadcastMs = o.rebroadcastMs ?? 2_000;
   const maxWaitMs = o.maxWaitMs ?? 120_000;
   const now = o.now ?? Date.now;
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const signature = await rpc.sendRaw(raw);
+  await rpc.sendRaw(raw).catch(() => undefined);
   const started = now();
   let lastSend = started;
   const landed = (s: Awaited<ReturnType<ConfirmRpc["status"]>>) => !!s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized");
@@ -118,7 +138,13 @@ export async function sendAndConfirm(rpc: ConfirmRpc, raw: Uint8Array, lastValid
     if (s?.err) return settle(s); // processed with an error: it won't change
     const height = await rpc.blockHeight().catch(() => null);
     if (height !== null && height > lastValidBlockHeight) {
-      const last = await rpc.status(signature).catch(() => undefined);
+      // Twice, a poll apart, over the whole history: the node that answered the block height may be ahead of the one
+      // answering statuses. Expired only if both say the transaction isn't there.
+      let last = await rpc.status(signature, true).catch(() => undefined);
+      if (last === null) {
+        await sleep(pollMs);
+        last = await rpc.status(signature, true).catch(() => undefined);
+      }
       if (last && (landed(last) || last.err)) return settle(last);
       if (last === null) throw new TxExpiredError(signature);
       throw new TxUnconfirmedError(signature);
@@ -161,14 +187,16 @@ export async function sendBudgeted(o: SendBudgetedOptions): Promise<{ signature:
   if (sim.value.err) throw new TxFailedError(describeTxError(sim.value.err, sim.value.logs, o.idlErrors), null);
   const computeUnits = computeUnitLimit(sim.value.unitsConsumed);
   const signed = await o.signTransaction(build(computeUnits, blockhash));
+  if (!signed.signature) throw new Error("The wallet didn't sign the transaction");
   const raw = signed.serialize();
   const signature = await sendAndConfirm(
     {
       sendRaw: (r) => connection.sendRawTransaction(r, { skipPreflight: true, maxRetries: 0 }),
-      status: async (sig) => (await connection.getSignatureStatuses([sig])).value[0],
+      status: async (sig, history) => (await connection.getSignatureStatuses([sig], { searchTransactionHistory: !!history })).value[0],
       blockHeight: () => connection.getBlockHeight("confirmed"),
     },
     raw,
+    base58(signed.signature),
     lastValidBlockHeight,
     { idlErrors: o.idlErrors, ...o.confirm },
   );

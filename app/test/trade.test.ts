@@ -9,7 +9,7 @@ import { Keypair, PublicKey } from "@solana/web3.js";
 import { checkLocks, clockUnixTimestamp, launchedBy, lockBlocker, registryLock } from "../src/lib/launchLocks";
 import { curveProgress, initialReserves, PROTOCOL } from "../src/lib/protocol";
 import { applyBuy, quoteBuyWithSol, quoteSellTokens, requoteBuy, requoteSell } from "../src/lib/quote";
-import { computeUnitLimit, describeTxError, pickPriorityFee, priorityFeeLamports, sendAndConfirm, TxExpiredError, TxFailedError, TxUnconfirmedError, type ConfirmRpc } from "../src/lib/txSend";
+import { base58, computeUnitLimit, describeTxError, pickPriorityFee, priorityFeeLamports, sendAndConfirm, TxExpiredError, TxFailedError, TxUnconfirmedError, type ConfirmRpc } from "../src/lib/txSend";
 import { progressOf } from "../src/mock/coins";
 import idl from "../src/idl/parabull.json";
 
@@ -67,24 +67,82 @@ const fast = (clock = { t: 0 }) => ({ pollMs: 1, rebroadcastMs: 0, sleep: async 
 
 test("send and watch: confirmed after rebroadcasts, never reported failed while it may land", async () => {
   const f = fakeRpc({ landAfterSends: 3 });
-  assert.equal(await sendAndConfirm(f.rpc, new Uint8Array(1), 1_000, fast()), "sig1");
+  assert.equal(await sendAndConfirm(f.rpc, new Uint8Array(1), "sig1", 1_000, fast()), "sig1");
   assert.ok(f.sends() >= 3, "rebroadcast until it landed");
 });
 
 test("send and watch: an on-chain error is a definite failure with the program's reason", async () => {
   const slip = IDL_ERRORS.find((e) => e.name === "SlippageExceeded")!.code;
   const f = fakeRpc({ landAfterSends: 1, err: { InstructionError: [2, { Custom: slip }] } });
-  await assert.rejects(sendAndConfirm(f.rpc, new Uint8Array(1), 1_000, { ...fast(), idlErrors: IDL_ERRORS }), (e: unknown) => e instanceof TxFailedError && e.signature === "sig1" && /SlippageExceeded/.test(e.message));
+  await assert.rejects(sendAndConfirm(f.rpc, new Uint8Array(1), "sig1", 1_000, { ...fast(), idlErrors: IDL_ERRORS }), (e: unknown) => e instanceof TxFailedError && e.signature === "sig1" && /SlippageExceeded/.test(e.message));
 });
 
 test("send and watch: past the blockhash's last valid height with no status, it expired (nothing spent)", async () => {
   const f = fakeRpc({ height: 100 });
-  await assert.rejects(sendAndConfirm(f.rpc, new Uint8Array(1), 110, fast()), (e: unknown) => e instanceof TxExpiredError && /Nothing was spent/.test((e as Error).message));
+  await assert.rejects(sendAndConfirm(f.rpc, new Uint8Array(1), "sig1", 110, fast()), (e: unknown) => e instanceof TxExpiredError && /Nothing was spent/.test((e as Error).message));
 });
 
 test("send and watch: when nothing can be read in time, it's unconfirmed, not failed", async () => {
   const f = fakeRpc({ statusThrows: true, heightThrows: true });
-  await assert.rejects(sendAndConfirm(f.rpc, new Uint8Array(1), 110, { ...fast(), maxWaitMs: 5_000 }), (e: unknown) => e instanceof TxUnconfirmedError && e.signature === "sig1");
+  await assert.rejects(sendAndConfirm(f.rpc, new Uint8Array(1), "sig1", 110, { ...fast(), maxWaitMs: 5_000 }), (e: unknown) => e instanceof TxUnconfirmedError && e.signature === "sig1");
+});
+
+test("send and watch: a send that errors is not a failure; the status decides (it may have been forwarded)", async () => {
+  let statusReads = 0;
+  const rpc: ConfirmRpc = {
+    sendRaw: async () => {
+      throw new Error("fetch failed");
+    },
+    status: async () => (++statusReads >= 2 ? { err: null, confirmationStatus: "confirmed" } : null),
+    blockHeight: async () => 100,
+  };
+  assert.equal(await sendAndConfirm(rpc, new Uint8Array(1), "sigX", 1_000, fast()), "sigX");
+});
+
+test("send and watch: at expiry, a status that shows up on the second history check is still a landing", async () => {
+  const history: boolean[] = [];
+  let height = 100;
+  const rpc: ConfirmRpc = {
+    sendRaw: async () => "sigY",
+    status: async (_s, h) => {
+      history.push(!!h);
+      // The status node lags: the transaction shows only on the second history search.
+      return h && history.filter(Boolean).length >= 2 ? { err: null, confirmationStatus: "confirmed" } : null;
+    },
+    blockHeight: async () => (height += 50),
+  };
+  assert.equal(await sendAndConfirm(rpc, new Uint8Array(1), "sigY", 120, fast()), "sigY");
+  assert.ok(history.includes(true), "the final checks search the whole history");
+});
+
+test("base58 matches web3.js for signatures and keys, leading zeros included", () => {
+  for (const bytes of [Keypair.generate().publicKey.toBytes(), new Uint8Array(32), Uint8Array.from([0, 0, 7, ...new Uint8Array(29).fill(200)])]) {
+    assert.equal(base58(bytes), new PublicKey(bytes).toBase58());
+  }
+});
+
+test("re-quote: slippage is never applied twice; the shown limits are what gets sent at worst", () => {
+  const r0 = initialReserves();
+  const budget = 1_000_000_000n;
+  const shown = quoteBuyWithSol(r0, budget, 100n, 200n)!;
+  // A small buy landed first: within slippage, so it goes, but max_sol_cost stays within the shown worst price per token.
+  const small = quoteBuyWithSol(r0, 15_000_000n, 100n, 0n)!;
+  const r = requoteBuy(applyBuy(r0, small.tokens, small.solCost), budget, shown, 100n, 200n);
+  assert.ok(r.ok);
+  if (r.ok) assert.ok(r.quote.maxCost * shown.tokens <= shown.maxCost * r.quote.tokens, "price per token capped at the shown max");
+  // The price already sits above the shown max per token: refused, even though fewer tokens alone was within 2%.
+  const edge = quoteBuyWithSol(r0, 25_000_000_000n, 100n, 0n)!;
+  const atEdge = requoteBuy(applyBuy(r0, edge.tokens, edge.solCost), budget, shown, 100n, 200n);
+  assert.ok(!atEdge.ok);
+
+  const held = 50_000_000_000_000n;
+  const mid = applyBuy(r0, held * 4n, quoteBuyWithSol(r0, 30_000_000_000n, 100n, 0n)!.solCost);
+  const shownSell = quoteSellTokens(mid, held, 100n, 200n)!;
+  // Someone sold a little first: the fresh net is lower but above the shown minimum; min_sol_output stays the shown one.
+  const nudged = { ...mid, virtualSol: mid.virtualSol - 5_000_000n, virtualToken: mid.virtualToken + 80_000_000_000n, realSol: mid.realSol - 5_000_000n, realToken: mid.realToken + 80_000_000_000n };
+  const s2 = requoteSell(nudged, held, shownSell, 100n, 200n);
+  assert.ok(s2.ok);
+  if (s2.ok) assert.ok(s2.quote.minOut >= shownSell.minOut, `min_sol_output ${s2.quote.minOut} >= shown ${shownSell.minOut}`);
 });
 
 test("re-quote: a fresh curve within slippage is sent as freshly quoted; a move past it is refused", () => {

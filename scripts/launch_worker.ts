@@ -64,8 +64,10 @@ async function main() {
   }
 
   worker.listen();
+  // Passes don't wait for each other: a ticket still retrying its checks (or waiting out a pause) never holds up the
+  // next pass's discovery of new tickets. `handle` skips a ticket already in flight.
   for (;;) {
-    await worker.pollOnce().catch((e) => log(`poll failed: ${(e as Error).message}`));
+    void worker.pollOnce().catch((e) => log(`poll failed: ${(e as Error).message}`));
     await sleep(POLL_MS);
   }
 }

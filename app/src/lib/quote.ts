@@ -86,22 +86,28 @@ export const applySell = (r: Reserves, tokens: bigint, solGross: bigint): Reserv
   realSol: r.realSol - solGross,
 });
 
+const MOVED = "The price moved past your slippage since this quote. Check the new quote and place the trade again.";
+
 /**
- * Re-quotes a buy on reserves just read from the chain, as it will be sent. Refused when the fresh quote gives fewer
- * tokens than the shown one less the slippage: the price moved past what the user agreed to, so they should see the
- * new quote first.
+ * Re-quotes a buy on reserves just read from the chain, as it will be sent. The shown quote's worst price per token
+ * (its max cost over its tokens) is the limit the user agreed to, and slippage is never applied a second time on top:
+ * the fresh buy is refused if it already costs more per token than that, and is sent with `max_sol_cost` capped at it.
  */
 export function requoteBuy(fresh: Reserves, budget: bigint, shown: BuyQuote, feeBps: bigint, slippageBps: bigint): { ok: true; quote: BuyQuote } | { ok: false; reason: string } {
   const q = quoteBuyWithSol(fresh, budget, feeBps, slippageBps);
   if (!q) return { ok: false, reason: "The curve has no tokens left to buy at this size" };
-  if (q.tokens * BPS < shown.tokens * (BPS - slippageBps)) return { ok: false, reason: "The price moved past your slippage since this quote. Check the new quote and place the trade again." };
-  return { ok: true, quote: q };
+  const cap = (shown.maxCost * q.tokens) / shown.tokens;
+  if (q.total > cap) return { ok: false, reason: MOVED };
+  return { ok: true, quote: { ...q, maxCost: q.maxCost < cap ? q.maxCost : cap } };
 }
 
-/** The sell counterpart: refused when the fresh net proceeds fall below the shown minimum. */
+/**
+ * The sell counterpart: refused when the fresh net proceeds already fall below the shown minimum, and sent with
+ * `min_sol_output` no lower than that shown minimum (never the fresh net less slippage again).
+ */
 export function requoteSell(fresh: Reserves, tokens: bigint, shown: SellQuote, feeBps: bigint, slippageBps: bigint): { ok: true; quote: SellQuote } | { ok: false; reason: string } {
   const q = quoteSellTokens(fresh, tokens, feeBps, slippageBps);
   if (!q) return { ok: false, reason: "The curve can't pay out this sale" };
-  if (q.solNet < shown.minOut) return { ok: false, reason: "The price moved past your slippage since this quote. Check the new quote and place the trade again." };
-  return { ok: true, quote: q };
+  if (q.solNet < shown.minOut) return { ok: false, reason: MOVED };
+  return { ok: true, quote: { ...q, minOut: q.minOut > shown.minOut ? q.minOut : shown.minOut } };
 }
