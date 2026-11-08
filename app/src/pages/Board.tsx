@@ -1,16 +1,17 @@
-import { Activity, ArrowRight, ChevronUp, Crown, Flame, Globe, Maximize2, Megaphone, SlidersHorizontal, Trophy } from "lucide-react";
+import { Activity, ArrowRight, ChevronUp, Crown, Flame, Globe, Lock, Maximize2, Megaphone, Minimize2, SlidersHorizontal, Trophy } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { BullMark } from "../components/brand/BullMark";
 import { XLogo } from "../components/brand/Wordmark";
 import { ActiveLocks, CalloutCard, CoinCard, CoinRow } from "../components/coin/CoinViews";
 import { MobileBoard } from "../components/mobile/MobileBoard";
-import { ChangePill, cx, HotBadge, Panel, PanelHeader, Segmented, UnderlineTabs, Verified } from "../components/ui/primitives";
+import { ChangePill, cx, HotBadge, Panel, PanelHeader, Popover, Segmented, UnderlineTabs, Verified } from "../components/ui/primitives";
 import { CoinAvatar, Meter, Sparkline, TraderAvatar } from "../components/ui/visuals";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { useNow } from "../hooks/useNow";
 import { age, compact, price, usdCompact, usdSigned } from "../lib/format";
 import { GRADUATION_RAISE_LAMPORTS } from "../lib/protocol";
+import { activeScreenerFilters, FEED_PAGE, nextFeedCount, NO_SCREENER_FILTERS, passesScreener, SCREENER_ROWS, type ScreenerFilters } from "../lib/screener";
 import type { Coin, Period } from "../lib/types";
 import { progressOf } from "../mock/coins";
 import { useApp } from "../state/AppState";
@@ -95,34 +96,52 @@ function KingOfTheBull({ coin }: { coin: Coin }) {
 
 type ScreenTab = "New" | "Soon" | "Graduated" | "Movers";
 
-function ProScreener() {
+/** `expanded`: the panel spans the whole board row and lists every match (the Expand button). */
+function ProScreener({ expanded, onToggleExpand }: { expanded: boolean; onToggleExpand: () => void }) {
   const { coins } = useMarket();
+  const now = useNow();
   const [tab, setTab] = useState<ScreenTab>("New");
+  const [filters, setFilters] = useState<ScreenerFilters>(NO_SCREENER_FILTERS);
+  const active = activeScreenerFilters(filters);
   const list = useMemo(() => {
-    const curve = coins.filter((c) => !c.migrated);
+    const shown = coins.filter((c) => passesScreener(c, filters, now));
+    const curve = shown.filter((c) => !c.migrated);
     switch (tab) {
       case "New":
         return [...curve].sort((a, b) => b.createdAt - a.createdAt);
       case "Soon":
         return curve.filter((c) => progressOf(c) >= 0.6).sort((a, b) => progressOf(b) - progressOf(a));
       case "Graduated":
-        return coins.filter((c) => c.migrated).sort((a, b) => b.mcapUsd - a.mcapUsd);
+        return shown.filter((c) => c.migrated).sort((a, b) => b.mcapUsd - a.mcapUsd);
       default:
-        return [...coins].sort((a, b) => b.change1h - a.change1h);
+        return [...shown].sort((a, b) => b.change1h - a.change1h);
     }
-  }, [coins, tab]);
+  }, [coins, tab, filters, now]);
   return (
-    <Panel className="h-[660px]">
+    <Panel className={expanded ? "h-[calc(100vh-180px)] min-h-[660px] lg:col-span-2 2xl:col-span-4" : "h-[660px]"}>
       <PanelHeader
         icon={Activity}
         title="Pro Screener"
         actions={
           <>
-            <button className="btn-icon h-7 w-7" aria-label="Filters">
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-            </button>
-            <button className="btn-icon h-7 w-7" aria-label="Expand panel">
-              <Maximize2 className="h-3.5 w-3.5" />
+            <Popover
+              className="w-72"
+              trigger={(open) => (
+                <button
+                  type="button"
+                  className={cx("btn-icon relative h-7 w-7", (open || active > 0) && "text-gold")}
+                  aria-label={active ? `Filters (${active} on)` : "Filters"}
+                  aria-expanded={open}
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                  {active > 0 && <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-gold" aria-hidden />}
+                </button>
+              )}
+            >
+              {(close) => <ScreenerFilterForm value={filters} onApply={(f) => (setFilters(f), close())} />}
+            </Popover>
+            <button type="button" onClick={onToggleExpand} className="btn-icon h-7 w-7" aria-label={expanded ? "Collapse panel" : "Expand panel"} aria-expanded={expanded}>
+              {expanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
             </button>
           </>
         }
@@ -131,12 +150,51 @@ function ProScreener() {
         <Segmented options={["New", "Soon", "Graduated", "Movers"] as const} value={tab} onChange={setTab} label="Screener" />
         <span className="text-xs text-muted">{list.length}</span>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {list.slice(0, 30).map((c) => (
+      {/* Expanded, the rows (sized for a narrow panel) flow into columns instead of stretching across the board. */}
+      <div className={cx("min-h-0 flex-1 overflow-y-auto", expanded && "grid auto-rows-max grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4")}>
+        {(expanded ? list : list.slice(0, SCREENER_ROWS)).map((c) => (
           <CoinRow key={c.mint} coin={c} />
         ))}
+        {list.length === 0 && <p className="col-span-full px-4 py-10 text-center text-[13px] text-muted">No coins match these filters.</p>}
       </div>
     </Panel>
+  );
+}
+
+/** The screener's filter form: edits a draft, applied (and the popover closed) with Apply. */
+function ScreenerFilterForm({ value, onApply }: { value: ScreenerFilters; onApply: (f: ScreenerFilters) => void }) {
+  const [draft, setDraft] = useState(value);
+  const [minK, setMinK] = useState(value.minMcapUsd ? String(value.minMcapUsd / 1e3) : "");
+  const apply = (f: ScreenerFilters) => onApply(f);
+  const row = "flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-line-soft bg-canvas-2 p-2.5";
+  return (
+    <div className="space-y-2.5">
+      <label className={row}>
+        <span>
+          <span className="flex items-center gap-1.5 text-[13px] font-semibold">
+            <Lock className="h-3.5 w-3.5 text-rosebronze" /> Verified locks only
+          </span>
+          <span className="text-[11.5px] text-muted">Ticker, name and tweet all locked on-chain</span>
+        </span>
+        <input type="checkbox" className="h-4 w-4 accent-[#E5A967]" checked={draft.lockedOnly} onChange={(e) => setDraft({ ...draft, lockedOnly: e.target.checked })} />
+      </label>
+      <label className={row}>
+        <span className="text-[13px] font-semibold">Has X or website</span>
+        <input type="checkbox" className="h-4 w-4 accent-[#E5A967]" checked={draft.socialsOnly} onChange={(e) => setDraft({ ...draft, socialsOnly: e.target.checked })} />
+      </label>
+      <div>
+        <div className="label mb-1.5">Min market cap ($K)</div>
+        <input className="input h-9 py-1" inputMode="decimal" placeholder="Any" aria-label="Minimum market cap in thousands of dollars" value={minK} onChange={(e) => setMinK(e.target.value.replace(/[^0-9.]/g, ""))} />
+      </div>
+      <div className="flex justify-between pt-0.5">
+        <button type="button" onClick={() => (setDraft(NO_SCREENER_FILTERS), setMinK(""), apply(NO_SCREENER_FILTERS))} className="btn-ghost h-8 px-3 text-xs">
+          Reset
+        </button>
+        <button type="button" onClick={() => apply({ ...draft, minMcapUsd: Number(minK) > 0 ? Number(minK) * 1e3 : 0 })} className="btn-gold h-8 px-4 text-xs">
+          Apply
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -242,11 +300,13 @@ function MiniLeaderboard() {
 function TerminalBoard() {
   const { coins } = useMarket();
   const king = kingOf(coins);
+  const [expanded, setExpanded] = useState(false);
   return (
     <div className="space-y-4 p-4">
       {king && <KingOfTheBull coin={king} />}
+      {/* Expanded, the screener takes the whole first row and the other panels flow below it. */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-[1.12fr_1fr_1.12fr_1fr]">
-        <ProScreener />
+        <ProScreener expanded={expanded} onToggleExpand={() => setExpanded((e) => !e)} />
         <Trending />
         <HotCallouts />
         <MiniLeaderboard />
@@ -260,17 +320,25 @@ function ClassicBoard() {
   const [feed, setFeed] = useState<"For you" | "Following">("For you");
   const [side, setSide] = useState<"Movers" | "Trending">("Movers");
   const [newOpen, setNewOpen] = useState(false);
-  const posts = feed === "For you" ? callouts : callouts.filter((c) => following.has(c.handle));
+  const [shown, setShown] = useState(FEED_PAGE);
+  const all = feed === "For you" ? callouts : callouts.filter((c) => following.has(c.handle));
+  const posts = all.slice(0, shown);
   const newest = [...coins].sort((a, b) => b.createdAt - a.createdAt).slice(0, 6);
   const right = side === "Movers" ? [...coins].sort((a, b) => b.change1h - a.change1h) : [...coins].sort((a, b) => b.vol24hUsd - a.vol24hUsd);
   return (
     <div className="mx-auto grid max-w-[1320px] grid-cols-1 gap-12 px-8 py-6 xl:grid-cols-[minmax(0,1fr)_400px]">
       <div>
-        <UnderlineTabs size="lg" options={["For you", "Following"] as const} value={feed} onChange={setFeed} />
+        <UnderlineTabs size="lg" options={["For you", "Following"] as const} value={feed} onChange={(f) => (setFeed(f), setShown(FEED_PAGE))} />
         {posts.map((c) => (
           <CalloutCard key={c.id} callout={c} trader={traders.find((t) => t.handle === c.handle)} coin={byMint.get(c.mint)} />
         ))}
-        <button className="mt-4 text-[14px] font-semibold text-gold hover:underline">Show more updates</button>
+        {all.length === 0 && <p className="py-10 text-center text-[14px] text-muted">No updates yet from traders you follow.</p>}
+        {/* Only while there is more to show; each click adds a page. */}
+        {posts.length < all.length && (
+          <button type="button" onClick={() => setShown((n) => nextFeedCount(n, all.length))} className="mt-4 text-[14px] font-semibold text-gold hover:underline">
+            Show more updates <span className="font-normal text-muted">({all.length - posts.length} more)</span>
+          </button>
+        )}
       </div>
       <aside>
         <UnderlineTabs size="lg" options={["Movers", "Trending"] as const} value={side} onChange={setSide} />

@@ -14,7 +14,7 @@ import { OVERLAY_MS } from "../hooks/usePresence";
 import { useParabullProgram } from "../hooks/useParabullProgram";
 import { coinArt } from "../lib/art";
 import { canonicalTicker, nameHash, normalizeName, parseTweetId, socialLink, tweetIdHash } from "../lib/launchRules";
-import { checkUri, uploadMetadata } from "../lib/metadata";
+import { checkUri, MAX_IMAGE_BYTES, uploadMetadata } from "../lib/metadata";
 import { durationLabel } from "../lib/protocolParams";
 import { initialReserves, mcapSol, priceSol } from "../lib/protocol";
 import { toHex } from "../lib/sha256";
@@ -159,7 +159,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
 
   function pickFile(f: File | undefined) {
     if (!f || !f.type.startsWith("image/")) return;
-    if (f.size > 5 * 1024 * 1024) return toast({ tone: "bad", title: "Image too large", body: "Use an image under 5 MB." });
+    if (f.size > MAX_IMAGE_BYTES) return toast({ tone: "bad", title: "Image too large", body: "Use an image of at most 5 MB." });
     const reader = new FileReader();
     reader.onload = () => setImage({ url: String(reader.result), file: f });
     reader.readAsDataURL(f);

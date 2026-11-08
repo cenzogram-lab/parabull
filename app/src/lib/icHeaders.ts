@@ -2,7 +2,8 @@
  * The `_headers` file for hosting the built app on the Internet Computer with the `@dfinity/static-site` recipe (the
  * certified-assets canister). That canister adds no security headers of its own, so the CSP and friends live here.
  * vite.config.ts writes the result into `dist/_headers` at build time, so `connect-src` always includes the endpoints
- * this build was configured with (RPC and its websocket, sentinel, metadata upload, rewards artifacts).
+ * this build was configured with (RPC and its websocket, sentinel, metadata upload, rewards artifacts, the media CDN,
+ * the chat socket and the stream host), and `media-src` lets video play from the media CDN and the stream host.
  *
  * Patterns match the stored file (asset key), not the visitor's URL: `/*` covers every file, and because client routes
  * are rewritten to `/index.html` (see public/_redirects), the `/index.html` block is what every route's HTML gets.
@@ -75,19 +76,73 @@ export function rpcWebsocketOrigin(rpcUrl: string): string | null {
   }
 }
 
+/**
+ * The websocket and https origins of a chat endpoint given as ws://, wss://, http:// or https:// (wss pairs with https,
+ * ws with http): the socket and the same host's https routes (session sign-in, uploads). Empty when it isn't a URL.
+ */
+export function socketOrigins(url: string | undefined): string[] {
+  if (!url) return [];
+  try {
+    const u = new URL(url);
+    const secure = u.protocol === "wss:" || u.protocol === "https:";
+    if (!secure && u.protocol !== "ws:" && u.protocol !== "http:") return [];
+    return [`${secure ? "wss" : "ws"}://${u.host}`, `${secure ? "https" : "http"}://${u.host}`];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The https origin of the Cloudflare Stream host (`customer-<code>.cloudflarestream.com`), given bare or as an https
+ * URL; null for anything else, so a typo can't widen the policy.
+ */
+export function streamOrigin(host: string | undefined): string | null {
+  if (!host) return null;
+  const raw = /^[a-z][a-z0-9+.-]*:\/\//i.test(host) ? host : `https://${host}`;
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "https:" || u.username || u.password || !/^[a-z0-9.-]+$/i.test(u.hostname) || !u.hostname.includes(".")) return null;
+    return u.origin;
+  } catch {
+    return null;
+  }
+}
+
 export interface HeaderEnv {
   VITE_CLUSTER?: string;
   VITE_RPC_URL?: string;
   VITE_SENTINEL_URL?: string;
   VITE_METADATA_UPLOAD_URL?: string;
   VITE_REWARDS_BASE_URL?: string;
+  /** Public R2 domain media is served from (services/parabull-edge). */
+  VITE_MEDIA_URL?: string;
+  /** Coin chat endpoint (wss://), a Durable Object behind the edge Worker. */
+  VITE_CHAT_URL?: string;
+  /** Cloudflare Stream playback host, customer-<code>.cloudflarestream.com. */
+  VITE_STREAM_HOST?: string;
 }
 
 /** Every origin the app may fetch or open a socket to, for this build's configuration. */
 export function connectSources(env: HeaderEnv): string[] {
   const rpc = env.VITE_RPC_URL || CLUSTER_RPC[env.VITE_CLUSTER ?? "devnet"] || CLUSTER_RPC.devnet;
-  const configured = [originOf(rpc), rpcWebsocketOrigin(rpc), originOf(env.VITE_SENTINEL_URL), originOf(env.VITE_METADATA_UPLOAD_URL), originOf(env.VITE_REWARDS_BASE_URL)];
+  const configured = [
+    originOf(rpc),
+    rpcWebsocketOrigin(rpc),
+    originOf(env.VITE_SENTINEL_URL),
+    originOf(env.VITE_METADATA_UPLOAD_URL),
+    originOf(env.VITE_REWARDS_BASE_URL),
+    originOf(env.VITE_MEDIA_URL),
+    ...socketOrigins(env.VITE_CHAT_URL),
+    // hls.js fetches the stream's manifests and segments.
+    streamOrigin(env.VITE_STREAM_HOST),
+  ];
   return [...new Set(["'self'", ...configured.filter((s): s is string => !!s), ...RPC_PROVIDERS, ...PRICE_APIS, ...WALLET_CONNECT, ...IDENTITY_CONNECT])];
+}
+
+/** Where audio and video may play from: the media CDN and the stream host, plus blob: for hls.js's MediaSource. */
+export function mediaSources(env: HeaderEnv): string[] {
+  const configured = [originOf(env.VITE_MEDIA_URL), streamOrigin(env.VITE_STREAM_HOST)];
+  return [...new Set(["'self'", "blob:", ...configured.filter((s): s is string => !!s)])];
 }
 
 export function contentSecurityPolicy(env: HeaderEnv): string {
@@ -100,6 +155,7 @@ export function contentSecurityPolicy(env: HeaderEnv): string {
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
     `connect-src ${connectSources(env).join(" ")}`,
+    `media-src ${mediaSources(env).join(" ")}`,
     `frame-src ${[...WALLET_FRAMES, ...IDENTITY_FRAMES].join(" ")}`,
     "worker-src 'self' blob:",
     "object-src 'none'",

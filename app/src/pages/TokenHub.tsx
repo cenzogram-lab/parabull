@@ -337,8 +337,8 @@ export function TokenHub() {
             <a href={parabullMint ? `https://raydium.io/swap/?inputMint=sol&outputMint=${parabullMint}` : "https://raydium.io/swap/"} target="_blank" rel="noreferrer" className="btn-gold h-12 px-7 text-[15px] max-md:flex-1 max-md:px-4">
               Trade $PARABULL <ArrowRight className="h-4 w-4" />
             </a>
-            {/* Shares on a phone; the desktop button stays as it was. */}
-            <button onClick={isMobile ? share : undefined} className="btn-ghost h-12 px-6 text-[15px] max-md:px-5">
+            {/* The system share sheet where there is one (phones, most desktop browsers), otherwise the link is copied. */}
+            <button type="button" onClick={share} className="btn-ghost h-12 px-6 text-[15px] max-md:px-5">
               Share <Share2 className="h-4 w-4" />
             </button>
           </div>

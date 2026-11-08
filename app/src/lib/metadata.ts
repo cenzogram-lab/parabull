@@ -18,6 +18,9 @@ export interface MetadataInput {
 
 const ALLOWED = /^(https:\/\/|ipfs:\/\/|ar:\/\/)/i;
 
+/** The launch worker refuses larger images (scripts/src/launchWorker.ts checkMetadataUri), and so does parabull-edge. */
+export const MAX_IMAGE_BYTES = 5_000_000;
+
 export function checkUri(uri: string): string | null {
   if (!ALLOWED.test(uri)) return "Metadata URI must start with https://, ipfs:// or ar://";
   if (byteLength(uri) > 200) return "Metadata URI is at most 200 bytes";

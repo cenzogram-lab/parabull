@@ -1,14 +1,15 @@
-import { Copy, Eye, Heart, MessageCircle, MoreHorizontal, Share2, UserPlus } from "lucide-react";
+import { ArrowUpRight, Check, Copy, Eye, Heart, Link2, MessageCircle, MoreHorizontal, Share2, UserPlus } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useIsMobile } from "../../hooks/useMediaQuery";
 import { useNow } from "../../hooks/useNow";
 import { age, pct, shortAddr, usd, usdCompact, usdSigned } from "../../lib/format";
 import type { Callout, Coin, Trader } from "../../lib/types";
 import { progressOf } from "../../mock/coins";
+import { useApp } from "../../state/AppState";
 import { useMarket } from "../../state/Market";
 import { XLogo } from "../brand/Wordmark";
 import { FollowButton } from "../mobile/MobileUi";
-import { AgeTag, ChangePill, cx, HotBadge, LockBadge, StageBadge } from "../ui/primitives";
+import { AgeTag, ChangePill, cx, HotBadge, LockBadge, Popover, StageBadge } from "../ui/primitives";
 import { CoinAvatar, Meter, TraderAvatar } from "../ui/visuals";
 
 export function ActiveLocks({ coin, compact = true }: { coin: Coin; compact?: boolean }) {
@@ -93,6 +94,55 @@ export function CoinCard({ coin }: { coin: Coin }) {
   );
 }
 
+/** The callout's "More" menu: open the coin, copy its link, or share the callout. */
+function CalloutMenu({ callout, coin }: { callout: Callout; coin: Coin }) {
+  const { toast } = useApp();
+  const url = `${window.location.origin}/coin/${coin.mint}`;
+  const copy = async (text: string, title: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({ tone: "good", title, body: text.length > 80 ? `${text.slice(0, 80)}…` : text });
+    } catch {
+      toast({ tone: "info", title: "Copy this link", body: text });
+    }
+  };
+  const share = async () => {
+    const text = `@${callout.handle} on $${coin.ticker}: ${callout.text}`;
+    try {
+      if (navigator.share) return await navigator.share({ title: `$${coin.ticker} on Parabull`, text, url });
+      await copy(`${text} ${url}`, "Callout copied");
+    } catch (e) {
+      // Closing the share sheet rejects with AbortError: nothing to report.
+      if ((e as Error).name !== "AbortError") toast({ tone: "info", title: "Share this link", body: url });
+    }
+  };
+  const item = "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] hover:bg-surface-2";
+  return (
+    <Popover
+      className="w-52 p-1.5"
+      trigger={(open) => (
+        <button type="button" className="btn-icon h-7 w-7" aria-label="More" aria-haspopup="menu" aria-expanded={open}>
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+      )}
+    >
+      {(close) => (
+        <div role="menu" aria-label={`@${callout.handle}'s callout`}>
+          <Link role="menuitem" to={`/coin/${coin.mint}`} onClick={close} className={item}>
+            <ArrowUpRight className="h-4 w-4 text-copper" /> View ${coin.ticker}
+          </Link>
+          <button role="menuitem" type="button" onClick={() => (close(), void copy(url, "Link copied"))} className={item}>
+            <Link2 className="h-4 w-4 text-copper" /> Copy coin link
+          </button>
+          <button role="menuitem" type="button" onClick={() => (close(), void share())} className={item}>
+            <Share2 className="h-4 w-4 text-copper" /> Share callout
+          </button>
+        </div>
+      )}
+    </Popover>
+  );
+}
+
 /** Social callout: a public call on a coin the trader holds. */
 export function CalloutCard({ callout, trader, coin, dense = false }: { callout: Callout; trader?: Trader; coin?: Coin; dense?: boolean }) {
   const now = useNow();
@@ -114,15 +164,21 @@ export function CalloutCard({ callout, trader, coin, dense = false }: { callout:
               {isMobile ? (
                 <FollowButton name={`@${callout.handle}`} on={following.has(callout.handle)} onToggle={() => toggleFollow(callout.handle)} />
               ) : (
-                <button className="touch-target inline-flex h-7 items-center gap-1 rounded-full border border-line px-2.5 text-xs font-semibold text-cream hover:border-line-accent">
-                  <UserPlus className="h-3.5 w-3.5" /> Follow
+                <button
+                  type="button"
+                  onClick={() => toggleFollow(callout.handle)}
+                  aria-pressed={following.has(callout.handle)}
+                  aria-label={`Follow @${callout.handle}`}
+                  className={cx(
+                    "touch-target inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-xs font-semibold hover:border-line-accent",
+                    following.has(callout.handle) ? "border-gold/40 text-gold" : "border-line text-cream",
+                  )}
+                >
+                  {following.has(callout.handle) ? <Check className="h-3.5 w-3.5" /> : <UserPlus className="h-3.5 w-3.5" />}
+                  {following.has(callout.handle) ? "Following" : "Follow"}
                 </button>
               )}
-              {!dense && (
-                <button className="btn-icon h-7 w-7" aria-label="More">
-                  <MoreHorizontal className="h-4 w-4" />
-                </button>
-              )}
+              {!dense && <CalloutMenu callout={callout} coin={coin} />}
             </div>
           </div>
           <p className={cx("mt-1.5 text-cream/95", dense ? "text-[13px] leading-5" : "text-[14.5px] leading-6")}>{callout.text}</p>

@@ -86,3 +86,28 @@ test("graduated coins link to their Raydium pool and DexScreener", () => {
   assert.equal(raydiumSwapUrl(mint), `https://raydium.io/swap/?inputMint=sol&outputMint=${mint}`);
   assert.equal(dexScreenerUrl(mint), `https://dexscreener.com/solana/${mint}`);
 });
+
+test("IC hosting: media CDN, chat socket and stream host open connect-src and media-src, nothing else", async () => {
+  const { mediaSources, socketOrigins, streamOrigin } = await import("../src/lib/icHeaders");
+  const env = {
+    VITE_MEDIA_URL: "https://media.parabull.xyz/",
+    VITE_CHAT_URL: "wss://edge.parabull.xyz/chat",
+    VITE_STREAM_HOST: "customer-abc123.cloudflarestream.com",
+  };
+  const connect = connectSources(env);
+  for (const o of ["https://media.parabull.xyz", "wss://edge.parabull.xyz", "https://edge.parabull.xyz", "https://customer-abc123.cloudflarestream.com"]) assert.ok(connect.includes(o), o);
+  assert.deepEqual(mediaSources(env), ["'self'", "blob:", "https://media.parabull.xyz", "https://customer-abc123.cloudflarestream.com"]);
+  const csp = contentSecurityPolicy(env);
+  assert.match(csp, /media-src 'self' blob: https:\/\/media\.parabull\.xyz https:\/\/customer-abc123\.cloudflarestream\.com(;|$)/);
+  // Unset: no extra origins, and video only from the app itself (plus blob: for hls.js).
+  assert.match(contentSecurityPolicy({}), /media-src 'self' blob:(;|$)/);
+  assert.ok(!connectSources({}).some((o) => /parabull\.xyz|cloudflarestream/.test(o)));
+
+  assert.deepEqual(socketOrigins("https://edge.parabull.xyz/chat"), ["wss://edge.parabull.xyz", "https://edge.parabull.xyz"]);
+  assert.deepEqual(socketOrigins("ws://127.0.0.1:8787"), ["ws://127.0.0.1:8787", "http://127.0.0.1:8787"]);
+  assert.deepEqual(socketOrigins("ftp://x.test"), []);
+  assert.deepEqual(socketOrigins("not a url"), []);
+  assert.equal(streamOrigin("https://customer-abc123.cloudflarestream.com/"), "https://customer-abc123.cloudflarestream.com");
+  for (const bad of ["http://customer-abc.cloudflarestream.com", "customer abc", "localhost", "https://u:p@customer-abc.cloudflarestream.com", "*.cloudflarestream.com"])
+    assert.equal(streamOrigin(bad), null, bad);
+});

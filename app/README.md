@@ -16,7 +16,7 @@ npm run dev          # http://localhost:5173
 
 | Route | View |
 | --- | --- |
-| `/`, `/board` | Board: King of the Bull hero, then either **Terminal Pro** (Pro Screener with New / Soon / Graduated / Movers, Trending, Hot callouts, Leaderboard) or **Classic** (For you / Following feed plus Movers / Trending cards) |
+| `/`, `/board` | Board: King of the Bull hero, then either **Terminal Pro** (Pro Screener with New / Soon / Graduated / Movers, a Filters menu for verified locks, X or website and a minimum market cap, and Expand to give it the whole row; Trending, Hot callouts, Leaderboard) or **Classic** (For you / Following feed, six callouts at a time with Show more updates, plus Movers / Trending cards). Each callout has a Follow toggle and a More menu (view the coin, copy its link, share) |
 | `/explore` | Explore table (sparkline, MCAP, ATH, AGE, TRADES, 24H VOL, TRADERS, 1H / 6H / 24H, sortable) or grid. Range filters and a "Verified locks only" toggle |
 | `/create` | Launch flow: a modal over the current page, or a full page when opened directly. Live name-lock key, ticker and tweet parsing, lock pre-check, itemized 0.230 SOL ticket, live preview, and the 3–15 s anti-bundle delay |
 | `/coin/:mint` | Trading terminal: lock countdowns, metrics, candles (`1s`–`D`, Price/MCap), bonding-curve and DexScreener gauges, Holders / Trades / Callouts tabs, Buy/Sell panel, stats and audit |
@@ -39,13 +39,17 @@ render, so there's no flash), and shared components change only through
 
 - **Frame.** The desktop dock, header, info strip and footer are hidden.
   Instead there's a sticky header (your avatar, equity and 24h PnL, which
-  open the portfolio; Deposit; notifications) and a floating nav with five
+  open the portfolio; a **Live** chip to `/live`; Deposit; notifications) and a floating nav with five
   destinations: **Board** `/`, **Explore** `/explore`, **Leaderboard**
   `/leaderboard`, **Portfolio** `/portfolio` and **Search** `/search`.
   Every page but search ends with a one-line demo-data note.
 - **Launching.** A gold **+** button above the nav on the board and the
   screener opens the launch modal (`/create`), full screen on a phone.
   Opening `/create` directly gives the full page.
+- **Live.** The header's Live chip (a pulsing dot; under 360px wide, the dot
+  and a radio icon) opens `/live` from any page, and the board shows a
+  **Live now** row under King of the Bull: the six most-watched streams, each
+  opening its coin, and See all for `/live`.
 - **Board and Explore.** A sticky Movers / New / Soon / Graduated tab row
   (Movers / New / Graduated plus a sort sheet on Explore), quick filters in a
   sheet, a detailed/compact row toggle (saved as `parabull:mobileRows`), and
@@ -115,9 +119,12 @@ Set these in `app/.env.local` (see `src/config.ts`):
 | `VITE_PARABULL_MODE` | `demo` | `demo`: seeded data, and trades, launches and claims are simulated locally. `chain`: those three are sent to the program |
 | `VITE_CLUSTER` | `devnet` | `devnet`, `mainnet-beta` or `localnet` (explorer links, default RPC) |
 | `VITE_RPC_URL` | the cluster's public RPC | Your RPC endpoint |
-| `VITE_METADATA_UPLOAD_URL` | unset | Backend that pins the image and metadata JSON and returns `{ uri }`. Without it, chain mode asks for a metadata URI |
+| `VITE_METADATA_UPLOAD_URL` | unset | Backend that stores the image and metadata JSON and returns `{ uri }`: the [`services/parabull-edge`](../services/parabull-edge/README.md) Worker's `POST /metadata` (R2). Images up to 5,000,000 bytes, the launch worker's limit. Without it, chain mode asks for a metadata URI |
 | `VITE_REWARDS_BASE_URL` | unset | Where `epoch-<n>.json` snapshot artifacts (from `scripts/src/snapshot.ts`) are served |
 | `VITE_SENTINEL_URL` | unset | The X sentinel ([`services/twitter-sentinel`](../services/twitter-sentinel/README.md)). When the connected wallet launched the coin, its page shows an **X automation** button with a status dot. It opens a modal (a bottom sheet on a phone) to link, replace or disconnect the project's X account and set milestone posts, cashtag replies, persona and project context, any time after launch. Every change is signed by the wallet. Unset, the modal says the sentinel isn't connected; demo coins can't be saved, since they aren't on-chain |
+| `VITE_MEDIA_URL` | unset | The public R2 domain media is served from (`services/parabull-edge`). Added to the CSP's `connect-src` and `media-src` |
+| `VITE_CHAT_URL` | unset | Coin chat websocket (`wss://…`, a Durable Object behind the edge Worker; not built yet). Its `wss://` and `https://` origins are added to `connect-src` |
+| `VITE_STREAM_HOST` | unset | Cloudflare Stream playback host (`customer-<code>.cloudflarestream.com`; the player isn't built yet). Added to `connect-src` (hls.js) and `media-src` |
 | `VITE_II_SIGNER_CANISTER_ID` | unset | The Chain Fusion signer canister for Internet Identity users ([`src/lib/auth/solana_signer.did`](src/lib/auth/solana_signer.did)). Unset, "Continue with Google / Passkey / Email" uses a development key in demo builds and on the dev server, a local test identity on localnet, and is disabled in a production chain build (see [Connecting](#connecting)) |
 
 **Wired to the program** (`src/hooks/useParabullProgram.ts`):

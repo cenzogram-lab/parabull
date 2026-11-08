@@ -13,6 +13,7 @@ import { useApp } from "../../state/AppState";
 import { kingOf, useMarket } from "../../state/Market";
 import { usePortfolio } from "../../state/usePortfolio";
 import { cx } from "../ui/primitives";
+import { LiveChip } from "./MobileLiveStrip";
 import { BottomSheet, IconButton } from "./MobileUi";
 
 const MIN = 60_000;
@@ -39,7 +40,7 @@ function PnlBadge({ usdChange, pctChange }: { usdChange: number; pctChange: numb
 /** The newest holder-reward epoch the wallet can still claim (null if none). */
 const claimableEpoch = (epochs: readonly DemoEpoch[], claimed: ReadonlySet<number>) => epochs.filter((e) => e.you && !e.expired && !claimed.has(e.epoch)).pop() ?? null;
 
-/** Sticky mobile header (below md): portfolio capsule on the left, Deposit and notifications on the right. */
+/** Sticky mobile header (below md): portfolio capsule on the left, the Live chip, Deposit and notifications on the right. */
 export function MobileHeader() {
   const p = usePortfolio();
   const isMobile = useIsMobile();
@@ -97,7 +98,8 @@ export function MobileHeader() {
             <PnlBadge usdChange={p.change24hUsd} pctChange={p.change24hPct} />
           </span>
         </Link>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1.5">
+          <LiveChip />
           <button
             type="button"
             onClick={deposit}
