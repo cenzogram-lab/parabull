@@ -116,7 +116,8 @@ Set these in `app/.env.local` (see `src/config.ts`):
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `VITE_PARABULL_MODE` | `demo` | `demo`: seeded data, and trades, launches and claims are simulated locally. `chain`: those three are sent to the program |
+| `VITE_PARABULL_MODE` | `demo` | `demo`: seeded data, and trades, launches and claims are simulated locally. `chain`: those three are sent to the program, and market data comes from the indexer (`VITE_INDEXER_URL`) |
+| `VITE_INDEXER_URL` | unset | The market indexer ([`services/parabull-indexer`](../services/parabull-indexer/README.md)), chain mode only. Its `https://` and `wss://` origins are added to `connect-src`. Unset in a chain build, the market is empty and says so: chain mode never shows demo coins |
 | `VITE_CLUSTER` | `devnet` | `devnet`, `mainnet-beta` or `localnet` (explorer links, default RPC) |
 | `VITE_RPC_URL` | the cluster's public RPC | Your RPC endpoint |
 | `VITE_METADATA_UPLOAD_URL` | unset | Backend that stores the image and metadata JSON and returns `{ uri }`: the [`services/parabull-edge`](../services/parabull-edge/README.md) Worker's `POST /metadata` (R2). Images up to 5,000,000 bytes, the launch worker's limit. Without it, chain mode asks for a metadata URI |
@@ -183,14 +184,22 @@ polled every minute; until one answers, the demo price ($162.40) is used
 and the console labels it as a fallback. Demo mode keeps the program
 defaults and the fixed demo price that the seeded data is built on.
 
-**Still demo data in both modes:** coin lists, candles, trades, holders,
-leaderboards, streams, protocol totals and the portfolio (balance,
-positions, PnL, closed positions and reward epochs, even for a connected
-wallet). These need the indexer API in
-[`docs/BACKEND_SPEC.md`](../docs/BACKEND_SPEC.md); the UI labels them
-(header pill and footer; on a phone, the footnote, a Demo tag by the
-header's balance and the portfolio's Demo chip; in both layouts, a Demo tag
-by the Rewards tab's unclaimed figure).
+**Market data in chain mode** comes from the indexer (`src/state/Market.tsx`, `src/lib/indexer.ts`;
+[`docs/BACKEND_SPEC.md` §5](../docs/BACKEND_SPEC.md)):
+- **Lists:** the board, Explore and search read `GET /coins` every 30 s. The `/stream` websocket keeps them live, so a
+  coin appears the moment `create` lands.
+- **Coin page:** `useCoinView(mint)` fetches a coin that isn't in the list yet (a launch seconds old), asking again
+  before it says "Coin not found". The page shows:
+  - the trade tape and chart candles, from the coin's indexed trades;
+  - holders, labelled (bonding curve, Dev), with the dev's share;
+  - 24h stats and locks.
+- **Your position:** the trade panel's sell side reads the connected wallet's on-chain balances (`GET /portfolio`).
+
+**Still demo data:** leaderboards, squads and callouts (in chain mode these are empty, with no on-chain source yet),
+protocol totals, and the portfolio page's history, cash, PnL and reward epochs. The UI labels them:
+- the header pill and footer;
+- on a phone, the footnote, a Demo tag by the header's balance and the portfolio's Demo chip;
+- in both layouts, a Demo tag by the Rewards tab's unclaimed figure.
 
 ## Admin console
 
@@ -287,7 +296,8 @@ icp deploy -e ic frontend                           # mainnet (needs cycles): ht
 ```
 
 **Build settings.** Put the build's settings in `app/.env.production.local` (git-ignored); `npm run build` reads them.
-A chain deployment usually sets `VITE_PARABULL_MODE=chain`, `VITE_CLUSTER` and an origin-restricted `VITE_RPC_URL`.
+A chain deployment usually sets `VITE_PARABULL_MODE=chain`, `VITE_CLUSTER`, an origin-restricted `VITE_RPC_URL` and
+`VITE_INDEXER_URL`.
 
 **Routing and headers.** The canister reads two files from the root of `dist/`. It ignores `.ic-assets.json5` and adds
 no security headers of its own.

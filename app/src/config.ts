@@ -11,7 +11,9 @@
  *   VITE_MEDIA_URL            public R2 domain coin images and chat media are served from (services/parabull-edge)
  *   VITE_CHAT_URL             coin chat websocket (wss://), a Durable Object behind the edge Worker
  *   VITE_STREAM_HOST          Cloudflare Stream playback host (customer-<code>.cloudflarestream.com)
- * The last three also open the CSP's connect-src / media-src to those origins at build time (src/lib/icHeaders.ts).
+ *   VITE_INDEXER_URL          the Parabull indexer (services/parabull-indexer): chain mode's coins, trades, holders and
+ *                             positions. Chain mode never shows demo coins; without it the market is empty.
+ * The last four also open the CSP's connect-src / media-src to those origins at build time (src/lib/icHeaders.ts).
  */
 import { clusterApiUrl } from "@solana/web3.js";
 
@@ -31,6 +33,7 @@ export const CONFIG = {
   mediaUrl: (env.VITE_MEDIA_URL as string | undefined)?.replace(/\/+$/, ""),
   chatUrl: (env.VITE_CHAT_URL as string | undefined)?.replace(/\/+$/, ""),
   streamHost: env.VITE_STREAM_HOST as string | undefined,
+  indexerUrl: (env.VITE_INDEXER_URL as string | undefined)?.replace(/\/+$/, ""),
 };
 
 export const isDemo = CONFIG.mode === "demo";

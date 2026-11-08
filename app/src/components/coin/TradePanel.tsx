@@ -25,7 +25,7 @@ const SELL_PRESETS = [25, 50, 100];
 export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced }: { coin: Coin; initialSide?: "buy" | "sell"; framed?: boolean; onPlaced?: () => void }) {
   const client = useParabullProgram();
   const { setVisible } = useWalletModal();
-  const { demoTrade, positions } = useMarket();
+  const { demoTrade, positions, refreshPositions } = useMarket();
   const { toast, sfx } = useApp();
   // The fee the program charges and the SOL/USD used for dollar amounts: from Global and the live price feed in chain
   // mode, the 1% default and the fixed demo price in demo mode.
@@ -90,7 +90,11 @@ export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced 
     } finally {
       setBusy(false);
     }
-    if (placed) onPlaced?.();
+    if (placed) {
+      // Chain mode: the indexer re-reads the wallet's balances (the trade itself arrives on its stream).
+      if (!isDemo) refreshPositions();
+      onPlaced?.();
+    }
   }
 
   const receive =

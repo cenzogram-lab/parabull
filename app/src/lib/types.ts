@@ -126,7 +126,8 @@ export interface Holder {
   pct: number;
   tokens: number;
   valueUsd: number;
-  pnlUsd: number;
+  /** Unknown (null) for on-chain holders: the indexer doesn't track every holder's cost. */
+  pnlUsd: number | null;
 }
 
 export interface Candle {

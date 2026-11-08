@@ -1,10 +1,13 @@
 import { CandlestickSeries, ColorType, createChart, CrosshairMode, HistogramSeries, type IChartApi, type ISeriesApi, type MouseEventParams, type UTCTimestamp } from "lightweight-charts";
 import { CandlestickChart } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isDemo } from "../../config";
 import { useIsMobile } from "../../hooks/useMediaQuery";
+import { tradeCandles } from "../../lib/indexer";
 import { compact, pct, price, usdCompact } from "../../lib/format";
 import type { Coin } from "../../lib/types";
 import { candles, INTERVALS, type Interval } from "../../mock/market";
+import { useMarket } from "../../state/Market";
 import { hex } from "../../theme/tokens";
 import { cx, Segmented } from "../ui/primitives";
 
@@ -37,8 +40,11 @@ export function PriceChart({ coin }: { coin: Coin }) {
   const scale = unit === "MCap" ? SUPPLY : 1;
   const scaleRef = useRef(scale);
   scaleRef.current = scale;
-  // Candles regenerate per coin and interval; live trades only move the last bar.
-  const data = useMemo(() => candles(coin, iv), [coin.mint, iv]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Demo: generated candles per coin and interval, live trades only move the last bar. Chain mode: candles from the
+  // coin's indexed trades, rebuilt as trades arrive.
+  const { tradesFor } = useMarket();
+  const trades = isDemo ? null : tradesFor(coin.mint);
+  const data = useMemo(() => (trades ? tradeCandles(trades, INTERVALS[iv], coin) : candles(coin, iv)), [coin.mint, iv, trades]); // eslint-disable-line react-hooks/exhaustive-deps
   const [hover, setHover] = useState<Ohlc | null>(null);
   const isMobile = useIsMobile();
   // The layout the chart was created for; options change only when it flips.
@@ -157,7 +163,7 @@ export function PriceChart({ coin }: { coin: Coin }) {
             )}
           </div>
         )}
-        <div ref={box} className="absolute inset-0" />
+        <div ref={box} className="absolute inset-0" data-bars={data.length} />
       </div>
     </div>
   );

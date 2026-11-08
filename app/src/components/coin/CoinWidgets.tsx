@@ -1,6 +1,6 @@
 import { ExternalLink, GraduationCap, Megaphone } from "lucide-react";
 import { useMemo } from "react";
-import { explorer } from "../../config";
+import { explorer, isDemo } from "../../config";
 import { useNow } from "../../hooks/useNow";
 import { age, compact, price, shortAddr, sol, usd, usdCompact, usdSigned } from "../../lib/format";
 import { GRADUATION_RAISE_LAMPORTS } from "../../lib/protocol";
@@ -70,7 +70,11 @@ export function EscrowGauge({ coin }: { coin: Coin }) {
 }
 
 export function HoldersTable({ coin }: { coin: Coin }) {
-  const rows = useMemo(() => holderList(coin), [coin]);
+  const { holdersFor } = useMarket();
+  const onChain = holdersFor(coin.mint);
+  // Demo mode: the seeded holders. Chain mode: the indexer's, once loaded.
+  const rows = useMemo(() => onChain ?? (isDemo ? holderList(coin) : []), [onChain, coin]);
+  if (!rows.length) return <p className="px-3 py-6 text-center text-[13px] text-muted">{isDemo ? "No holders yet." : "Loading holders…"}</p>;
   return (
     <table className="w-full text-[12.5px]">
       <thead>
@@ -103,7 +107,7 @@ export function HoldersTable({ coin }: { coin: Coin }) {
             </td>
             <td className="num py-2 text-right">{compact(h.tokens)}</td>
             <td className="num py-2 text-right">{usdCompact(h.valueUsd)}</td>
-            <td className={cx("num px-3 py-2 text-right", h.label ? "text-muted" : h.pnlUsd >= 0 ? "text-gold" : "text-ember")}>{h.label ? "-" : usdSigned(h.pnlUsd, 0)}</td>
+            <td className={cx("num px-3 py-2 text-right", h.label || h.pnlUsd === null ? "text-muted" : h.pnlUsd >= 0 ? "text-gold" : "text-ember")}>{h.label || h.pnlUsd === null ? "-" : usdSigned(h.pnlUsd, 0)}</td>
           </tr>
         ))}
       </tbody>
