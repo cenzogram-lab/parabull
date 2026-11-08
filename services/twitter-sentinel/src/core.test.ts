@@ -9,7 +9,7 @@ import { payloadDigest, verifySignedDisconnect, verifySignedSettings } from "./a
 import { keyFromSecret, seal, unseal } from "./seal";
 import { decodeCurve, decodeRaise, IDL } from "./chain";
 import { due, graduationRaise, progress, reached } from "./milestones";
-import { MAX_POST, milestonePost, replyText, weightedLength } from "./persona";
+import { fillTemplate, MAX_POST, milestonePost, replyText, weightedLength } from "./persona";
 import { hasCashtag, mentionsAccount, selectReplies, type MentionTweet } from "./replies";
 
 const DEFAULT_INITIAL = { virtualToken: 1_073_000_000_000_000n, virtualSol: 30_000_000_000n, realToken: 793_100_000_000_000n };
@@ -61,6 +61,16 @@ test("every persona's posts fit in 280 characters with the ticker and link", () 
   assert.match(r, /^@alice /);
   assert.match(r, /42%/);
   assert.match(r, /Staking next week\./);
+});
+
+test("templates fill like elizaOS composeContext: one pass, missing keys empty, values never expanded", () => {
+  assert.equal(fillTemplate("${{ticker}} at {{pct}}. {{news}}{{url}}", { ticker: "BULL", pct: "50%", url: "https://x.y" }), "$BULL at 50%. https://x.y");
+  // The creator's news is inserted as written: placeholders and replacement patterns inside it stay literal.
+  assert.equal(fillTemplate("{{news}}|{{ticker}}", { news: "{{ticker}} $& $1 $$", ticker: "BULL" }), "{{ticker}} $& $1 $$|BULL");
+  // Only \w+ keys are placeholders; anything else in braces is left alone.
+  assert.equal(fillTemplate("{{ ticker }} {{tick-er}} {{}}", { ticker: "BULL" }), "{{ ticker }} {{tick-er}} {{}}");
+  // Inherited properties are never values.
+  assert.equal(fillTemplate("[{{constructor}}][{{toString}}]", {}), "[][]");
 });
 
 test("replies go only to posts that mention the account and the cashtag", () => {
