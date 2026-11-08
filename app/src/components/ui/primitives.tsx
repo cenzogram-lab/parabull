@@ -93,7 +93,14 @@ export function UnderlineTabs<T extends string>({ options, value, onChange, size
  * Signed change with an arrow, so direction never relies on color alone. `soft` lightens the loss tint for pills on
  * cards and wells (`bg-surface`, `bg-canvas-2`), where the /30 tint would take ember below 4.5:1.
  */
-export function ChangePill({ value, size = "sm", soft = false }: { value: number; size?: "xs" | "sm"; soft?: boolean }) {
+/** A change as an up/down pill; null (the indexer's history doesn't reach that far) shows a muted dash. */
+export function ChangePill({ value, size = "sm", soft = false }: { value: number | null; size?: "xs" | "sm"; soft?: boolean }) {
+  if (value === null)
+    return (
+      <span className={cx("num inline-flex items-center rounded-md bg-surface-3 font-semibold text-muted", size === "xs" ? "px-1.5 py-0.5 text-[11px]" : "px-2 py-0.5 text-xs")} title="Not known yet: the indexer's history doesn't reach that far">
+        —
+      </span>
+    );
   const up = value >= 0;
   const Icon = up ? ArrowUp : ArrowDown;
   return (
@@ -104,7 +111,8 @@ export function ChangePill({ value, size = "sm", soft = false }: { value: number
   );
 }
 
-export function Delta({ value, className }: { value: number; className?: string }) {
+export function Delta({ value, className }: { value: number | null; className?: string }) {
+  if (value === null) return <span className={cx("num font-semibold text-muted", className)}>—</span>;
   return <span className={cx("num font-semibold", value >= 0 ? "text-gold" : "text-ember", className)}>{pct(value)}</span>;
 }
 

@@ -120,6 +120,8 @@ export interface HeaderEnv {
   VITE_CHAT_URL?: string;
   /** Cloudflare Stream playback host, customer-<code>.cloudflarestream.com. */
   VITE_STREAM_HOST?: string;
+  /** The Parabull indexer (https:// for REST, wss:// for its /stream). */
+  VITE_INDEXER_URL?: string;
 }
 
 /** Every origin the app may fetch or open a socket to, for this build's configuration. */
@@ -133,6 +135,8 @@ export function connectSources(env: HeaderEnv): string[] {
     originOf(env.VITE_REWARDS_BASE_URL),
     originOf(env.VITE_MEDIA_URL),
     ...socketOrigins(env.VITE_CHAT_URL),
+    // The indexer's REST API and its /stream websocket.
+    ...socketOrigins(env.VITE_INDEXER_URL),
     // hls.js fetches the stream's manifests and segments.
     streamOrigin(env.VITE_STREAM_HOST),
   ];

@@ -1,10 +1,14 @@
-import { CandlestickSeries, ColorType, createChart, CrosshairMode, HistogramSeries, type IChartApi, type ISeriesApi, type MouseEventParams, type UTCTimestamp } from "lightweight-charts";
+import { CandlestickSeries, ColorType, createChart, CrosshairMode, HistogramSeries, type AutoscaleInfo, type IChartApi, type ISeriesApi, type MouseEventParams, type UTCTimestamp } from "lightweight-charts";
 import { CandlestickChart } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isDemo } from "../../config";
 import { useIsMobile } from "../../hooks/useMediaQuery";
+import { toCandles, type CandleJson } from "../../lib/indexer";
 import { compact, pct, price, usdCompact } from "../../lib/format";
 import type { Coin } from "../../lib/types";
 import { candles, INTERVALS, type Interval } from "../../mock/market";
+import { minRange } from "../../lib/chartRange";
+import { useMarket } from "../../state/Market";
 import { hex } from "../../theme/tokens";
 import { cx, Segmented } from "../ui/primitives";
 
@@ -37,8 +41,32 @@ export function PriceChart({ coin }: { coin: Coin }) {
   const scale = unit === "MCap" ? SUPPLY : 1;
   const scaleRef = useRef(scale);
   scaleRef.current = scale;
-  // Candles regenerate per coin and interval; live trades only move the last bar.
-  const data = useMemo(() => candles(coin, iv), [coin.mint, iv]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Demo: generated candles per coin and interval, live trades only move the last bar. Chain mode: the indexer's bars
+  // (built from every trade it holds), fetched again shortly after each new trade.
+  const { tradesFor, fetchCandles, solUsd } = useMarket();
+  const newest = isDemo ? null : (tradesFor(coin.mint)[0]?.id ?? "none");
+  const key = `${coin.mint}:${iv}`;
+  const [bars, setBars] = useState<{ key: string; bars: CandleJson[] } | null>(null);
+  const loaded = bars?.key === key;
+  useEffect(() => {
+    if (isDemo) return;
+    let stop = false;
+    const id = window.setTimeout(
+      () =>
+        void fetchCandles(coin.mint, INTERVALS[iv])
+          .then((b) => !stop && b && setBars({ key, bars: b }))
+          .catch(() => undefined),
+      loaded ? 800 : 0,
+    );
+    return () => {
+      stop = true;
+      window.clearTimeout(id);
+    };
+  }, [coin.mint, iv, newest]); // eslint-disable-line react-hooks/exhaustive-deps
+  const data = useMemo(
+    () => (isDemo ? candles(coin, iv) : toCandles(loaded ? bars!.bars : [], solUsd, coin, INTERVALS[iv])),
+    [coin.mint, iv, bars, loaded, solUsd], // eslint-disable-line react-hooks/exhaustive-deps
+  );
   const [hover, setHover] = useState<Ohlc | null>(null);
   const isMobile = useIsMobile();
   // The layout the chart was created for; options change only when it flips.
@@ -68,8 +96,15 @@ export function PriceChart({ coin }: { coin: Coin }) {
       wickUpColor: hex.up,
       wickDownColor: hex.downEdge,
       priceLineColor: hex.copper,
+      autoscaleInfoProvider: (original: () => AutoscaleInfo | null) => minRange(original(), 0.02),
     });
-    const vs = c.addSeries(HistogramSeries, { priceScaleId: "vol", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false });
+    const vs = c.addSeries(HistogramSeries, {
+      priceScaleId: "vol",
+      priceFormat: { type: "volume" },
+      lastValueVisible: false,
+      priceLineVisible: false,
+      autoscaleInfoProvider: (original: () => AutoscaleInfo | null) => minRange(original(), 0.02),
+    });
     c.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
     const onMove = (p: MouseEventParams) => {
       const d = p.time !== undefined ? (p.seriesData.get(cs) as Ohlc | undefined) : undefined;
@@ -157,7 +192,7 @@ export function PriceChart({ coin }: { coin: Coin }) {
             )}
           </div>
         )}
-        <div ref={box} className="absolute inset-0" />
+        <div ref={box} className="absolute inset-0" data-bars={data.length} />
       </div>
     </div>
   );

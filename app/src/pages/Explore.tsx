@@ -6,7 +6,7 @@ import { CategoryTabs, ChangePill, cx, Popover } from "../components/ui/primitiv
 import { CoinAvatar, Meter, Sparkline } from "../components/ui/visuals";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { useNow } from "../hooks/useNow";
-import { age, compact, usdCompact } from "../lib/format";
+import { age, byChangeDesc, compact, usdCompact } from "../lib/format";
 import { fullyLocked } from "../lib/launchRules";
 import type { Coin } from "../lib/types";
 import { progressOf } from "../mock/coins";
@@ -70,8 +70,8 @@ function DesktopExplore() {
       if (filters.lockedOnly && !fullyLocked(c.locks, now)) return false;
       return true;
     });
-    list = cat === "new" ? list.sort((a, b) => b.createdAt - a.createdAt) : cat === "graduated" ? list.sort((a, b) => b.mcapUsd - a.mcapUsd) : list.sort((a, b) => b.change1h - a.change1h);
-    if (sort) list = [...list].sort((a, b) => (sortValue(b, sort.key) - sortValue(a, sort.key)) * sort.dir);
+    list = cat === "new" ? list.sort((a, b) => b.createdAt - a.createdAt) : cat === "graduated" ? list.sort((a, b) => b.mcapUsd - a.mcapUsd) : list.sort((a, b) => byChangeDesc(a.change1h, b.change1h));
+    if (sort) list = [...list].sort((a, b) => byChangeDesc(sortValue(a, sort.key), sortValue(b, sort.key)) * sort.dir);
     return list;
   }, [coins, cat, filters, sort, now]);
   const onSort = (k: SortKey) => setSort((s) => (s?.key === k ? (s.dir === 1 ? { key: k, dir: -1 } : null) : { key: k, dir: 1 }));

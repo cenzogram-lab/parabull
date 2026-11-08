@@ -6,7 +6,7 @@
  */
 import { ExternalLink } from "lucide-react";
 import { useMemo, useState } from "react";
-import { explorer } from "../../config";
+import { explorer, isDemo } from "../../config";
 import { useNow } from "../../hooks/useNow";
 import { age, compact, shortAddr, sol, usdCompact, usdSigned } from "../../lib/format";
 import type { Coin } from "../../lib/types";
@@ -72,7 +72,10 @@ export function TradeFeed({ coin }: { coin: Coin }) {
 
 /** Top holders: share of supply with a bar, value, and unrealized PnL. */
 export function HolderList({ coin }: { coin: Coin }) {
-  const rows = useMemo(() => holderList(coin), [coin]);
+  const { holdersFor } = useMarket();
+  const onChain = holdersFor(coin.mint);
+  const rows = useMemo(() => onChain ?? (isDemo ? holderList(coin) : []), [onChain, coin]);
+  if (!rows.length) return <p className="px-4 py-6 text-center text-[13px] text-muted">{isDemo ? "No holders yet." : "Loading holders…"}</p>;
   return (
     <div>
       <div aria-hidden className={cx(head, HOLDER_COLS)}>
@@ -91,7 +94,7 @@ export function HolderList({ coin }: { coin: Coin }) {
                 href={explorer("account", h.address)}
                 target="_blank"
                 rel="noreferrer"
-                aria-label={`${i + 1}. ${h.label ?? shortAddr(h.address, 5)}: ${share} of supply, ${usdCompact(h.valueUsd)}${h.label ? "" : `, ${usdSigned(h.pnlUsd, 0)}`}. View account`}
+                aria-label={`${i + 1}. ${h.label ?? shortAddr(h.address, 5)}: ${share} of supply, ${usdCompact(h.valueUsd)}${h.label || h.pnlUsd === null ? "" : `, ${usdSigned(h.pnlUsd, 0)}`}. View account`}
                 className={cx(row, HOLDER_COLS)}
               >
                 <span className="num text-muted">{i + 1}</span>
@@ -107,7 +110,7 @@ export function HolderList({ coin }: { coin: Coin }) {
                   <span className="num text-cream">{share}</span>
                 </span>
                 <span className="num text-right text-cream">{usdCompact(h.valueUsd)}</span>
-                <span className={cx("num text-right", h.label ? "text-muted" : h.pnlUsd >= 0 ? "text-gold" : "text-ember")}>{h.label ? "-" : usdSigned(h.pnlUsd, 0)}</span>
+                <span className={cx("num text-right", h.label || h.pnlUsd === null ? "text-muted" : h.pnlUsd >= 0 ? "text-gold" : "text-ember")}>{h.label || h.pnlUsd === null ? "-" : usdSigned(h.pnlUsd, 0)}</span>
               </a>
             </li>
           );

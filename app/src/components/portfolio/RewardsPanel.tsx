@@ -114,7 +114,7 @@ export function RewardsPanel({ summary, solUsd }: { summary: RewardSummary | und
         <EmptyNote>This wallet wasn't in any holder snapshot yet. Hold $PARABULL through a weekly snapshot to earn a share of the fees.</EmptyNote>
       )}
       <p className="mt-3 text-[11.5px] leading-4 text-muted">
-        {isDemo ? "Demo epochs: real Merkle trees over simulated $PARABULL holders. " : "Demo epochs until the indexer API is connected. "}Each proof is checked in your browser against the epoch's root before you claim.
+        {isDemo ? "Demo epochs: real Merkle trees over simulated $PARABULL holders. " : "Demo epochs: holder-reward snapshots aren't served by the indexer yet. "}Each proof is checked in your browser against the epoch's root before you claim.
       </p>
     </div>
   );

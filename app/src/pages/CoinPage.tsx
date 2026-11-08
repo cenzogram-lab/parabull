@@ -21,7 +21,7 @@ import { dexScreenerUrl, raydiumSwapUrl } from "../lib/links";
 import type { Coin } from "../lib/types";
 import { progressOf } from "../mock/coins";
 import { useApp } from "../state/AppState";
-import { useMarket } from "../state/Market";
+import { useCoinView, useMarket, type CoinState } from "../state/Market";
 import { safeLink } from "../lib/launchRules";
 
 function CopyPill({ value }: { value: string }) {
@@ -64,35 +64,42 @@ function LockTimers({ coin }: { coin: Coin }) {
   );
 }
 
+/** Why a coin page has no coin to show yet. */
+const NO_COIN: Record<Exclude<CoinState, "ready">, { title: string; body: string }> = {
+  loading: { title: "Loading coin…", body: "Reading this coin from the chain." },
+  missing: { title: "Coin not found", body: "No coin on Parabull has this address." },
+  error: { title: "Couldn't load this coin", body: "The market indexer didn't answer. Try again in a moment." },
+  unconfigured: { title: "Market data isn't set up", body: "This build has no indexer (VITE_INDEXER_URL), so it can't show on-chain coins." },
+};
+
 export function CoinPage() {
   const { mint = "" } = useParams();
-  const { byMint, solUsd } = useMarket();
+  const { solUsd } = useMarket();
+  // Chain mode: a coin that isn't on the board yet (created seconds ago, or past the list) is fetched on its own.
+  const { coin, state } = useCoinView(mint);
   const live = useLiveStreams();
   const { markViewed, watchlist, toggleWatch } = useApp();
   const now = useNow();
   const isMobile = useIsMobile();
-  const coin = byMint.get(mint);
   const [tab, setTab] = useState<"Holders" | "Trades" | "Callouts" | "Chat">("Trades");
   useEffect(() => {
     if (coin) markViewed(coin.mint);
   }, [coin?.mint]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!coin && isMobile)
+  if (!coin) {
+    const msg = NO_COIN[state === "ready" ? "loading" : state];
     return (
-      <div className="flex flex-col items-center gap-4 px-4 py-16 text-center">
-        <h1 className="text-lg font-semibold">Coin not found</h1>
-        <p className="text-[13.5px] text-muted">No coin on Parabull has this address.</p>
-        <Link to="/explore" className="btn-gold h-11 px-5">
-          Explore coins
-        </Link>
+      <div className="flex flex-col items-center gap-4 px-4 py-16 text-center" role={state === "loading" ? "status" : undefined}>
+        <h1 className="text-lg font-semibold">{msg.title}</h1>
+        <p className="text-[13.5px] text-muted">{msg.body}</p>
+        {state !== "loading" && (
+          <Link to="/explore" className="btn-gold h-11 px-5">
+            Explore coins
+          </Link>
+        )}
       </div>
     );
-  if (!coin)
-    return (
-      <div className="p-10 text-center text-muted">
-        Coin not found. <Link to="/explore" className="text-gold">Explore coins</Link>
-      </div>
-    );
+  }
 
   // Keyed by coin, so another coin starts on a fresh terminal (tab, expanded lists, chart).
   if (isMobile) return <MobileTradeTerminal key={coin.mint} coin={coin} />;

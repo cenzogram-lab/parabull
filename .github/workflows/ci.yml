@@ -150,6 +150,28 @@ jobs:
       - name: "Tests (metadata upload; chat rooms: broadcast, hibernation, sign-in, limits, attachments; /live; /live/input and the on-chain creator check)"
         run: npm test
 
+  indexer:
+    name: indexer (typecheck + tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/parabull-indexer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: services/parabull-indexer/package-lock.json
+      - name: npm ci
+        run: npm ci
+      # Also checks what it shares with the app and the edge Worker: the IDL, base58 and PDA helpers, the curve math.
+      - name: Typecheck
+        run: npm run typecheck
+      - name: "Tests (Anchor-encoded vectors, log invoke stack, tickets to coins, trades, graduation, backfill paging, holders, portfolio, the API and /stream)"
+        run: npm test
+
   canister:
     name: canister (Motoko build + tests, PocketIC)
     runs-on: ubuntu-latest

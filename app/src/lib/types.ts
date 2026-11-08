@@ -32,9 +32,10 @@ export interface Coin {
   buys24h: number;
   sells24h: number;
   traders24h: number;
-  change1h: number;
-  change6h: number;
-  change24h: number;
+  /** Price changes as fractions; null when not known (chain mode: the indexer's history doesn't reach that far). */
+  change1h: number | null;
+  change6h: number | null;
+  change24h: number | null;
   holders: number;
   devPct: number;
   replies: number;
@@ -126,7 +127,8 @@ export interface Holder {
   pct: number;
   tokens: number;
   valueUsd: number;
-  pnlUsd: number;
+  /** Unknown (null) for on-chain holders: the indexer doesn't track every holder's cost. */
+  pnlUsd: number | null;
 }
 
 export interface Candle {

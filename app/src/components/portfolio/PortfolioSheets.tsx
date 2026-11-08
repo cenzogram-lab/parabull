@@ -107,7 +107,7 @@ export function StatsSheet({ open, onClose, p }: { open: boolean; onClose: () =>
           </span>
         </Link>
       )}
-      <DemoNote>{isDemo ? "Demo stats from the simulated market and your demo trades." : "Demo stats from the simulated market, until the indexer API is connected."}</DemoNote>
+      <DemoNote>{isDemo ? "Demo stats from the simulated market and your demo trades." : "Demo stats: the indexer doesn't serve portfolio history yet."}</DemoNote>
     </Sheet>
   );
 }
@@ -154,7 +154,7 @@ export function BalanceSheet({ open, onClose, p }: { open: boolean; onClose: () 
       </div>
       <p className="mt-3 text-[12.5px] leading-[18px] text-muted">
         SOL is valued at <span className="num text-cream">${solUsd.toFixed(2)}</span>.
-        {isDemo ? " Demo cash: your demo buys spend it and sells pay into it; a buy bigger than it takes it below zero." : " These are demo figures, not your wallet's balance, until the indexer API is connected."}
+        {isDemo ? " Demo cash: your demo buys spend it and sells pay into it; a buy bigger than it takes it below zero." : " These are demo figures, not your wallet's balance: the indexer doesn't serve portfolio cash yet."}
       </p>
     </Sheet>
   );

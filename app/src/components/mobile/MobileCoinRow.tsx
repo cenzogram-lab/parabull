@@ -9,7 +9,7 @@ import { Globe, Lock } from "lucide-react";
 import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { useNow } from "../../hooks/useNow";
-import { age, pct } from "../../lib/format";
+import { age, changeWords } from "../../lib/format";
 import { GRADUATION_RAISE_LAMPORTS } from "../../lib/protocol";
 import type { Coin } from "../../lib/types";
 import { progressOf } from "../../mock/coins";
@@ -124,7 +124,7 @@ export function MobileCoinRow({ coin, density = "detailed" }: { coin: Coin; dens
   const label = [
     `${coin.name} ($${coin.ticker})`,
     `market cap ${shortUsd(coin.mcapUsd)}`,
-    `${coin.change24h >= 0 ? "up" : "down"} ${pct(Math.abs(coin.change24h), 1, false)} in 24 hours`,
+    changeWords(coin.change24h, "24 hours"),
     detailed && `volume ${shortUsd(coin.vol24hUsd)}`,
     detailed && (coin.migrated ? "graduated to Raydium" : `${(Number(coin.reserves.realSol) / 1e9).toFixed(2)} of ${GRADUATION_SOL} SOL raised`),
     detailed && `${shortNum(trades)} trades`,

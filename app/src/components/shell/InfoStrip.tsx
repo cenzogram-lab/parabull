@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { compact, pct, usdCompact, usdSigned } from "../../lib/format";
 import { useApp, type QuickInfo } from "../../state/AppState";
 import { useMarket } from "../../state/Market";
-import { cx } from "../ui/primitives";
+import { cx, Delta } from "../ui/primitives";
 
 const TOGGLES: { id: QuickInfo; label: string; icon: LucideIcon }[] = [
   { id: "traders", label: "Top traders", icon: Trophy },
@@ -69,7 +69,7 @@ export function InfoStrip() {
         <img src={c.image} alt="" className="h-[18px] w-[18px] rounded" />
         <span className="font-medium text-cream">${c.ticker}</span>
         <span className="num text-muted">{usdCompact(c.mcapUsd)}</span>
-        <span className={cx("num font-semibold", c.change24h >= 0 ? "text-gold" : "text-ember")}>{pct(c.change24h)}</span>
+        <Delta value={c.change24h} />
       </Link>
     ));
   }

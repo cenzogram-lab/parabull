@@ -1,14 +1,21 @@
 /**
- * Market data for the views. Demo mode serves the seeded dataset and runs a
- * light live simulation (trades move reserves through the real curve math);
- * `?live=0` freezes it. Demo trades and launches update this store only.
+ * Market data for the views, from one of two sources (same MarketState either way):
+ * - Demo mode (VITE_PARABULL_MODE=demo, the default): the seeded dataset and a light live simulation (trades move
+ *   reserves through the real curve math); `?live=0` freezes it. Demo trades and launches update this store only.
+ * - Chain mode: the Parabull indexer (VITE_INDEXER_URL, services/parabull-indexer): real curves, trades, holders and
+ *   the connected wallet's positions, kept live by its /stream websocket. Chain mode never shows demo coins: without
+ *   an indexer the market is empty and says so (source "unconfigured"). The social layer (traders, squads, callouts)
+ *   has no on-chain source yet and is empty in chain mode.
  */
+import { useWallet } from "@solana/wallet-adapter-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { CONFIG, isDemo } from "../config";
 import { coinArt } from "../lib/art";
+import { IndexerClient, positionsFrom, toCoin, toHolders, toTrade, type CandleJson, type CoinJson, type HoldersJson, type PortfolioJson, type TradeJson } from "../lib/indexer";
 import { PROTOCOL, initialReserves, mcapSol, priceSol } from "../lib/protocol";
 import { applyBuy, applySell, quoteBuyWithSol, quoteSellTokens } from "../lib/quote";
 import { Rng } from "../lib/rng";
-import type { Callout, Coin, Squad, Stream, Trade, Trader } from "../lib/types";
+import type { Callout, Coin, Holder, Squad, Stream, Trade, Trader } from "../lib/types";
 import { HANDLES } from "../mock/catalog";
 import { address, generateCoins, progressOf, SOL_USD } from "../mock/coins";
 import { fakeSignature, tradeHistory } from "../mock/market";
@@ -37,7 +44,22 @@ export interface LaunchDraft {
   socials: Coin["socials"];
 }
 
+/** Where a coin page stands: shown, being fetched, not a Parabull coin, the indexer failed, or no indexer configured. */
+export type CoinState = "ready" | "loading" | "missing" | "error" | "unconfigured";
+
 interface MarketState {
+  /** Where the data comes from. */
+  source: "demo" | "indexer" | "unconfigured";
+  /** A coin page's state; call watchCoin(mint) to start loading it. */
+  coinState: (mint: string) => CoinState;
+  /** Loads a coin (even one newer than the list), its trades and holders. Demo mode: nothing to do. */
+  watchCoin: (mint: string) => void;
+  /** On-chain holders once loaded (chain mode); null in demo mode, where the views use the seeded holders. */
+  holdersFor: (mint: string) => Holder[] | null;
+  /** Re-reads the wallet's positions (after a trade). */
+  refreshPositions: () => void;
+  /** Chain mode: the indexer's chart bars for a coin (every trade it holds). Demo mode: null (the chart generates its own). */
+  fetchCandles: (mint: string, intervalSec: number) => Promise<CandleJson[] | null>;
   coins: Coin[];
   byMint: Map<string, Coin>;
   liveTrades: Trade[];
@@ -89,15 +111,20 @@ function reprice(c: Coin, reserves: Coin["reserves"]): Coin {
     mcapUsd,
     athUsd: Math.max(c.athUsd, mcapUsd),
     spark,
-    change24h: (1 + c.change24h) * (priceUsd / c.priceUsd) - 1,
-    change1h: (1 + c.change1h) * (priceUsd / c.priceUsd) - 1,
-    change6h: (1 + c.change6h) * (priceUsd / c.priceUsd) - 1,
+    // Demo coins always have changes; the ?? only satisfies the shared (nullable) type.
+    change24h: (1 + (c.change24h ?? 0)) * (priceUsd / c.priceUsd) - 1,
+    change1h: (1 + (c.change1h ?? 0)) * (priceUsd / c.priceUsd) - 1,
+    change6h: (1 + (c.change6h ?? 0)) * (priceUsd / c.priceUsd) - 1,
     stage: c.stage === "new" ? "new" : progress >= 0.72 ? "soon" : "live",
     complete: reserves.realToken === 0n,
   };
 }
 
 export function MarketProvider({ children }: { children: ReactNode }) {
+  return isDemo ? <DemoMarketProvider>{children}</DemoMarketProvider> : <IndexerMarketProvider>{children}</IndexerMarketProvider>;
+}
+
+function DemoMarketProvider({ children }: { children: ReactNode }) {
   // SOL/USD for display: the live feed in chain mode (Protocol polls it), the demo price in demo mode. The seeded demo
   // data and its simulation stay priced at SOL_USD, the price they were generated with.
   const solUsd = useProtocol().solUsd.price;
@@ -318,9 +345,246 @@ export function MarketProvider({ children }: { children: ReactNode }) {
     return coin;
   }, []);
 
+  const coinState = useCallback((mint: string): CoinState => (byMint.has(mint) ? "ready" : "missing"), [byMint]);
   const value = useMemo<MarketState>(
-    () => ({ coins, byMint, liveTrades, tradesFor, ...social, solUsd, positions, startPositions, demoSolDelta, demoClosed, demoTradeCount, following, toggleFollow, demoTrade, demoLaunch }),
-    [coins, byMint, liveTrades, tradesFor, social, solUsd, positions, startPositions, demoSolDelta, demoClosed, demoTradeCount, following, toggleFollow, demoTrade, demoLaunch],
+    () => ({ source: "demo", coinState, watchCoin: noop, holdersFor: none, refreshPositions: noop, fetchCandles: noCandles, coins, byMint, liveTrades, tradesFor, ...social, solUsd, positions, startPositions, demoSolDelta, demoClosed, demoTradeCount, following, toggleFollow, demoTrade, demoLaunch }),
+    [coinState, coins, byMint, liveTrades, tradesFor, social, solUsd, positions, startPositions, demoSolDelta, demoClosed, demoTradeCount, following, toggleFollow, demoTrade, demoLaunch],
+  );
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+const noop = () => undefined;
+const none = () => null;
+const noCandles = () => Promise.resolve(null);
+const EMPTY = { traders: [] as Trader[], squads: [] as Squad[], callouts: [] as Callout[], streams: [] as Stream[] };
+const tradeKey = (t: TradeJson) => `${t.signature}:${t.index}`;
+/** Newest first, one copy of each event. */
+function mergeTrades(a: TradeJson[], b: TradeJson[] = []): TradeJson[] {
+  const seen = new Set<string>();
+  return [...a, ...b].filter((t) => !seen.has(tradeKey(t)) && !!seen.add(tradeKey(t))).sort((x, y) => y.slot - x.slot || y.timestamp - x.timestamp);
+}
+
+/** Chain mode: everything from the indexer, refreshed by its push stream. */
+function IndexerMarketProvider({ children }: { children: ReactNode }) {
+  const protocol = useProtocol();
+  const solUsd = protocol.solUsd.price;
+  const lockSeconds = protocol.params.registryLockSeconds;
+  const client = useMemo(() => (CONFIG.indexerUrl ? new IndexerClient(CONFIG.indexerUrl) : null), []);
+  const { publicKey } = useWallet();
+  const wallet = publicKey?.toBase58() ?? null;
+  const walletRef = useRef(wallet);
+  walletRef.current = wallet;
+
+  const [raw, setRaw] = useState<Map<string, CoinJson>>(() => new Map());
+  const rawRef = useRef(raw);
+  rawRef.current = raw;
+  const [rawTrades, setRawTrades] = useState<Map<string, TradeJson[]>>(() => new Map());
+  const [live, setLive] = useState<TradeJson[]>([]);
+  const [rawHolders, setRawHolders] = useState<Map<string, HoldersJson>>(() => new Map());
+  const [states, setStates] = useState<Map<string, CoinState>>(() => new Map());
+  const [portfolio, setPortfolio] = useState<PortfolioJson | null>(null);
+  const tradesLoaded = useRef(new Set<string>());
+  const watched = useRef<string | null>(null);
+  const holdersTimer = useRef<number | undefined>(undefined);
+
+  const upsert = useCallback((cs: CoinJson[]) => {
+    if (!cs.length) return;
+    setRaw((prev) => {
+      const next = new Map(prev);
+      for (const c of cs) next.set(c.mint, c);
+      return next;
+    });
+  }, []);
+  const setState = useCallback((mint: string, st: CoinState | null) => {
+    setStates((prev) => {
+      const next = new Map(prev);
+      if (st) next.set(mint, st);
+      else next.delete(mint);
+      return next;
+    });
+  }, []);
+
+  const loadHolders = useCallback(
+    (mint: string) => {
+      client
+        ?.holders(mint)
+        .then((h) => setRawHolders((prev) => new Map(prev).set(mint, h)))
+        .catch(() => undefined);
+    },
+    [client],
+  );
+
+  const refreshPositions = useCallback(() => {
+    const w = walletRef.current;
+    if (!client || !w) return;
+    client
+      .portfolio(w)
+      .then((p) => {
+        if (walletRef.current !== w) return;
+        setPortfolio(p);
+        upsert(p.holdings.map((h) => h.coin));
+      })
+      .catch(() => undefined);
+  }, [client, upsert]);
+
+  // The board's list: on load and every 30 s (the stream keeps it current in between).
+  useEffect(() => {
+    if (!client) return;
+    let stop = false;
+    const load = () =>
+      client
+        .coins()
+        .then((cs) => !stop && upsert(cs))
+        .catch(() => undefined);
+    void load();
+    const id = window.setInterval(load, 30_000);
+    return () => {
+      stop = true;
+      window.clearInterval(id);
+    };
+  }, [client, upsert]);
+
+  // Live updates: coin changes, trades (the ticker, the watched coin's tape and holders, your positions). The stream
+  // doesn't replay what it missed while disconnected, so a reconnect re-reads the list, the watched coin's trades and
+  // holders, and your positions; other coins' trades are refetched when next opened.
+  useEffect(() => {
+    if (!client) return;
+    let connected = false;
+    const resync = () => {
+      if (!connected) return void (connected = true);
+      client
+        .coins()
+        .then(upsert)
+        .catch(() => undefined);
+      const mint = watched.current;
+      tradesLoaded.current = new Set(mint ? [mint] : []);
+      if (mint)
+        client
+          .trades(mint)
+          .then((ts) => setRawTrades((prev) => new Map([[mint, mergeTrades(ts, prev.get(mint))]])))
+          .catch(() => undefined);
+      if (mint) loadHolders(mint);
+      refreshPositions();
+    };
+    return client.stream((m) => {
+      if (m.type === "coin") return upsert([m.coin]);
+      if (m.type !== "trade") return;
+      const t = m.trade;
+      setLive((ts) => (ts.some((x) => tradeKey(x) === tradeKey(t)) ? ts : [t, ...ts].slice(0, 400)));
+      if (tradesLoaded.current.has(t.mint)) setRawTrades((prev) => new Map(prev).set(t.mint, mergeTrades([t], prev.get(t.mint)).slice(0, 300)));
+      if (t.user === walletRef.current) refreshPositions();
+      if (t.mint === watched.current) {
+        window.clearTimeout(holdersTimer.current);
+        holdersTimer.current = window.setTimeout(() => loadHolders(t.mint), 3_000);
+      }
+    }, resync);
+  }, [client, upsert, refreshPositions, loadHolders]);
+
+  // The connected wallet's positions: on connect and every 30 s.
+  useEffect(() => {
+    setPortfolio(null);
+    if (!wallet) return;
+    refreshPositions();
+    const id = window.setInterval(refreshPositions, 30_000);
+    return () => window.clearInterval(id);
+  }, [wallet, refreshPositions]);
+
+  const watchCoin = useCallback(
+    (mint: string) => {
+      if (!client || !mint) return;
+      watched.current = mint;
+      if (!rawRef.current.has(mint)) {
+        setState(mint, "loading");
+        // A coin created moments ago may not be visible to the indexer's RPC yet: ask again before calling it missing.
+        const attempt = (n: number) =>
+          client
+            .coin(mint)
+            .then((c) => {
+              if (c) {
+                upsert([c]);
+                setState(mint, null);
+              } else if (n < 3) window.setTimeout(() => void attempt(n + 1), 2_000 * n);
+              else setState(mint, "missing");
+            })
+            .catch(() => setState(mint, "error"));
+        void attempt(1);
+      }
+      if (!tradesLoaded.current.has(mint)) {
+        tradesLoaded.current.add(mint);
+        client
+          .trades(mint)
+          .then((ts) => setRawTrades((prev) => new Map(prev).set(mint, mergeTrades(ts, prev.get(mint)))))
+          .catch(() => tradesLoaded.current.delete(mint));
+      }
+      loadHolders(mint);
+    },
+    [client, upsert, setState, loadHolders],
+  );
+
+  const coins = useMemo(
+    () =>
+      [...raw.values()]
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .map((j) => {
+          const c = toCoin(j, solUsd, lockSeconds);
+          // The creator's share, once the coin's holders are loaded.
+          const dev = rawHolders.get(j.mint)?.holders.find((h) => h.label === "creator");
+          return dev ? { ...c, devPct: dev.pct * 100 } : c;
+        }),
+    [raw, rawHolders, solUsd, lockSeconds],
+  );
+  const byMint = useMemo(() => new Map(coins.map((c) => [c.mint, c])), [coins]);
+  const liveTrades = useMemo(() => live.map((t) => toTrade(t, solUsd)), [live, solUsd]);
+  const tradesFor = useCallback((mint: string) => (rawTrades.get(mint) ?? []).map((t) => toTrade(t, solUsd)), [rawTrades, solUsd]);
+  const holdersFor = useCallback(
+    (mint: string) => {
+      const h = rawHolders.get(mint);
+      const c = byMint.get(mint);
+      return h && c ? toHolders(h, c) : null;
+    },
+    [rawHolders, byMint],
+  );
+  const coinState = useCallback((mint: string): CoinState => (!client ? "unconfigured" : raw.has(mint) ? "ready" : (states.get(mint) ?? "loading")), [client, raw, states]);
+  const positions = useMemo(() => (portfolio ? positionsFrom(portfolio, solUsd) : {}), [portfolio, solUsd]);
+  const fetchCandles = useCallback((mint: string, intervalSec: number) => (client ? client.candles(mint, intervalSec) : Promise.resolve(null)), [client]);
+  const [following, setFollowing] = useState(() => new Set<string>());
+  const toggleFollow = useCallback(
+    (key: string) =>
+      setFollowing((s) => {
+        const next = new Set(s);
+        if (!next.delete(key)) next.add(key);
+        return next;
+      }),
+    [],
+  );
+
+  const value = useMemo<MarketState>(
+    () => ({
+      source: client ? "indexer" : "unconfigured",
+      coinState,
+      watchCoin,
+      holdersFor,
+      refreshPositions,
+      fetchCandles,
+      coins,
+      byMint,
+      liveTrades,
+      tradesFor,
+      ...EMPTY,
+      solUsd,
+      positions,
+      startPositions: positions,
+      demoSolDelta: 0,
+      demoClosed: [],
+      demoTradeCount: 0,
+      following,
+      toggleFollow,
+      demoTrade: () => null,
+      demoLaunch: () => {
+        throw new Error("demo launches are demo-mode only");
+      },
+    }),
+    [client, coinState, watchCoin, holdersFor, refreshPositions, fetchCandles, coins, byMint, liveTrades, tradesFor, solUsd, positions, following, toggleFollow],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -329,6 +593,14 @@ export function useMarket(): MarketState {
   const v = useContext(Ctx);
   if (!v) throw new Error("useMarket outside MarketProvider");
   return v;
+}
+
+/** A coin page's coin and state; starts loading it in chain mode (a coin newer than the board's list included). */
+export function useCoinView(mint: string): { coin: Coin | undefined; state: CoinState } {
+  const m = useMarket();
+  const { watchCoin } = m;
+  useEffect(() => watchCoin(mint), [watchCoin, mint]);
+  return { coin: m.byMint.get(mint), state: m.coinState(mint) };
 }
 
 /** The leading curve coin closest to graduation: the King of the Bull. */

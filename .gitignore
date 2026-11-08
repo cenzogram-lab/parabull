@@ -22,3 +22,6 @@ app/screenshots/
 
 # Cloudflare Worker local state (wrangler dev)
 .wrangler/
+
+# TypeScript incremental build caches (tsc -b)
+*.tsbuildinfo

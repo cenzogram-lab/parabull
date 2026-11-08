@@ -25,7 +25,8 @@ export interface Holding {
   /** pnlUsd / costUsd, as a fraction. */
   pnlPct: number;
   /** The coin's 24h change, as a fraction. */
-  change24h: number;
+  /** null when not known (chain mode). */
+  change24h: number | null;
   note: PositionNote | null;
 }
 
@@ -93,7 +94,8 @@ export function usePortfolio(): Portfolio {
         const coin = byMint.get(mint);
         if (!coin) return n;
         if (coin.createdAt > now - DAY) return n + p.basisUsd;
-        if (!(coin.change24h > -1)) return n;
+        // An unknown change (chain mode, history not reaching a day back) counts as no change.
+        if (coin.change24h === null || !(coin.change24h > -1)) return n;
         const ago = coin.priceUsd / (1 + coin.change24h);
         return n + (Number(p.tokens) / 1e6) * (coin.migrated ? ago : Math.max(ago, LAUNCH_PRICE_SOL * solUsd));
       }, 0),

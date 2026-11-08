@@ -138,7 +138,9 @@ function NotificationList({ epoch, onPick }: { epoch: DemoEpoch | null | undefin
   const [now] = useState(() => Date.now());
 
   const notes: Note[] = [];
-  const mover = [...holdings].sort((a, b) => Math.abs(b.change24h) - Math.abs(a.change24h))[0];
+  // The biggest mover among holdings whose 24h change is known.
+  const known = holdings.filter((h): h is typeof h & { change24h: number } => h.change24h !== null);
+  const mover = known.sort((a, b) => Math.abs(b.change24h) - Math.abs(a.change24h))[0];
   if (mover) {
     const up = mover.change24h >= 0;
     notes.push({ id: "mover", icon: up ? TrendingUp : TrendingDown, tone: up ? "gold" : "ember", title: `$${mover.coin.ticker} is ${up ? "up" : "down"} ${pct(Math.abs(mover.change24h), 1, false)} today`, body: `Your position is worth ${usd(mover.valueUsd)} (${usdSigned(mover.pnlUsd)} unrealized)`, to: `/coin/${mover.coin.mint}`, at: now - 4 * MIN });
