@@ -17,6 +17,7 @@ import { CoinFilterButton, filterCount, MobileCoinFilterSheet, NO_FILTERS, passe
 import { FilterSummary, MobileCoinList, RowDensityButton, useListTop, useRemembered } from "./MobileCoinList";
 import { shortUsd, useRowDensity } from "./MobileCoinRow";
 import { MobileTabs } from "./MobileUi";
+import { byChangeDesc } from "../../lib/format";
 
 type Tab = "Movers" | "New" | "Soon" | "Graduated";
 // Slightly tight tracking lets all four tabs and the two 44px controls fit a 390px row.
@@ -40,7 +41,7 @@ function listFor(coins: Coin[], tab: Tab): Coin[] {
     case "Graduated":
       return coins.filter((c) => c.migrated).sort((a, b) => b.mcapUsd - a.mcapUsd);
     default:
-      return [...coins].sort((a, b) => b.change1h - a.change1h);
+      return [...coins].sort((a, b) => byChangeDesc(a.change1h, b.change1h));
   }
 }
 

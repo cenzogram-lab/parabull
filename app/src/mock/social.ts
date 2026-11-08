@@ -48,7 +48,7 @@ export function generateSquads(traders: Trader[]): Squad[] {
 
 export function generateCallouts(coins: Coin[], now = Date.now()): Callout[] {
   const rng = new Rng("callouts");
-  const ranked = [...coins].sort((a, b) => b.change24h - a.change24h);
+  const ranked = [...coins].sort((a, b) => (b.change24h ?? 0) - (a.change24h ?? 0));
   return CALLOUT_LINES.map((text, i) => {
     const coin = ranked[(i * 5) % Math.min(ranked.length, 28)];
     const [handle] = HANDLES[(i * 11 + 2) % HANDLES.length];

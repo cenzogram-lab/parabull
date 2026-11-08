@@ -75,10 +75,20 @@ export interface HoldersJson {
   holders: { owner: string; amount: string; pct: number; label: "bonding_curve" | "migration" | "raydium_pool" | "creator" | null }[];
 }
 
+export interface CandleJson {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volumeSol: number;
+}
+
 export interface PortfolioJson {
   wallet: string;
   lamports: string;
-  holdings: { mint: string; amount: string; valueSol: number; coin: CoinJson }[];
+  /** costSol: the held amount at the wallet's average indexed buy price (null when no buy is indexed). */
+  holdings: { mint: string; amount: string; valueSol: number; costSol: number | null; coin: CoinJson }[];
   trades: TradeJson[];
   next: string | null;
 }
@@ -109,8 +119,17 @@ export class IndexerClient {
     return json;
   }
 
-  async coins(limit = 200): Promise<CoinJson[]> {
-    return (await this.get<{ coins: CoinJson[] }>(`/coins?sort=new&limit=${limit}`)).coins;
+  /** Every coin, newest first, page by page: at most `maxPages` pages of 200 (older coins load when opened). */
+  async coins(maxPages = 5): Promise<CoinJson[]> {
+    const out: CoinJson[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < maxPages; page++) {
+      const r: { coins: CoinJson[]; next: string | null } = await this.get(`/coins?sort=new&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      out.push(...r.coins);
+      cursor = r.next;
+      if (!cursor) break;
+    }
+    return out;
   }
   /** null when the address isn't a Parabull coin. */
   async coin(mint: string): Promise<CoinJson | null> {
@@ -123,6 +142,10 @@ export class IndexerClient {
   }
   async trades(mint: string, limit = 100): Promise<TradeJson[]> {
     return (await this.get<{ trades: TradeJson[] }>(`/coins/${mint}/trades?limit=${limit}`)).trades;
+  }
+  /** Chart bars built by the indexer from every trade it holds for the coin. */
+  async candles(mint: string, intervalSec: number): Promise<CandleJson[]> {
+    return (await this.get<{ candles: CandleJson[] }>(`/coins/${mint}/candles?interval=${intervalSec}&limit=500`)).candles;
   }
   holders(mint: string): Promise<HoldersJson> {
     return this.get<HoldersJson>(`/coins/${mint}/holders?limit=50`);
@@ -182,7 +205,8 @@ export function stageOf(j: CoinJson): Stage {
 export function toCoin(j: CoinJson, solUsd: number, registryLockSeconds: number): Coin {
   const lock = (j.createdAt + registryLockSeconds) * 1000;
   const priceUsd = j.priceSol * solUsd;
-  const change1h = j.stats.change1h ?? 0;
+  // Unknown changes stay null: the views show them as unavailable, never as a flat 0%.
+  const change1h = j.stats.change1h;
   return {
     mint: j.mint,
     name: j.name || shortAddr(j.mint, 4),
@@ -206,8 +230,8 @@ export function toCoin(j: CoinJson, solUsd: number, registryLockSeconds: number)
     sells24h: j.stats.sells24h,
     traders24h: j.stats.traders24h,
     change1h,
-    change6h: j.stats.change6h ?? 0,
-    change24h: j.stats.change24h ?? 0,
+    change6h: j.stats.change6h,
+    change24h: j.stats.change24h,
     holders: j.holders ?? 0,
     devPct: 0,
     replies: 0,
@@ -217,7 +241,7 @@ export function toCoin(j: CoinJson, solUsd: number, registryLockSeconds: number)
     escrowReleased: j.escrowReleased,
     spark: j.stats.spark.map((p) => p * solUsd),
     socials: j.socials,
-    hot: change1h > 0.25,
+    hot: (change1h ?? 0) > 0.25,
     ...(j.raydiumPool && j.migrated ? { pool: { address: j.raydiumPool, lpLocked: true, feeNft: "", lpFeesUsd: 0 } } : {}),
   };
 }
@@ -251,46 +275,22 @@ export function toHolders(h: HoldersJson, coin: Pick<Coin, "priceUsd">): Holder[
   });
 }
 
-/**
- * OHLCV from a coin's indexed trades (given newest first), oldest bar first: each trade's post-trade price, bucketed
- * by `intervalSec`; a bar opens at the previous bar's close, and quiet intervals have no bar. Volume is in USD. A coin
- * with no trades yet is one flat bar at its current price.
- */
-export function tradeCandles(newestFirst: Trade[], intervalSec: number, current: Pick<Coin, "priceUsd">, now = Date.now()): Candle[] {
-  const bars: Candle[] = [];
-  for (let i = newestFirst.length - 1; i >= 0; i--) {
-    const t = newestFirst[i];
-    const time = Math.floor(t.ts / 1000 / intervalSec) * intervalSec;
-    const p = t.priceUsd;
-    const volume = t.tokens * p;
-    const last = bars[bars.length - 1];
-    if (last && last.time === time) {
-      last.high = Math.max(last.high, p);
-      last.low = Math.min(last.low, p);
-      last.close = p;
-      last.volume += volume;
-    } else {
-      const open = last ? last.close : p;
-      bars.push({ time, open, high: Math.max(open, p), low: Math.min(open, p), close: p, volume });
-    }
-  }
+/** The indexer's bars in USD; a coin with no trades yet is one flat bar at its current price. */
+export function toCandles(bars: CandleJson[], solUsd: number, current: Pick<Coin, "priceUsd">, intervalSec: number, now = Date.now()): Candle[] {
   if (!bars.length) {
     const p = current.priceUsd;
-    bars.push({ time: Math.floor(now / 1000 / intervalSec) * intervalSec, open: p, high: p, low: p, close: p, volume: 0 });
+    return [{ time: Math.floor(now / 1000 / intervalSec) * intervalSec, open: p, high: p, low: p, close: p, volume: 0 }];
   }
-  return bars;
+  return bars.map((b) => ({ time: b.time, open: b.open * solUsd, high: b.high * solUsd, low: b.low * solUsd, close: b.close * solUsd, volume: b.volumeSol * solUsd }));
 }
 
-/** Each held coin's token balance and an average-cost basis from the wallet's indexed buys (USD at today's SOL price). */
+/** Each held coin's token balance and its cost basis (the indexer's average over the wallet's buys; USD at today's SOL price). */
 export function positionsFrom(p: PortfolioJson, solUsd: number): Record<string, { tokens: bigint; costUsd: number; basisUsd: number }> {
   const out: Record<string, { tokens: bigint; costUsd: number; basisUsd: number }> = {};
   for (const h of p.holdings) {
     const tokens = BigInt(h.amount);
-    const buys = p.trades.filter((t) => t.mint === h.mint && t.side === "buy");
-    const boughtTokens = buys.reduce((s, t) => s + Number(t.tokenAmount), 0);
-    const boughtSol = buys.reduce((s, t) => s + Number(t.solAmount) + Number(t.fee), 0) / 1e9;
-    // Without indexed buys (an airdrop, or older than the index), the position starts at today's value.
-    const cost = boughtTokens > 0 ? (boughtSol / boughtTokens) * Number(tokens) * solUsd : h.valueSol * solUsd;
+    // The indexer averages every indexed buy; without one (an airdrop, or older than the index), today's value.
+    const cost = (h.costSol ?? h.valueSol) * solUsd;
     out[h.mint] = { tokens, costUsd: cost, basisUsd: cost };
   }
   return out;

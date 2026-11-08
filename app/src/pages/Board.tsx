@@ -9,7 +9,7 @@ import { ChangePill, cx, HotBadge, Panel, PanelHeader, Popover, Segmented, Under
 import { CoinAvatar, Meter, Sparkline, TraderAvatar } from "../components/ui/visuals";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { useNow } from "../hooks/useNow";
-import { age, compact, price, usdCompact, usdSigned } from "../lib/format";
+import { age, byChangeDesc, compact, price, usdCompact, usdSigned } from "../lib/format";
 import { GRADUATION_RAISE_LAMPORTS } from "../lib/protocol";
 import { activeScreenerFilters, FEED_PAGE, nextFeedCount, NO_SCREENER_FILTERS, passesScreener, SCREENER_ROWS, type ScreenerFilters } from "../lib/screener";
 import type { Coin, Period } from "../lib/types";
@@ -114,7 +114,7 @@ function ProScreener({ expanded, onToggleExpand }: { expanded: boolean; onToggle
       case "Graduated":
         return shown.filter((c) => c.migrated).sort((a, b) => b.mcapUsd - a.mcapUsd);
       default:
-        return [...shown].sort((a, b) => b.change1h - a.change1h);
+        return [...shown].sort((a, b) => byChangeDesc(a.change1h, b.change1h));
     }
   }, [coins, tab, filters, now]);
   return (
@@ -199,12 +199,16 @@ function ScreenerFilterForm({ value, onApply }: { value: ScreenerFilters; onAppl
 }
 
 type Tf = "1h" | "4h" | "12h" | "24h";
-const changeFor = (c: Coin, tf: Tf) => (tf === "1h" ? c.change1h : tf === "4h" ? (c.change1h + c.change6h) / 2 : tf === "12h" ? (c.change6h + c.change24h) / 2 : c.change24h);
+/** The change over a timeframe (4h and 12h blend the neighbours); null when a part isn't known. */
+const changeFor = (c: Coin, tf: Tf): number | null => {
+  const mid = (x: number | null, y: number | null) => (x === null || y === null ? null : (x + y) / 2);
+  return tf === "1h" ? c.change1h : tf === "4h" ? mid(c.change1h, c.change6h) : tf === "12h" ? mid(c.change6h, c.change24h) : c.change24h;
+};
 
 function Trending() {
   const { coins } = useMarket();
   const [tf, setTf] = useState<Tf>("24h");
-  const list = useMemo(() => [...coins].sort((a, b) => b.vol24hUsd * (1 + Math.max(0, changeFor(b, tf))) - a.vol24hUsd * (1 + Math.max(0, changeFor(a, tf)))).slice(0, 24), [coins, tf]);
+  const list = useMemo(() => [...coins].sort((a, b) => b.vol24hUsd * (1 + Math.max(0, changeFor(b, tf) ?? 0)) - a.vol24hUsd * (1 + Math.max(0, changeFor(a, tf) ?? 0))).slice(0, 24), [coins, tf]);
   return (
     <Panel className="h-[660px]">
       <PanelHeader icon={Flame} title="Trending" />
@@ -231,9 +235,15 @@ function Trending() {
             <Sparkline data={c.spark} width={64} height={26} label={`${c.ticker} 24h trend`} />
             <div className="w-[76px] text-right">
               <div className="num text-[13.5px] font-semibold">{usdCompact(c.mcapUsd)}</div>
-              <div className={cx("num text-[12px] font-semibold", changeFor(c, tf) >= 0 ? "text-gold" : "text-ember")}>
-                {changeFor(c, tf) >= 0 ? "↑" : "↓"} {Math.abs(changeFor(c, tf) * 100).toLocaleString("en-US", { maximumFractionDigits: 1, minimumFractionDigits: 1 })}%
-              </div>
+              {(() => {
+                const ch = changeFor(c, tf);
+                if (ch === null) return <div className="num text-[12px] font-semibold text-muted">—</div>;
+                return (
+                  <div className={cx("num text-[12px] font-semibold", ch >= 0 ? "text-gold" : "text-ember")}>
+                    {ch >= 0 ? "↑" : "↓"} {Math.abs(ch * 100).toLocaleString("en-US", { maximumFractionDigits: 1, minimumFractionDigits: 1 })}%
+                  </div>
+                );
+              })()}
             </div>
           </Link>
         ))}
@@ -324,7 +334,7 @@ function ClassicBoard() {
   const all = feed === "For you" ? callouts : callouts.filter((c) => following.has(c.handle));
   const posts = all.slice(0, shown);
   const newest = [...coins].sort((a, b) => b.createdAt - a.createdAt).slice(0, 6);
-  const right = side === "Movers" ? [...coins].sort((a, b) => b.change1h - a.change1h) : [...coins].sort((a, b) => b.vol24hUsd - a.vol24hUsd);
+  const right = side === "Movers" ? [...coins].sort((a, b) => byChangeDesc(a.change1h, b.change1h)) : [...coins].sort((a, b) => b.vol24hUsd - a.vol24hUsd);
   return (
     <div className="mx-auto grid max-w-[1320px] grid-cols-1 gap-12 px-8 py-6 xl:grid-cols-[minmax(0,1fr)_400px]">
       <div>

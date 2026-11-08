@@ -46,6 +46,17 @@ export function price(n: number, prefix = "$"): string {
 }
 
 /** +12.3% / -4.1%; large moves keep separators: +4,067.5% */
+/** Descending order of a change that may be unknown (null): unknowns go last. */
+export function byChangeDesc(a: number | null, b: number | null): number {
+  const x = a ?? Number.NEGATIVE_INFINITY;
+  const y = b ?? Number.NEGATIVE_INFINITY;
+  return x === y ? 0 : y > x ? 1 : -1;
+}
+
+/** "up 4.2% in 24 hours", for labels; an unknown change says so. */
+export const changeWords = (fraction: number | null, span: string) =>
+  fraction === null ? `change in ${span} unknown` : `${fraction >= 0 ? "up" : "down"} ${pct(Math.abs(fraction), 1, false)} in ${span}`;
+
 export function pct(fraction: number, digits = 1, signed = true): string {
   const v = fraction * 100;
   const s = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });

@@ -13,6 +13,7 @@ import { CoinFilterButton, filterCount, MobileCoinFilterSheet, NO_FILTERS, passe
 import { MobileCoinList, RowDensityButton, useListTop, useRemembered } from "./MobileCoinList";
 import { useRowDensity } from "./MobileCoinRow";
 import { BottomSheet, MobileTabs } from "./MobileUi";
+import { byChangeDesc } from "../../lib/format";
 
 type Cat = "Movers" | "New" | "Graduated";
 /** Tracked like the board's tabs, so the two screeners match. */
@@ -41,7 +42,7 @@ export function MobileExplore() {
   const [sheet, setSheet] = useState<"sort" | "filters" | null>(null);
   const [listTop, toTop] = useListTop();
   const base = useMemo(() => (cat === "Graduated" ? coins.filter((c) => c.migrated) : coins), [coins, cat]);
-  const rows = useMemo(() => base.filter((c) => passesFilters(c, filters, now)).sort((a, b) => sortValue(b, sort) - sortValue(a, sort)), [base, filters, sort, now]);
+  const rows = useMemo(() => base.filter((c) => passesFilters(c, filters, now)).sort((a, b) => byChangeDesc(sortValue(a, sort), sortValue(b, sort))), [base, filters, sort, now]);
   const active = filterCount(filters);
   const sortLabel = SORTS.find((s) => s.key === sort)?.label ?? "";
   const close = () => setSheet(null);

@@ -13,7 +13,7 @@ export function tradeHistory(coin: Coin, n = 60, now = Date.now()): Trade[] {
   const rng = new Rng(`trades:${coin.mint}`);
   const out: Trade[] = [];
   let ts = now - rng.range(3, 20) * 1000;
-  const prices = bridge(rng, coin.priceUsd / (1 + coin.change1h * 0.5), coin.priceUsd, n, 0.01);
+  const prices = bridge(rng, coin.priceUsd / (1 + (coin.change1h ?? 0) * 0.5), coin.priceUsd, n, 0.01);
   for (let i = 0; i < n; i++) {
     const side = rng.bool(coin.buyVolUsd / (coin.buyVolUsd + coin.sellVolUsd)) ? "buy" : "sell";
     const solAmt = rng.logRange(0.02, coin.migrated ? 12 : 4);
@@ -47,7 +47,9 @@ export function candles(coin: Coin, interval: Interval, now = Date.now()): Candl
   const maxBars = Math.max(24, Math.floor((now - coin.createdAt) / 1000 / sec));
   const n = Math.min(160, maxBars);
   const spanH = (n * sec) / 3600;
-  const drift = spanH >= 24 ? coin.change24h : spanH >= 6 ? coin.change6h : spanH >= 1 ? coin.change1h : coin.change1h * Math.max(0.05, spanH);
+  // Demo coins always carry their changes (the type allows null for chain mode).
+  const c1 = coin.change1h ?? 0;
+  const drift = (spanH >= 24 ? coin.change24h : spanH >= 6 ? coin.change6h : spanH >= 1 ? c1 : c1 * Math.max(0.05, spanH)) ?? 0;
   const vol = Math.min(0.09, 0.006 * Math.sqrt(sec) + 0.004);
   const closes = bridge(rng, coin.priceUsd / (1 + drift), coin.priceUsd, n, vol);
   const end = Math.floor(now / 1000 / sec) * sec;

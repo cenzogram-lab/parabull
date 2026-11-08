@@ -5,6 +5,7 @@
  *   GET /coins?status=&sort=&limit=&cursor=   { coins: CoinJson[], next }
  *   GET /coins/:mint                     CoinJson (looked up on-chain if not indexed yet; 404 if it isn't a Parabull coin)
  *   GET /coins/:mint/trades?limit=&before=    { trades: TradeJson[], next } newest first
+ *   GET /coins/:mint/candles?interval=&limit=  { mint, interval, candles: CandleJson[], partial } oldest first
  *   GET /coins/:mint/holders?limit=      { mint, totalSupply, count, holders: HolderJson[] }
  *   GET /portfolio/:wallet?limit=&before=     { wallet, lamports, holdings: [{ mint, amount, valueSol, coin }], trades, next }
  *   GET /tickets/:ticket                 TicketJson
@@ -18,7 +19,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { isAddress } from "../../../app/src/lib/chatMessage";
 import type { Indexer } from "./indexer";
-import { coinJson, mcapOf, progressOf, statusOf, ticketJson, tradeCursor, tradeJson, type CoinJson, type CoinRecord, type CoinStatus, type TradeRecord } from "./model";
+import { CANDLE_INTERVALS, candlesOf, coinJson, mcapOf, progressOf, statusOf, ticketJson, tradeCursor, tradeJson, type CoinJson, type CoinRecord, type CoinStatus, type TradeRecord } from "./model";
 import { RpcError } from "./rpc";
 import { page } from "./store";
 import { acceptWebSocket, type WsConn } from "./ws";
@@ -75,8 +76,7 @@ export class Api {
   }
 
   private coin(c: CoinRecord): CoinJson {
-    const s = this.ix.store;
-    return coinJson(c, s.trades(c.mint), this.ix.nowSec(), s.fullHistory.has(c.mint), s.evictedThrough.get(c.mint));
+    return coinJson(c, this.ix.store.trades(c.mint), this.ix.nowSec(), this.ix.coveredFrom(c.mint));
   }
 
   private push(mint: string | null, build: () => object | null) {
@@ -192,6 +192,12 @@ export class Api {
           const p = page(ix.store.trades(mint), tradeCursor, q.get("before"), limit);
           if (!p) throw new HttpError(400, "unknown `before` cursor");
           return this.send(req, res, 200, { trades: p.items.map((t) => tradeJson(t, coin!.totalSupply)), next: p.next });
+        }
+        if (parts.length === 3 && parts[2] === "candles") {
+          const interval = Number(q.get("interval") ?? 300);
+          if (!(CANDLE_INTERVALS as readonly number[]).includes(interval)) throw new HttpError(400, `interval must be one of ${CANDLE_INTERVALS.join(", ")} (seconds)`);
+          const candles = candlesOf(ix.store.trades(mint), interval, intParam(q.get("limit"), 300, 1000));
+          return this.send(req, res, 200, { mint, interval, candles, partial: ix.coveredFrom(mint) > coin.launchTimestamp }, "public, max-age=2");
         }
         if (parts.length === 3 && parts[2] === "holders") {
           if (!this.allowRpc(req)) throw new HttpError(429, "too many requests");

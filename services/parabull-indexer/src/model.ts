@@ -119,25 +119,26 @@ export interface CoinStats {
   /** Price (SOL per token) at the end of each of the last 24 hours, oldest first. */
   spark: number[];
   lastTradeAt: number | null;
-  /** True when trades inside the last 24 h were evicted (a coin past 50,000 trades a day): the totals are a floor. */
+  /**
+   * True when the index doesn't hold every trade of the last 24 h (the startup backfill didn't reach that far, or a
+   * coin past 50,000 trades a day had some evicted): the totals are a floor.
+   */
   partial: boolean;
 }
 
 /**
  * The price at time `t`: after the last indexed trade at or before `t`; else the launch price, if nothing traded
- * before `t` (launched after it, or every trade since launch is indexed); else null (the history doesn't reach `t`).
+ * before `t` (it launched after `t`, or every trade since launch is held); else null (the history doesn't reach `t`).
+ * `coveredFrom`: the index holds every trade of this coin from this time on (-Infinity: since launch).
  */
-function priceAt(c: CoinRecord, newestFirst: TradeRecord[], t: number, historyComplete: boolean): number | null {
+function priceAt(c: CoinRecord, newestFirst: TradeRecord[], t: number, coveredFrom: number): number | null {
   for (const tr of newestFirst) if (tr.timestamp <= t) return priceSol(tr.virtualToken, tr.virtualSol);
-  if (c.launchTimestamp >= t || historyComplete) return c.initialPriceSol;
+  if (c.launchTimestamp >= t || coveredFrom <= c.launchTimestamp) return c.initialPriceSol;
   return null;
 }
 
-/**
- * 24h numbers from the coin's indexed trades (`newestFirst`). `historyComplete`: every trade since launch is indexed.
- * `evictedThrough`: the newest timestamp among trades the store dropped, if any.
- */
-export function statsOf(c: CoinRecord, newestFirst: TradeRecord[], now: number, historyComplete: boolean, evictedThrough?: number): CoinStats {
+/** 24h numbers from the coin's indexed trades (`newestFirst`), given what the index holds (`coveredFrom`, see priceAt). */
+export function statsOf(c: CoinRecord, newestFirst: TradeRecord[], now: number, coveredFrom: number): CoinStats {
   const since = now - 86_400;
   let buy = 0n;
   let sell = 0n;
@@ -157,12 +158,12 @@ export function statsOf(c: CoinRecord, newestFirst: TradeRecord[], now: number, 
   }
   const price = currentPrice(c);
   const change = (hours: number) => {
-    const then = priceAt(c, newestFirst, now - hours * 3600, historyComplete);
+    const then = priceAt(c, newestFirst, now - hours * 3600, coveredFrom);
     return then && then > 0 ? price / then - 1 : null;
   };
   const spark: number[] = [];
   for (let h = 23; h >= 0; h--) {
-    const p = priceAt(c, newestFirst, now - h * 3600, historyComplete);
+    const p = priceAt(c, newestFirst, now - h * 3600, coveredFrom);
     spark.push(p ?? spark[spark.length - 1] ?? price);
   }
   // Graduated coins trade on Raydium, which isn't indexed: the last point is the pool's price.
@@ -180,7 +181,8 @@ export function statsOf(c: CoinRecord, newestFirst: TradeRecord[], now: number, 
     change24h: change(24),
     spark,
     lastTradeAt: newestFirst[0]?.timestamp ?? null,
-    partial: evictedThrough !== undefined && evictedThrough >= since,
+    // The window starts at `since`, or at launch for a younger coin; anything not held from then on is missing.
+    partial: coveredFrom > Math.max(since, c.launchTimestamp),
   };
 }
 
@@ -216,7 +218,7 @@ export interface CoinJson {
   stats: CoinStats;
 }
 
-export function coinJson(c: CoinRecord, trades: TradeRecord[], now: number, historyComplete: boolean, evictedThrough?: number): CoinJson {
+export function coinJson(c: CoinRecord, trades: TradeRecord[], now: number, coveredFrom: number): CoinJson {
   const price = currentPrice(c);
   const mcap = mcapOf(c, price);
   return {
@@ -247,7 +249,7 @@ export function coinJson(c: CoinRecord, trades: TradeRecord[], now: number, hist
     raydiumPool: c.raydiumPool,
     tweetLocked: c.tweetLocked,
     holders: c.holderCount,
-    stats: statsOf(c, trades, now, historyComplete, evictedThrough),
+    stats: statsOf(c, trades, now, coveredFrom),
   };
 }
 
@@ -286,6 +288,44 @@ export function tradeJson(t: TradeRecord, totalSupply: bigint): TradeJson {
 }
 
 export const tradeCursor = (t: Pick<TradeRecord, "signature" | "index">) => `${t.signature}:${t.index}`;
+
+export const CANDLE_INTERVALS = [1, 60, 300, 3600, 14400, 86400] as const;
+export interface CandleJson {
+  /** Unix seconds at the bar's start. */
+  time: number;
+  /** SOL per whole token. */
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  /** SOL traded (curve side). */
+  volumeSol: number;
+}
+
+/**
+ * OHLCV from a coin's trades (given newest first), oldest bar first, the last `limit` bars: each trade's post-trade
+ * price bucketed by `intervalSec`; a bar opens at the previous bar's close, and quiet intervals have no bar.
+ */
+export function candlesOf(newestFirst: TradeRecord[], intervalSec: number, limit: number): CandleJson[] {
+  const bars: CandleJson[] = [];
+  for (let i = newestFirst.length - 1; i >= 0; i--) {
+    const t = newestFirst[i];
+    const time = Math.floor(t.timestamp / intervalSec) * intervalSec;
+    const p = priceSol(t.virtualToken, t.virtualSol);
+    const volumeSol = Number(t.solAmount) / LAMPORTS_PER_SOL;
+    const last = bars[bars.length - 1];
+    if (last && last.time === time) {
+      last.high = Math.max(last.high, p);
+      last.low = Math.min(last.low, p);
+      last.close = p;
+      last.volumeSol += volumeSol;
+    } else {
+      const open = last ? last.close : p;
+      bars.push({ time, open, high: Math.max(open, p), low: Math.min(open, p), close: p, volumeSol });
+    }
+  }
+  return bars.slice(-limit);
+}
 
 export type HolderLabel = "bonding_curve" | "migration" | "raydium_pool" | "creator";
 export interface HolderJson {

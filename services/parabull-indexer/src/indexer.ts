@@ -72,7 +72,8 @@ export interface HoldersResult {
 export interface PortfolioResult {
   wallet: string;
   lamports: string;
-  holdings: { mint: string; amount: string; valueSol: number }[];
+  /** costSol: what the held amount cost at the wallet's average buy price over its indexed buys (null: none indexed). */
+  holdings: { mint: string; amount: string; valueSol: number; costSol: number | null }[];
 }
 
 const str = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
@@ -118,6 +119,12 @@ export class Indexer extends EventEmitter {
   global: GlobalParams | null = null;
   /** The newest program signature processed in order: the poller's `until`. */
   newestSignature: string | null = null;
+  /**
+   * When the startup backfill stopped at its limit: the block time of the oldest transaction it read. Every trade
+   * after it is indexed; before it, only coins whose creation it saw have full history. null: it reached the
+   * program's first transaction.
+   */
+  indexedSince: number | null = null;
   private readonly now: () => number;
   private readonly log: (msg: string) => void;
   private readonly fetchImpl: Fetch;
@@ -416,6 +423,7 @@ export class Indexer extends EventEmitter {
         }
         before = batch[batch.length - 1].signature;
       }
+      if (!until && !reachedEnd && collected.length) this.indexedSince = collected[collected.length - 1].blockTime ?? this.nowSec();
       const todo = collected.filter((s) => !s.err && !this.store.hasSeen(s.signature)).reverse();
       for (let i = 0; i < todo.length; i += 8) {
         const txs = await Promise.all(todo.slice(i, i + 8).map((s) => this.rpc.getTransaction(s.signature)));
@@ -433,6 +441,15 @@ export class Indexer extends EventEmitter {
       if (!until && reachedEnd) for (const mint of this.store.coins.keys()) this.store.fullHistory.add(mint);
     });
     return applied;
+  }
+
+  /**
+   * From when the index holds every one of this coin's trades (-Infinity: since launch): its full history, else the
+   * later of the startup backfill's cutoff and the newest trade the store evicted.
+   */
+  coveredFrom(mint: string): number {
+    if (this.store.fullHistory.has(mint)) return -Infinity;
+    return Math.max(this.indexedSince ?? -Infinity, this.store.evictedThrough.get(mint) ?? -Infinity);
   }
 
   /** Applies one successful transaction's program events (from the poller or the websocket, whichever is first). */
@@ -668,6 +685,15 @@ export class Indexer extends EventEmitter {
         const t = parseTokenAccount(a.data);
         if (t && t.amount > 0n) balances.set(t.mint, (balances.get(t.mint) ?? 0n) + t.amount);
       }
+      // Average cost per token from every indexed buy of each coin (all of them, not one page).
+      const bought = new Map<string, { tokens: bigint; lamports: bigint }>();
+      for (const t of this.store.userTrades(wallet)) {
+        if (!t.isBuy) continue;
+        const b = bought.get(t.mint) ?? { tokens: 0n, lamports: 0n };
+        b.tokens += t.tokenAmount;
+        b.lamports += t.solAmount + t.fee;
+        bought.set(t.mint, b);
+      }
       let lookups = 0;
       const holdings: PortfolioResult["holdings"] = [];
       for (const [mint, amount] of balances) {
@@ -678,7 +704,9 @@ export class Indexer extends EventEmitter {
         }
         if (!coin) continue;
         const price = coin.migrated && coin.poolPriceSol !== null ? coin.poolPriceSol : priceSol(coin.virtualToken, coin.virtualSol);
-        holdings.push({ mint, amount: String(amount), valueSol: (Number(amount) / 1e6) * price });
+        const b = bought.get(mint);
+        const costSol = b && b.tokens > 0n ? (Number(b.lamports) / 1e9) * (Number(amount) / Number(b.tokens)) : null;
+        holdings.push({ mint, amount: String(amount), valueSol: (Number(amount) / 1e6) * price, costSol });
       }
       holdings.sort((a, b) => b.valueSol - a.valueSol);
       return { wallet, lamports: String(lamports), holdings };

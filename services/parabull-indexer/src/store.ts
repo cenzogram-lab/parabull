@@ -9,7 +9,9 @@ import { tradeCursor, type CoinRecord, type TicketRecord, type TradeRecord } fro
 export const MAX_TRADES_PER_COIN = 5_000;
 /** The absolute per-coin limit, reached only by a coin with more trades than this in a day. */
 export const MAX_TRADES_PER_COIN_HARD = 50_000;
-export const MAX_TRADES_PER_USER = 1_000;
+export const MAX_TRADES_PER_USER = 500;
+/** Wallets whose trades are kept: the most recently active (a wallet that trades again moves to the front). */
+export const MAX_USERS = 10_000;
 /** Trades this recent (against the coin's newest) stay past MAX_TRADES_PER_COIN: the 24h stats need them. */
 const KEEP_RECENT_SECONDS = 25 * 3600;
 const MAX_SEEN_SIGNATURES = 50_000;
@@ -25,6 +27,7 @@ export interface StoreLimits {
   perCoin: number;
   perCoinHard: number;
   perUser: number;
+  users: number;
 }
 
 export class Store {
@@ -39,7 +42,7 @@ export class Store {
   /** Per coin, the newest timestamp among its evicted trades: stats over a window reaching back past it are partial. */
   readonly evictedThrough = new Map<string, number>();
 
-  constructor(readonly limits: StoreLimits = { perCoin: MAX_TRADES_PER_COIN, perCoinHard: MAX_TRADES_PER_COIN_HARD, perUser: MAX_TRADES_PER_USER }) {}
+  constructor(readonly limits: StoreLimits = { perCoin: MAX_TRADES_PER_COIN, perCoinHard: MAX_TRADES_PER_COIN_HARD, perUser: MAX_TRADES_PER_USER, users: MAX_USERS }) {}
 
   /** Records a processed transaction; false if it was already processed (the websocket and the poller overlap). */
   markSeen(signature: string): boolean {
@@ -61,10 +64,13 @@ export class Store {
     insertNewestFirst(byMint, t);
     this.trimCoin(t.mint, byMint);
     this.tradesByMint.set(t.mint, byMint);
+    // Re-inserted so the map's order is by last activity; past the cap the least recently active wallet goes.
     const byUser = this.tradesByUser.get(t.user) ?? [];
+    this.tradesByUser.delete(t.user);
     insertNewestFirst(byUser, t);
     if (byUser.length > this.limits.perUser) byUser.length = this.limits.perUser;
     this.tradesByUser.set(t.user, byUser);
+    if (this.tradesByUser.size > this.limits.users) this.tradesByUser.delete(this.tradesByUser.keys().next().value as string);
     return true;
   }
 
@@ -83,6 +89,10 @@ export class Store {
     for (const old of evicted) this.tradeKeys.delete(tradeCursor(old));
     this.fullHistory.delete(mint);
     this.evictedThrough.set(mint, Math.max(this.evictedThrough.get(mint) ?? 0, ...evicted.map((x) => x.timestamp)));
+  }
+
+  get userCount() {
+    return this.tradesByUser.size;
   }
 
   /** How many trade keys are held (bounded by the per-coin caps). */

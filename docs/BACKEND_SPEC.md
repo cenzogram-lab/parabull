@@ -329,8 +329,9 @@ All `GET`.
 | `/coins?status=all\|new\|active\|graduating\|graduated&sort=new\|mcap\|volume\|progress\|last_trade&limit=1..200&cursor=` | `{ coins: Coin[], next }` |
 | `/coins/:mint` | `Coin`; a mint not indexed yet is looked up on-chain (curve PDA + mint) before answering 404 |
 | `/coins/:mint/trades?limit=1..100&before=<signature:index>` | `{ trades: Trade[], next }`, newest first |
+| `/coins/:mint/candles?interval=1\|60\|300\|3600\|14400\|86400&limit=1..1000` | `{ mint, interval, candles: [{ time, open, high, low, close, volumeSol }], partial }`, oldest first, from every trade held for the coin; each bar opens at the previous close |
 | `/coins/:mint/holders?limit=1..100` | `{ mint, totalSupply, count, holders: [{ owner, amount, pct, label }] }`, largest first; `label` is `bonding_curve`, `migration`, `raydium_pool`, `creator` or null |
-| `/portfolio/:wallet?limit=&before=` | `{ wallet, lamports, holdings: [{ mint, amount, valueSol, coin }], trades: Trade[], next }` |
+| `/portfolio/:wallet?limit=&before=` | `{ wallet, lamports, holdings: [{ mint, amount, valueSol, costSol, coin }], trades: Trade[], next }`; `costSol` is the held amount at the wallet's average price over every indexed buy (null if none is indexed) |
 | `/tickets/:ticket` | `{ ticket, payer, ticker, depositLamports, createdAt, expiresAt, state: pending\|created\|refunded\|closed, mint }` |
 | `/tickets?payer=` | `{ tickets }`, newest first, at most 50 |
 | `/stream[?mint=]` (WebSocket) | `{ type: "coin", coin }`, `{ type: "trade", trade }`, `{ type: "ticket", ticket }`; `?mint=` limits it to one coin |
@@ -357,8 +358,10 @@ All `GET`.
     history doesn't reach back that far;
   - `spark`: 24 hourly prices;
   - `lastTradeAt`;
-  - `partial`: true when trades from the last 24 h had to be dropped (the
-    hard limit below), so the 24h totals are a floor.
+  - `partial`: true when the index doesn't hold every trade of the last
+    24 h, so the 24h totals are a floor. That happens when the startup
+    backfill stopped before then (coins it didn't see created), or when the
+    hard limit below dropped trades.
 
 `Trade` has `signature`, `index` (the event's position in its transaction),
 `mint`, `user`, `side`, `tokenAmount`, `solAmount`, `fee`, `slot`,
@@ -370,14 +373,15 @@ All `GET`.
 - **In memory:** state is held in memory, with these limits:
   - per coin, 5,000 trades plus every trade from the last 25 h, up to a hard
     limit of 50,000;
-  - per wallet, 1,000 trades.
+  - per wallet, 500 trades, for the 10,000 most recently active wallets.
 - **What an eviction means:** a dropped trade is forgotten entirely, and the
   coin stops counting as having full history. Its price changes then read
   null rather than wrong. Dropping trades from the last day sets
   `stats.partial`.
 - **Restarts:** a restart re-reads the last `BACKFILL_LIMIT` program
-  transactions. Coins older than that have no full history, so their price
-  changes can be null. Durable storage means implementing the same `Store`
+  transactions. For coins created before that cutoff, a price change
+  reaching back past it is null (the app shows it as unavailable), and
+  `stats.partial` is true while the 24h window does. Durable storage means implementing the same `Store`
   methods over SQLite or Postgres.
 - **After graduation:** trades on Raydium aren't indexed; graduated coins are
   priced from the pool.

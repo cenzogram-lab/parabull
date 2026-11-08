@@ -87,7 +87,7 @@ test("indexer: trades move the coin and its 24h stats; failed transactions are s
   const coin = ix.store.coins.get(mint)!;
   assert.equal(coin.virtualSol, data.virtual_sol_reserves, "reserves follow the last trade");
   assert.equal(coin.realToken, data.real_token_reserves);
-  const j = coinJson(coin, trades, ix.nowSec(), ix.store.fullHistory.has(mint));
+  const j = coinJson(coin, trades, ix.nowSec(), ix.coveredFrom(mint));
   assert.equal(j.stats.buys24h, 2);
   assert.equal(j.stats.sells24h, 1);
   assert.equal(j.stats.traders24h, 2);
@@ -108,7 +108,7 @@ test("indexer: graduation (complete -> migrated), priced from the Raydium pool; 
   let coin = ix.store.coins.get(mint)!;
   assert.equal(coin.complete, true);
   assert.equal(statusOf(coin, ix.nowSec()), "graduating");
-  assert.equal(coinJson(coin, ix.store.trades(mint), ix.nowSec(), true).progress, 1);
+  assert.equal(coinJson(coin, ix.store.trades(mint), ix.nowSec(), -Infinity).progress, 1);
   assert.equal(ix.store.trades(mint)[0].tokenAmount, INITIAL.realToken, "the final buy fills only what was left");
 
   await chain.migrate(mint);
@@ -121,7 +121,7 @@ test("indexer: graduation (complete -> migrated), priced from the Raydium pool; 
   const solInPool = Number((await chain.curve(mint)).data.real_sol_reserves) === 0;
   assert.ok(solInPool);
   assert.ok(coin.poolPriceSol && coin.poolPriceSol > 0, "priced from the pool's vaults");
-  const j = coinJson(coin, ix.store.trades(mint), ix.nowSec(), true);
+  const j = coinJson(coin, ix.store.trades(mint), ix.nowSec(), -Infinity);
   assert.equal(j.priceSol, coin.poolPriceSol);
 });
 
@@ -313,20 +313,21 @@ test("store: old trades past a coin's cap are forgotten with their dedupe keys (
 
 test("store: the last day's trades stay past the soft cap (24h stats stay exact); the hard cap flags them partial", async () => {
   const { Store } = await import("./store");
-  const s = new Store({ perCoin: 50, perCoinHard: 200, perUser: 10 });
+  const s = new Store({ perCoin: 50, perCoinHard: 200, perUser: 10, users: 100 });
+  const cov = () => (s.fullHistory.has("M") ? -Infinity : (s.evictedThrough.get("M") ?? -Infinity));
   s.fullHistory.add("M");
   const T0 = 1_000_000; // trades every 10 s from T0; the coin launched days before
   const coin = { ...coinRecordFor("M"), launchTimestamp: T0 - 500_000 };
   for (let i = 0; i < 150; i++) s.addTrade(storeTrade(i, T0 + i * 10));
   assert.equal(s.trades("M").length, 150, "nothing in the last day is dropped below the hard cap");
   assert.equal(s.fullHistory.has("M"), true);
-  let st = coinJson(coin, s.trades("M"), T0 + 3_000, true, s.evictedThrough.get("M")).stats;
+  let st = coinJson(coin, s.trades("M"), T0 + 3_000, cov()).stats;
   assert.deepEqual([st.trades24h, st.partial], [150, false]);
 
   for (let i = 150; i < 260; i++) s.addTrade(storeTrade(i, T0 + i * 10, 2n));
   assert.equal(s.trades("M").length, 200, "the hard cap holds: trades 0..59 (T0 .. T0+590) are gone");
   const now = T0 + 3_900; // an hour ago is T0+300, inside the evicted span
-  st = coinJson(coin, s.trades("M"), now, s.fullHistory.has("M"), s.evictedThrough.get("M")).stats;
+  st = coinJson(coin, s.trades("M"), now, cov()).stats;
   assert.equal(st.partial, true, "in-window trades were evicted: the totals are a floor");
   assert.equal(st.trades24h, 200);
   assert.equal(st.change1h, null, "the price an hour ago was evicted: unknown, not the launch price (123)");
@@ -339,4 +340,50 @@ test("indexer: replaying a ticket's LaunchRequested keeps its on-chain creation 
   chain.time += 5_000; // the indexer starts much later and backfills the request
   await ix.start();
   assert.equal(ix.store.tickets.get(t)?.createdAt, createdOnChain);
+});
+
+test("indexer: a backfill cut short marks older coins' 24h stats partial and their changes unknown; newer coins stay exact", async () => {
+  const { chain, ix } = await setup({ backfillLimit: 10 });
+  const old = await launch(chain, ALICE, "OLDC", 1n);
+  for (let i = 0; i < 20; i++) await chain.trade(old.mint, BOB, true, 1_000_000_000_000n);
+  chain.time += 30 * 3600; // the coin is more than a day old; a day ago falls between its two bursts of trades
+  for (let i = 0; i < 10; i++) await chain.trade(old.mint, BOB, true, 1_000_000_000_000n);
+  const fresh = await launch(chain, ALICE, "NEWC", 2n);
+  await chain.trade(fresh.mint, BOB, true, 1_000_000_000_000n);
+  chain.time += 2 * 3600; // two quiet hours
+  await ix.start();
+  assert.ok(ix.indexedSince !== null, "the backfill stopped at its limit");
+  const o = coinJson(ix.store.coins.get(old.mint)!, ix.store.trades(old.mint), ix.nowSec(), ix.coveredFrom(old.mint));
+  assert.equal(o.stats.partial, true, "trades of the last day before the cutoff weren't read");
+  assert.equal(o.stats.change24h, null, "a day ago is before the cutoff: unknown");
+  const n = coinJson(ix.store.coins.get(fresh.mint)!, ix.store.trades(fresh.mint), ix.nowSec(), ix.coveredFrom(fresh.mint));
+  assert.deepEqual([n.stats.partial, n.stats.buys24h], [false, 1], "its creation was read: complete");
+  assert.ok(n.stats.change24h !== null);
+});
+
+test("indexer: portfolio cost basis averages every indexed buy, not one page", async () => {
+  const { chain, ix } = await setup();
+  const { mint } = await launch(chain, ALICE, "COST");
+  for (let i = 0; i < 150; i++) await chain.trade(mint, BOB, true, 1_000_000_000_000n);
+  await chain.trade(mint, BOB, false, 50_000_000_000_000n);
+  await ix.start();
+  const buys = ix.store.userTrades(BOB).filter((t) => t.isBuy);
+  assert.equal(buys.length, 150);
+  const paid = buys.reduce((s, t) => s + Number(t.solAmount + t.fee), 0) / 1e9;
+  const h = (await ix.portfolio(BOB)).holdings[0];
+  assert.equal(h.amount, "100000000000000");
+  assert.ok(Math.abs(h.costSol! - paid * (100 / 150)) < 1e-9, `${h.costSol} vs ${paid * (100 / 150)}`);
+});
+
+test("store: per-wallet history is kept for the most recently active wallets only", async () => {
+  const { Store } = await import("./store");
+  const s = new Store({ perCoin: 100, perCoinHard: 100, perUser: 2, users: 3 });
+  const tr = (i: number, user: string) => ({ ...storeTrade(i, i), user });
+  ["a", "b", "c"].forEach((u, i) => s.addTrade(tr(i, u)));
+  s.addTrade(tr(3, "a")); // a is active again
+  s.addTrade(tr(4, "d")); // over the cap: the least recently active (b) goes
+  assert.equal(s.userCount, 3);
+  assert.deepEqual([s.userTrades("b").length, s.userTrades("a").length, s.userTrades("d").length], [0, 2, 1]);
+  for (let i = 5; i < 9; i++) s.addTrade(tr(i, "a"));
+  assert.equal(s.userTrades("a").length, 2, "per-wallet cap");
 });

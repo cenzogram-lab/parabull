@@ -190,10 +190,15 @@ defaults and the fixed demo price that the seeded data is built on.
   coin appears the moment `create` lands.
 - **Coin page:** `useCoinView(mint)` fetches a coin that isn't in the list yet (a launch seconds old), asking again
   before it says "Coin not found". The page shows:
-  - the trade tape and chart candles, from the coin's indexed trades;
+  - the trade tape (the coin's indexed trades) and chart candles (`GET /coins/:mint/candles`, built from every trade the
+    indexer holds);
   - holders, labelled (bonding curve, Dev), with the dev's share;
   - 24h stats and locks.
-- **Your position:** the trade panel's sell side reads the connected wallet's on-chain balances (`GET /portfolio`).
+- **Your position:** the trade panel's sell side reads the connected wallet's on-chain balances (`GET /portfolio`), with
+  the indexer's cost basis.
+- **Unknown changes:** a price change the indexer can't know (its history doesn't reach that far) shows as "—", never
+  as a flat 0%, and sorts last.
+- **Lists:** the board pages through `/coins` (up to 1,000 coins); an older coin still opens by address.
 
 **Still demo data:** leaderboards, squads and callouts (in chain mode these are empty, with no on-chain source yet),
 protocol totals, and the portfolio page's history, cash, PnL and reward epochs. The UI labels them:

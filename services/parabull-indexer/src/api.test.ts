@@ -104,6 +104,25 @@ test("api: GET /coins/:mint finds a coin created since the last poll; trades pag
   await s.close();
 });
 
+test("api: candles from every retained trade (not just a page), oldest first; bad intervals are 400", async (t) => {
+  const s = await serve(t);
+  const { mint } = await launch(s.chain, "CNDL", 1n);
+  for (let i = 0; i < 130; i++) await s.chain.trade(mint, i % 3 ? ALICE : BOB, i % 5 !== 0, 1_000_000_000_000n);
+  await s.ix.start();
+  const r = await s.get(`/coins/${mint}/candles?interval=60`);
+  assert.equal(r.status, 200);
+  const bars = r.body.candles as { time: number; open: number; close: number; volumeSol: number }[];
+  assert.ok(bars.length > 1 && bars.every((b, i) => i === 0 || b.time > bars[i - 1].time), "oldest first");
+  const trades = s.ix.store.trades(mint);
+  assert.equal(trades.length, 130);
+  const vol = trades.reduce((x, t) => x + Number(t.solAmount), 0) / 1e9;
+  assert.ok(Math.abs(bars.reduce((x, b) => x + b.volumeSol, 0) - vol) < 1e-6, "every trade is in a bar");
+  assert.ok(bars.every((b, i) => i === 0 || b.open === bars[i - 1].close), "each bar opens at the last close");
+  assert.equal(r.body.partial, false);
+  assert.equal((await s.get(`/coins/${mint}/candles?interval=7`)).status, 400);
+  assert.equal((await s.get(`/coins/${mint}/candles?interval=60&limit=2`)).body.candles.length, 2);
+});
+
 test("api: holders, portfolio and tickets", async (t) => {
   const s = await serve(t);
   const { mint, ticket } = await launch(s.chain, "HOLD", 1n);
@@ -121,6 +140,7 @@ test("api: holders, portfolio and tickets", async (t) => {
   assert.equal(p.status, 200);
   assert.equal(p.body.holdings[0].mint, mint);
   assert.equal(p.body.holdings[0].coin.symbol, "HOLD");
+  assert.ok(p.body.holdings[0].costSol > 0, "cost basis from the wallet's indexed buys");
   assert.equal(p.body.trades.length, 1);
   assert.equal(p.body.trades[0].user, BOB);
   assert.equal((await s.get("/portfolio/xyz")).status, 400);

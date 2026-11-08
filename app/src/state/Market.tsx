@@ -11,7 +11,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CONFIG, isDemo } from "../config";
 import { coinArt } from "../lib/art";
-import { IndexerClient, positionsFrom, toCoin, toHolders, toTrade, type CoinJson, type HoldersJson, type PortfolioJson, type TradeJson } from "../lib/indexer";
+import { IndexerClient, positionsFrom, toCoin, toHolders, toTrade, type CandleJson, type CoinJson, type HoldersJson, type PortfolioJson, type TradeJson } from "../lib/indexer";
 import { PROTOCOL, initialReserves, mcapSol, priceSol } from "../lib/protocol";
 import { applyBuy, applySell, quoteBuyWithSol, quoteSellTokens } from "../lib/quote";
 import { Rng } from "../lib/rng";
@@ -58,6 +58,8 @@ interface MarketState {
   holdersFor: (mint: string) => Holder[] | null;
   /** Re-reads the wallet's positions (after a trade). */
   refreshPositions: () => void;
+  /** Chain mode: the indexer's chart bars for a coin (every trade it holds). Demo mode: null (the chart generates its own). */
+  fetchCandles: (mint: string, intervalSec: number) => Promise<CandleJson[] | null>;
   coins: Coin[];
   byMint: Map<string, Coin>;
   liveTrades: Trade[];
@@ -109,9 +111,10 @@ function reprice(c: Coin, reserves: Coin["reserves"]): Coin {
     mcapUsd,
     athUsd: Math.max(c.athUsd, mcapUsd),
     spark,
-    change24h: (1 + c.change24h) * (priceUsd / c.priceUsd) - 1,
-    change1h: (1 + c.change1h) * (priceUsd / c.priceUsd) - 1,
-    change6h: (1 + c.change6h) * (priceUsd / c.priceUsd) - 1,
+    // Demo coins always have changes; the ?? only satisfies the shared (nullable) type.
+    change24h: (1 + (c.change24h ?? 0)) * (priceUsd / c.priceUsd) - 1,
+    change1h: (1 + (c.change1h ?? 0)) * (priceUsd / c.priceUsd) - 1,
+    change6h: (1 + (c.change6h ?? 0)) * (priceUsd / c.priceUsd) - 1,
     stage: c.stage === "new" ? "new" : progress >= 0.72 ? "soon" : "live",
     complete: reserves.realToken === 0n,
   };
@@ -344,7 +347,7 @@ function DemoMarketProvider({ children }: { children: ReactNode }) {
 
   const coinState = useCallback((mint: string): CoinState => (byMint.has(mint) ? "ready" : "missing"), [byMint]);
   const value = useMemo<MarketState>(
-    () => ({ source: "demo", coinState, watchCoin: noop, holdersFor: none, refreshPositions: noop, coins, byMint, liveTrades, tradesFor, ...social, solUsd, positions, startPositions, demoSolDelta, demoClosed, demoTradeCount, following, toggleFollow, demoTrade, demoLaunch }),
+    () => ({ source: "demo", coinState, watchCoin: noop, holdersFor: none, refreshPositions: noop, fetchCandles: noCandles, coins, byMint, liveTrades, tradesFor, ...social, solUsd, positions, startPositions, demoSolDelta, demoClosed, demoTradeCount, following, toggleFollow, demoTrade, demoLaunch }),
     [coinState, coins, byMint, liveTrades, tradesFor, social, solUsd, positions, startPositions, demoSolDelta, demoClosed, demoTradeCount, following, toggleFollow, demoTrade, demoLaunch],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -352,6 +355,7 @@ function DemoMarketProvider({ children }: { children: ReactNode }) {
 
 const noop = () => undefined;
 const none = () => null;
+const noCandles = () => Promise.resolve(null);
 const EMPTY = { traders: [] as Trader[], squads: [] as Squad[], callouts: [] as Callout[], streams: [] as Stream[] };
 const tradeKey = (t: TradeJson) => `${t.signature}:${t.index}`;
 /** Newest first, one copy of each event. */
@@ -429,7 +433,7 @@ function IndexerMarketProvider({ children }: { children: ReactNode }) {
     let stop = false;
     const load = () =>
       client
-        .coins(200)
+        .coins()
         .then((cs) => !stop && upsert(cs))
         .catch(() => undefined);
     void load();
@@ -449,7 +453,7 @@ function IndexerMarketProvider({ children }: { children: ReactNode }) {
     const resync = () => {
       if (!connected) return void (connected = true);
       client
-        .coins(200)
+        .coins()
         .then(upsert)
         .catch(() => undefined);
       const mint = watched.current;
@@ -542,6 +546,7 @@ function IndexerMarketProvider({ children }: { children: ReactNode }) {
   );
   const coinState = useCallback((mint: string): CoinState => (!client ? "unconfigured" : raw.has(mint) ? "ready" : (states.get(mint) ?? "loading")), [client, raw, states]);
   const positions = useMemo(() => (portfolio ? positionsFrom(portfolio, solUsd) : {}), [portfolio, solUsd]);
+  const fetchCandles = useCallback((mint: string, intervalSec: number) => (client ? client.candles(mint, intervalSec) : Promise.resolve(null)), [client]);
   const [following, setFollowing] = useState(() => new Set<string>());
   const toggleFollow = useCallback(
     (key: string) =>
@@ -560,6 +565,7 @@ function IndexerMarketProvider({ children }: { children: ReactNode }) {
       watchCoin,
       holdersFor,
       refreshPositions,
+      fetchCandles,
       coins,
       byMint,
       liveTrades,
@@ -578,7 +584,7 @@ function IndexerMarketProvider({ children }: { children: ReactNode }) {
         throw new Error("demo launches are demo-mode only");
       },
     }),
-    [client, coinState, watchCoin, holdersFor, refreshPositions, coins, byMint, liveTrades, tradesFor, solUsd, positions, following, toggleFollow],
+    [client, coinState, watchCoin, holdersFor, refreshPositions, fetchCandles, coins, byMint, liveTrades, tradesFor, solUsd, positions, following, toggleFollow],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

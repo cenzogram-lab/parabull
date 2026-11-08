@@ -7,7 +7,7 @@
 import { TrendingUp, X } from "lucide-react";
 import type { MouseEvent } from "react";
 import { Link } from "react-router-dom";
-import { age, pct, shortAddr, usdCompact } from "../../lib/format";
+import { age, changeWords, shortAddr, usdCompact } from "../../lib/format";
 import type { Coin, Trader } from "../../lib/types";
 import { ChangePill, cx } from "../ui/primitives";
 import { TraderAvatar } from "../ui/visuals";
@@ -96,7 +96,7 @@ const signedUsd = (n: number) => `${n >= 0 ? "+" : "-"}${usdCompact(Math.abs(n))
 /** Spoken version of a coin row, since the arrow icons and abbreviations don't read aloud well. */
 function coinLabel(coin: Coin, now: number, figures: boolean) {
   const parts = [`${coin.name} ($${coin.ticker})`];
-  if (figures) parts.push(`market cap ${usdCompact(coin.mcapUsd)}`, `${coin.change24h >= 0 ? "up" : "down"} ${pct(Math.abs(coin.change24h), 1, false)} in 24 hours`);
+  if (figures) parts.push(`market cap ${usdCompact(coin.mcapUsd)}`, changeWords(coin.change24h, "24 hours"));
   parts.push(`launched ${age(now - coin.createdAt)} ago`);
   return parts.join(", ");
 }
@@ -131,7 +131,7 @@ export function CoinSearchRow({
   onRemove?: (e: MouseEvent<HTMLButtonElement>) => void;
   removeLabel?: string;
 }) {
-  const up = coin.change24h >= 0;
+  const up = (coin.change24h ?? 0) >= 0;
   // Rows bleed 8px left so thumbnails line up with the section titles while the press state has room. The
   // right edge stays on the content edge when something visible ends there (the wash, the remove button);
   // plain rows bleed both ways so their figures end on it.

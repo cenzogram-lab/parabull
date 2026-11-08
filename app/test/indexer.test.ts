@@ -46,7 +46,7 @@ test("indexer client: coin JSON becomes the app's Coin in USD (u64 strings to bi
   assert.ok(Math.abs(c.athUsd - 8000) < 1e-9);
   assert.ok(Math.abs(c.vol24hUsd - 1000) < 1e-9);
   assert.ok(Math.abs(c.escrowUsd - 400) < 1e-9);
-  assert.deepEqual([c.change1h, c.change6h, c.change24h, c.hot], [0.3, 0, -0.1, true]);
+  assert.deepEqual([c.change1h, c.change6h, c.change24h, c.hot], [0.3, null, -0.1, true], "an unknown change stays unknown");
   assert.equal(c.locks.ticker, (1_762_560_000 + 259_200) * 1000);
   assert.equal(c.locks.tweet, c.locks.ticker);
   assert.equal(c.createdAt, 1_762_560_000_000);
@@ -77,13 +77,13 @@ test("indexer client: trades (a buy's SOL includes the fee, a sell's is net) and
   assert.equal(rows[1].label, undefined);
 });
 
-test("indexer client: positions from the portfolio, cost from the wallet's indexed buys", () => {
+test("indexer client: positions from the portfolio, cost from the indexer's basis over the wallet's buys", () => {
   const p: PortfolioJson = {
     wallet: USER,
     lamports: "1",
     holdings: [
-      { mint: MINT, amount: "2000000", valueSol: 3, coin: coinJson() },
-      { mint: USER, amount: "1000000", valueSol: 0.5, coin: coinJson({ mint: USER }) },
+      { mint: MINT, amount: "2000000", valueSol: 3, costSol: 0.5, coin: coinJson() },
+      { mint: USER, amount: "1000000", valueSol: 0.5, costSol: null, coin: coinJson({ mint: USER }) },
     ],
     trades: [
       { signature: "a", index: 0, mint: MINT, user: USER, side: "buy", tokenAmount: "4000000", solAmount: "990000000", fee: "10000000", slot: 1, timestamp: 1, priceSol: 0, mcapSol: 0 },
@@ -93,7 +93,7 @@ test("indexer client: positions from the portfolio, cost from the wallet's index
   };
   const pos = positionsFrom(p, 100);
   assert.equal(pos[MINT].tokens, 2_000_000n);
-  assert.ok(Math.abs(pos[MINT].costUsd - 50) < 1e-9, "half of 1 SOL of buys, at $100");
+  assert.ok(Math.abs(pos[MINT].costUsd - 50) < 1e-9, "the indexer's basis (0.5 SOL), at $100");
   assert.ok(Math.abs(pos[USER].costUsd - 50) < 1e-9, "no indexed buys: today's value");
 });
 
@@ -105,15 +105,25 @@ test("indexer client: the build's CSP lets the app reach the indexer and its str
   assert.ok(!connectSources({}).some((s) => s.includes("indexer")));
 });
 
-test("indexer client: chart candles from indexed trades (bucketed, each bar opening at the last close)", async () => {
-  const { tradeCandles } = await import("../src/lib/indexer");
-  const t = (ts: number, priceUsd: number, tokens = 10) => ({ id: String(ts), mint: MINT, side: "buy" as const, trader: USER, handle: "", sol: 0, tokens, priceUsd, mcapUsd: 0, ts: ts * 1000, sig: "" });
-  // Newest first, as the market store keeps them.
-  const bars = tradeCandles([t(3700, 4), t(130, 3), t(70, 1), t(65, 2)], 60, { priceUsd: 9 });
-  assert.deepEqual(bars, [
-    { time: 60, open: 2, high: 2, low: 1, close: 1, volume: 30 },
-    { time: 120, open: 1, high: 3, low: 1, close: 3, volume: 30 },
-    { time: 3660, open: 3, high: 4, low: 3, close: 4, volume: 40 },
-  ]);
-  assert.deepEqual(tradeCandles([], 60, { priceUsd: 9 }, 125_000), [{ time: 120, open: 9, high: 9, low: 9, close: 9, volume: 0 }]);
+test("indexer client: the indexer's chart bars in USD; no trades yet is one flat bar at the current price", async () => {
+  const { toCandles } = await import("../src/lib/indexer");
+  assert.deepEqual(toCandles([{ time: 60, open: 1, high: 2, low: 0.5, close: 1.5, volumeSol: 3 }], 100, { priceUsd: 9 }, 60), [{ time: 60, open: 100, high: 200, low: 50, close: 150, volume: 300 }]);
+  assert.deepEqual(toCandles([], 100, { priceUsd: 9 }, 60, 125_000), [{ time: 120, open: 9, high: 9, low: 9, close: 9, volume: 0 }]);
+});
+
+test("indexer client: unknown changes sort last and read as unknown", async () => {
+  const { byChangeDesc, changeWords } = await import("../src/lib/format");
+  assert.deepEqual([0.1, null, -0.5, 0.4, null].sort(byChangeDesc), [0.4, 0.1, -0.5, null, null]);
+  assert.equal(changeWords(null, "24 hours"), "change in 24 hours unknown");
+  assert.equal(changeWords(-0.125, "24 hours"), "down 12.5% in 24 hours");
+});
+
+test("chart: a collapsed range is widened (lightweight-charts' axis loop never ends on one), a real range is kept", async () => {
+  const { minRange } = await import("../src/lib/chartRange");
+  const flat = minRange({ priceRange: { minValue: 62_130, maxValue: 62_130.000001 } }, 0.02)!;
+  assert.ok(Math.abs(flat.priceRange!.maxValue - flat.priceRange!.minValue - 62_130 * 0.02) < 1e-6);
+  assert.deepEqual(minRange({ priceRange: { minValue: 0, maxValue: 0 } }, 0.02)!.priceRange, { minValue: -0.5, maxValue: 0.5 });
+  const real = { priceRange: { minValue: 100, maxValue: 150 } };
+  assert.equal(minRange(real, 0.02), real);
+  assert.equal(minRange(null, 0.02), null);
 });
