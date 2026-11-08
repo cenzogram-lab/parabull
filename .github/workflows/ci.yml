@@ -105,3 +105,50 @@ jobs:
       - name: Build
         working-directory: app
         run: npm run build
+
+  canister:
+    name: canister (Motoko build + tests, PocketIC)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: canisters/solana_signer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            canisters/solana_signer/e2e/package-lock.json
+      - name: Install mops and icp-cli
+        run: npm install -g ic-mops@3.5.1 @icp-sdk/icp-cli@1.8.0 @icp-sdk/ic-wasm@0.11.1
+      - name: mops install
+        run: mops install
+      # Compile errors, upgrade compatibility of the migration chain, and every warning (dot notation, unused
+      # imports, redundant instantiation) as an error.
+      - name: mops check
+        run: mops check -- -Werror
+      - name: Motoko unit tests (Base58, request checks, rate limits)
+        run: mops test
+      # Wasm + checks main.mo against solana_signer.did.
+      - name: mops build
+        run: mops build solana_signer
+      # The canister as icp-cli builds it: icp.yaml -> canister.yaml -> @dfinity/motoko recipe.
+      - name: icp build
+        working-directory: .
+        run: icp build solana_signer
+      # The integration tests drive the app's own client (app/src/lib/auth/chainFusionSigner.ts).
+      - name: npm ci (app)
+        working-directory: app
+        run: npm ci
+      - name: npm ci (e2e, downloads PocketIC)
+        working-directory: canisters/solana_signer/e2e
+        run: npm ci
+      - name: Typecheck the integration tests
+        working-directory: canisters/solana_signer/e2e
+        run: npm run typecheck
+      - name: PocketIC integration tests (threshold Ed25519 key_1)
+        working-directory: canisters/solana_signer/e2e
+        run: npm test

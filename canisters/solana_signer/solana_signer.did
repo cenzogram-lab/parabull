@@ -1,0 +1,18 @@
+// Chain Fusion Solana signer. `mops build` checks main.mo against this file; the app's view of it is
+// app/src/lib/auth/solana_signer.did, which lists the two methods it calls.
+type Limits = record { per_caller_per_minute : nat; global_per_minute : nat };
+type ConfigUpdate = record { key_name : opt text; signing_paused : opt bool; limits : opt Limits };
+type Status = record {
+  key_name : text;
+  signing_paused : bool;
+  limits : Limits;
+  known_addresses : nat;
+  signatures_issued : nat;
+};
+service : {
+  get_solana_address : (principal) -> (text);
+  lookup_solana_address : (principal) -> (opt text) query;
+  sign_solana_transaction : (blob, vec nat8) -> (blob);
+  configure : (ConfigUpdate) -> ();
+  status : () -> (Status) query;
+}

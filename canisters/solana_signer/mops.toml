@@ -1,0 +1,21 @@
+# Motoko project for the Chain Fusion Solana signer (skills.internetcomputer.org: writing-motoko, mops-cli).
+# icp.yaml lists this directory; its canister.yaml uses the @dfinity/motoko recipe, which runs `mops build
+# solana_signer` here. Versions follow the skills' current pins.
+[toolchain]
+moc = "1.15.1"
+
+[dependencies]
+core = "2.6.1"
+
+[moc]
+args = ["--default-persistent-actors", "-W=M0223,M0236,M0237"]
+
+[canisters.solana_signer]
+main = "main.mo"
+candid = "solana_signer.did"
+
+[canisters.solana_signer.migrations]
+chain = "migrations"
+
+[build]
+args = ["--release"]

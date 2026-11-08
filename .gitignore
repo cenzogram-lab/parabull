@@ -16,3 +16,6 @@ app/screenshots/
 
 # Internet Computer: keep .icp/data/ (mainnet canister IDs), ignore the rebuildable cache
 .icp/cache/
+
+# Motoko (mops): build output and package cache; mops.lock is committed
+.mops/
