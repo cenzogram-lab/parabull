@@ -59,8 +59,8 @@ export function useChatRoom(mint: string): ChatRoom {
   /** The token the socket last authenticated with: a replacement session must be sent even for the same wallet. */
   const socketToken = useRef<string | null>(null);
   const readyWaiters = useRef<((wallet: string | null) => void)[]>([]);
-  /** A post waiting for the room's answer: its own message coming back, or an error. */
-  const pendingSend = useRef<{ text: string; resolve: (ok: boolean) => void } | null>(null);
+  /** A post waiting for the room's answer to its `cid`: `sent` or an error carrying the same id. */
+  const pendingSend = useRef<{ cid: string; resolve: (ok: boolean) => void } | null>(null);
   const walletRef = useRef(wallet);
   walletRef.current = wallet;
   const roomUrl = endpoints?.room(mint) ?? null;
@@ -108,10 +108,9 @@ export function useChatRoom(mint: string): ChatRoom {
         if (f.type === "history") setMessages(f.messages.slice(-CHAT_HISTORY));
         else if (f.type === "message") {
           setMessages((m) => (m.some((x) => x.id === f.message.id) ? m : [...m, f.message].slice(-CHAT_HISTORY)));
-          const p = pendingSend.current;
-          if (p && f.message.author === walletRef.current && f.message.text === p.text) settleSend(true);
-        }
-        else if (f.type === "presence") setOnline(f.count);
+        } else if (f.type === "sent") {
+          if (pendingSend.current?.cid === f.cid) settleSend(true);
+        } else if (f.type === "presence") setOnline(f.count);
         else if (f.type === "ready") {
           setSignedInAs(f.wallet);
           readyWaiters.current.splice(0).forEach((r) => r(f.wallet));
@@ -122,7 +121,8 @@ export function useChatRoom(mint: string): ChatRoom {
             setSignedInAs(null);
             readyWaiters.current.splice(0).forEach((r) => r(null));
           }
-          settleSend(false);
+          // Only this send's own refusal settles it; an error about something else (a failed auth) doesn't.
+          if (f.cid && pendingSend.current?.cid === f.cid) settleSend(false);
           if (f.code === "rate_limited" && f.retryAfterMs) setCooldownUntil(Date.now() + f.retryAfterMs);
           setError(f.error);
         }
@@ -204,11 +204,12 @@ export function useChatRoom(mint: string): ChatRoom {
         if (ws?.readyState !== WebSocket.OPEN) throw new Error("Chat is reconnecting: try again in a moment");
         // Done when the room answers: our message comes back (true) or an error does (false, the draft stays).
         settleSend(false);
+        const cid = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("");
         const answered = new Promise<boolean>((resolve) => {
-          pendingSend.current = { text: t.value, resolve };
-          window.setTimeout(() => pendingSend.current?.resolve === resolve && (settleSend(false), setError("The chat didn't answer: try again")), 8_000);
+          pendingSend.current = { cid, resolve };
+          window.setTimeout(() => pendingSend.current?.cid === cid && (settleSend(false), setError("The chat didn't answer: try again")), 8_000);
         });
-        ws.send(JSON.stringify({ type: "send", text: t.value, attachments }));
+        ws.send(JSON.stringify({ type: "send", text: t.value, attachments, cid }));
         setCooldownUntil(Date.now() + CHAT_COOLDOWN_MS);
         return await answered;
       } catch (e) {

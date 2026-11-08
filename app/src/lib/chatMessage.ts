@@ -39,8 +39,12 @@ export interface ChatMessage {
   ts: number;
 }
 
-/** Client → room. */
-export type ClientFrame = { type: "auth"; token: string } | { type: "signout" } | { type: "send"; text: string; attachments?: string[] };
+/**
+ * Client → room. `cid` on a send is the client's id for it: the room answers that socket alone with
+ * `{type:"sent", cid, id}`, or with an error carrying the same `cid`, so a tab never mistakes another tab's message
+ * (same wallet, same text) for its own confirmation.
+ */
+export type ClientFrame = { type: "auth"; token: string } | { type: "signout" } | { type: "send"; text: string; attachments?: string[]; cid?: string };
 
 export type ChatErrorCode = "sign_in_required" | "session_expired" | "rate_limited" | "too_long" | "empty" | "bad_attachment" | "bad_request";
 
@@ -50,7 +54,11 @@ export type ServerFrame =
   | { type: "message"; message: ChatMessage }
   | { type: "presence"; count: number }
   | { type: "ready"; wallet: string | null }
-  | { type: "error"; code: ChatErrorCode; error: string; retryAfterMs?: number };
+  | { type: "sent"; cid: string; id: string }
+  | { type: "error"; code: ChatErrorCode; error: string; retryAfterMs?: number; cid?: string };
+
+/** A client send id: 1 to 64 of [A-Za-z0-9_-]. */
+export const isCid = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(v);
 
 /** The text a wallet signs to start a chat session. */
 export function chatSignInMessage(wallet: string, issuedAt: string, nonce: string): string {
@@ -154,7 +162,10 @@ export function parseClientFrame(raw: unknown): ClientFrame | null {
   const f = v as Record<string, unknown>;
   if (f.type === "auth" && typeof f.token === "string" && f.token.length <= 512) return { type: "auth", token: f.token };
   if (f.type === "signout") return { type: "signout" };
-  if (f.type === "send" && typeof f.text === "string") return { type: "send", text: f.text, attachments: Array.isArray(f.attachments) ? (f.attachments as string[]) : undefined };
+  if (f.type === "send" && typeof f.text === "string") {
+    if (f.cid !== undefined && !isCid(f.cid)) return null;
+    return { type: "send", text: f.text, attachments: Array.isArray(f.attachments) ? (f.attachments as string[]) : undefined, ...(f.cid !== undefined ? { cid: f.cid as string } : {}) };
+  }
   return null;
 }
 

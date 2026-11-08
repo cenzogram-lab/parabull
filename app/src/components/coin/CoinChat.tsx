@@ -50,10 +50,17 @@ export function CoinChat({ mint, className, header = true }: { mint: string; cla
   const list = useRef<HTMLUListElement>(null);
   const pinned = useRef(true);
   const file = useRef<HTMLInputElement>(null);
-  const now = useNow();
   const [localError, alertError] = useState<string | null>(null);
   const length = [...text].length;
-  const cooling = room.cooldownUntil > now;
+  // Re-enables Send exactly when the room's 2-second cooldown ends (the shared 1-second clock would be up to 1s late).
+  const [cooling, setCooling] = useState(false);
+  useEffect(() => {
+    const ms = room.cooldownUntil - Date.now();
+    if (ms <= 0) return setCooling(false);
+    setCooling(true);
+    const t = window.setTimeout(() => setCooling(false), ms);
+    return () => window.clearTimeout(t);
+  }, [room.cooldownUntil]);
 
   // Stay at the bottom while the reader is there; leave them be once they scroll up.
   useLayoutEffect(() => {

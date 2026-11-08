@@ -77,6 +77,9 @@ test("chat: attachments only from this deployment's media bucket, /img/<sha256>.
 test("chat: client frames parse strictly", () => {
   assert.deepEqual(parseClientFrame('{"type":"auth","token":"t"}'), { type: "auth", token: "t" });
   assert.deepEqual(parseClientFrame('{"type":"send","text":"gm"}'), { type: "send", text: "gm", attachments: undefined });
+  assert.deepEqual(parseClientFrame('{"type":"send","text":"gm","cid":"a1_-"}'), { type: "send", text: "gm", attachments: undefined, cid: "a1_-" });
+  assert.equal(parseClientFrame('{"type":"send","text":"gm","cid":"no spaces"}'), null);
+  assert.equal(parseClientFrame(JSON.stringify({ type: "send", text: "gm", cid: "x".repeat(65) })), null);
   assert.equal(parseClientFrame("not json"), null);
   assert.equal(parseClientFrame('{"type":"nuke"}'), null);
   assert.equal(parseClientFrame("x".repeat(5000)), null);

@@ -43,6 +43,11 @@ export interface Env {
   CHAT_SECRET?: string;
   /** Optional per-IP limit on chat sign-ins and uploads. */
   CHAT_LIMITER?: RateLimiter;
+  /**
+   * Optional per-IP limit on chat socket handshakes. Origin can be spoofed outside a browser, so this is what bounds
+   * how many rooms one client can open; rooms allocate storage only when a signed-in wallet posts.
+   */
+  CHAT_CONNECT_LIMITER?: RateLimiter;
 }
 
 async function limited(limiter: RateLimiter | undefined, request: Request, scope: string): Promise<boolean> {
@@ -125,6 +130,7 @@ export async function handle(request: Request, env: Env, now = Date.now()): Prom
     const mint = pathname.slice("/chat/".length);
     if (!isAddress(mint)) return json(400, { error: "not a coin mint" }, allow);
     if (!env.CHAT_ROOMS) return json(503, { error: "chat is not configured" }, allow);
+    if (await limited(env.CHAT_CONNECT_LIMITER, request, "chat-connect")) return json(429, { error: "too many chat connections, try again in a minute" }, { ...allow, "retry-after": "60" });
     return env.CHAT_ROOMS.get(env.CHAT_ROOMS.idFromName(mint)).fetch(request);
   }
 

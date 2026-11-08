@@ -475,3 +475,82 @@ test("review: chat uploads are limited per IP, whichever wallet signs them", asy
   }
   assert.deepEqual(keys, ["chat-upload:198.51.100.9", "chat-upload:198.51.100.9"], "one key for the IP, not one per wallet");
 });
+
+test("review: a send is confirmed to its own socket by cid, never by another tab's identical message", async () => {
+  const obj = durableObject();
+  const room = obj.wake();
+  const [tab1, tab2] = [new FakeSocket(), new FakeSocket()];
+  room.accept(tab1, MINT);
+  room.accept(tab2, MINT);
+  const w = await wallet();
+  const token = await issueToken(SECRET, w.address, T0 + CHAT_SESSION_MS);
+  for (const t of [tab1, tab2]) await send(room, t, { type: "auth", token });
+  tab1.clear();
+  tab2.clear();
+  await send(room, tab1, { type: "send", text: "same words", cid: "tab1-1" });
+  await send(room, tab2, { type: "send", text: "same words", cid: "tab2-1" }); // same wallet, inside the cooldown
+  assert.deepEqual(tab1.last("sent"), { type: "sent", cid: "tab1-1", id: tab1.last("message")!.message.id });
+  assert.equal(tab2.last("sent"), undefined, "tab 2 sees tab 1's broadcast but no confirmation of its own");
+  assert.equal(tab2.last("message")?.message.text, "same words", "(it does see the broadcast)");
+  const err = tab2.last("error");
+  assert.equal(err?.code, "rate_limited");
+  assert.equal(err?.cid, "tab2-1", "the refusal names tab 2's send");
+  // Every refusal of a send carries its cid.
+  await send(room, tab1, { type: "signout" });
+  await send(room, tab1, { type: "send", text: "x", cid: "c-2" });
+  assert.equal(tab1.last("error")?.cid, "c-2");
+  // A malformed cid is refused outright.
+  await send(room, tab2, JSON.stringify({ type: "send", text: "x", cid: "has spaces" }));
+  assert.equal(tab2.last("error")?.code, "bad_request");
+});
+
+test("review: readers allocate no storage; only a signed-in post creates the room's tables", async () => {
+  const obj = durableObject();
+  const room = obj.wake();
+  const tables = () => (obj.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[]).map((r) => r.name).sort();
+  for (let i = 0; i < 5; i++) room.accept(new FakeSocket(), MINT);
+  assert.deepEqual(room.history(MINT), []);
+  assert.deepEqual(tables(), [], "five readers, no tables");
+  const ws = new FakeSocket();
+  room.accept(ws, MINT);
+  await send(room, ws, { type: "send", text: "gm" });
+  assert.deepEqual(tables(), [], "an unauthenticated send doesn't create them either");
+  const w = await wallet();
+  await send(room, ws, { type: "auth", token: await issueToken(SECRET, w.address, T0 + CHAT_SESSION_MS) });
+  await send(room, ws, { type: "send", text: "gm" });
+  assert.deepEqual(tables(), ["messages", "senders"]);
+  // A woken instance finds the tables again.
+  const late = new FakeSocket();
+  obj.wake().accept(late, MINT);
+  assert.equal(late.last("history")?.messages.length, 1);
+});
+
+test("review: sender rows are pruned once their cooldown has passed", async () => {
+  const obj = durableObject();
+  const room = obj.wake();
+  const count = () => (obj.db.prepare("SELECT COUNT(*) AS n FROM senders").get() as { n: number }).n;
+  for (let i = 0; i < 5; i++) {
+    const ws = new FakeSocket();
+    room.accept(ws, MINT);
+    const w = await wallet();
+    await send(room, ws, { type: "auth", token: await issueToken(SECRET, w.address, T0 + CHAT_SESSION_MS) });
+    await send(room, ws, { type: "send", text: `from wallet ${i}` });
+    obj.clock.advance(CHAT_COOLDOWN_MS);
+  }
+  assert.equal(count(), 1, "only the wallet still inside its cooldown has a row");
+  assert.equal(room.history(MINT).length, 5);
+});
+
+test("review: chat socket handshakes are rate-limited per IP", async () => {
+  const keys: string[] = [];
+  let allow = true;
+  const e = env({ CHAT_CONNECT_LIMITER: { limit: async ({ key }) => (keys.push(key), { success: allow }) } });
+  const ws = () => new Request(`https://edge.test/chat/${MINT}`, { headers: { origin: APP, upgrade: "websocket", "cf-connecting-ip": "203.0.113.5" } });
+  assert.equal((await handle(ws(), e)).status, 200);
+  allow = false;
+  const res = await handle(ws(), e);
+  assert.equal(res.status, 429);
+  assert.equal(res.headers.get("retry-after"), "60");
+  assert.deepEqual(keys, ["chat-connect:203.0.113.5", "chat-connect:203.0.113.5"]);
+  assert.equal(e.forwarded.length, 1, "the limited handshake never reached a room");
+});

@@ -26,6 +26,12 @@ name = "CHAT_LIMITER"
 namespace_id = "1002"
 simple = { limit = 20, period = 60 }
 
+# Chat socket handshakes, per IP (src/router.ts CHAT_CONNECT_LIMITER): bounds how many rooms one client opens.
+[[ratelimits]]
+name = "CHAT_CONNECT_LIMITER"
+namespace_id = "1003"
+simple = { limit = 60, period = 60 }
+
 # One ChatRoom per coin mint (src/chatRoomDO.ts): WebSocket Hibernation, history in the object's SQLite storage.
 [[durable_objects.bindings]]
 name = "CHAT_ROOMS"

@@ -57,6 +57,8 @@ same `meta/<sha256>.json`.
 - Nothing lives only in memory:
   - each socket's mint, signed-in wallet and session expiry live in its serialized attachment;
   - the last 200 messages and each wallet's last send time live in the object's **SQLite storage**.
+  - Storage is created only when a signed-in wallet first posts, so readers never allocate any, however many rooms
+    they open. Sender rows are pruned once their 2-second cooldown has passed.
   - A woken room therefore carries on as before: history is replayed, signed-in sockets stay signed in, and cooldowns
     still apply.
 
@@ -69,6 +71,8 @@ same `meta/<sha256>.json`.
 2. `POST /chat/session` checks the ed25519 signature against the wallet's address and requires `issuedAt` within 5
    minutes of now. It returns a 24-hour token: an HMAC-SHA256 over the wallet and expiry, keyed by `CHAT_SECRET`.
 3. The socket sends `{type:"auth", token}`, and the room answers `{type:"ready", wallet}`.
+4. Each `{type:"send", cid}` gets an answer for that socket alone: `{type:"sent", cid, id}`, or an error carrying the
+   same `cid`. So a second tab on the same wallet never takes the first tab's message as its own confirmation.
 
 **Rules the room enforces:**
 - at most one message per wallet every 2 seconds;
@@ -82,7 +86,8 @@ Anything else gets `{type:"error", code}`: `sign_in_required`, `session_expired`
 **Fails closed:**
 - Without a `CHAT_SECRET` of 32 or more characters, sign-in answers 503 and no token verifies, so chat is read-only.
 - Sockets from origins outside `ALLOWED_ORIGINS` are refused, which also stops cross-site websocket hijacking.
-- `CHAT_LIMITER` limits sign-ins and uploads per IP.
+- `CHAT_LIMITER` limits sign-ins and uploads per IP, and `CHAT_CONNECT_LIMITER` limits socket handshakes per IP. A
+  client outside a browser can fake `Origin`, so the handshake limit is what caps how many rooms one client opens.
 
 ## Setup
 
@@ -110,6 +115,7 @@ Anything else gets `{type:"error", code}`: `sign_in_required`, `session_expired`
 **Rate limits** (`[[ratelimits]]` in `wrangler.toml`; without those bindings, add WAF rate-limiting rules instead):
 - `UPLOAD_LIMITER`: 10 metadata uploads per minute per IP.
 - `CHAT_LIMITER`: 20 chat sign-ins and uploads per minute per IP.
+- `CHAT_CONNECT_LIMITER`: 60 chat socket handshakes per minute per IP.
 
 **Chat setup:**
 1. Set the chat session key, a secret rather than a variable:

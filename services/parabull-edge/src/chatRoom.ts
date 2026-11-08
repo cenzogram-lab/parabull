@@ -88,7 +88,18 @@ export class ChatRoomCore {
     return this.state.storage.sql.exec<T>(q, ...b).toArray();
   }
 
-  /** Creates the tables on first use (idempotent, so it is safe after every wake). */
+  /** Whether this room has stored anything yet: a room nobody has posted in has no tables at all. */
+  private hasTables(): boolean {
+    if (this.ready) return true;
+    const found = this.sql<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'messages'").length > 0;
+    if (found) this.ready = true;
+    return found;
+  }
+
+  /**
+   * Creates the tables, only when a signed-in wallet first posts (idempotent, so it is safe after every wake). Readers,
+   * however many rooms they open, never allocate storage.
+   */
   private schema(): void {
     if (this.ready) return;
     this.sql("CREATE TABLE IF NOT EXISTS messages (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, author TEXT NOT NULL, text TEXT NOT NULL, attachments TEXT NOT NULL, ts INTEGER NOT NULL)");
@@ -97,7 +108,7 @@ export class ChatRoomCore {
   }
 
   history(mint: string): ChatMessage[] {
-    this.schema();
+    if (!this.hasTables()) return [];
     const rows = this.sql<Row>("SELECT id, author, text, attachments, ts FROM messages ORDER BY seq DESC LIMIT ?", CHAT_HISTORY);
     return rows.reverse().map((r) => ({ id: r.id, mint, author: r.author, text: r.text, attachments: JSON.parse(r.attachments) as ChatAttachment[], ts: Number(r.ts) }));
   }
@@ -135,8 +146,8 @@ export class ChatRoomCore {
     }
   }
 
-  private error(ws: RoomSocket, code: ChatErrorCode, retryAfterMs?: number): void {
-    this.send(ws, { type: "error", code, error: ERR[code], ...(retryAfterMs ? { retryAfterMs } : {}) });
+  private error(ws: RoomSocket, code: ChatErrorCode, retryAfterMs?: number, cid?: string): void {
+    this.send(ws, { type: "error", code, error: ERR[code], ...(retryAfterMs ? { retryAfterMs } : {}), ...(cid ? { cid } : {}) });
   }
 
   private broadcast(frame: ServerFrame, except?: RoomSocket): void {
@@ -180,28 +191,33 @@ export class ChatRoomCore {
       return this.send(ws, { type: "ready", wallet: session.wallet });
     }
 
-    // send
-    if (!info.wallet) return this.error(ws, "sign_in_required");
+    // send: every answer to it carries the client's cid, and only this socket gets the ack.
+    const cid = frame.cid;
+    if (!info.wallet) return this.error(ws, "sign_in_required", undefined, cid);
     if (info.expiresAt <= now) {
       ws.serializeAttachment({ ...info, wallet: null, expiresAt: 0 } satisfies SocketInfo);
-      return this.error(ws, "session_expired");
+      return this.error(ws, "session_expired", undefined, cid);
     }
     const text = checkText(frame.text);
-    if (!text.ok) return this.error(ws, text.code);
+    if (!text.ok) return this.error(ws, text.code, undefined, cid);
     const attachments = checkAttachments(frame.attachments, this.env.MEDIA_PUBLIC_URL ?? "");
-    if (!attachments.ok) return this.error(ws, attachments.code);
-    if (!text.value && attachments.value.length === 0) return this.error(ws, "empty");
+    if (!attachments.ok) return this.error(ws, attachments.code, undefined, cid);
+    if (!text.value && attachments.value.length === 0) return this.error(ws, "empty", undefined, cid);
 
     this.schema();
     const last = this.sql<{ last_ms: number }>("SELECT last_ms FROM senders WHERE wallet = ?", info.wallet)[0];
-    if (last && now - Number(last.last_ms) < CHAT_COOLDOWN_MS) return this.error(ws, "rate_limited", CHAT_COOLDOWN_MS - (now - Number(last.last_ms)));
+    if (last && now - Number(last.last_ms) < CHAT_COOLDOWN_MS) return this.error(ws, "rate_limited", CHAT_COOLDOWN_MS - (now - Number(last.last_ms)), cid);
 
     const message: ChatMessage = { id: this.deps.newId(), mint: info.mint, author: info.wallet, text: text.value, attachments: attachments.value, ts: now };
+    // A cooldown only needs each wallet's last send for CHAT_COOLDOWN_MS: older rows go, so the table holds only
+    // wallets that posted in the last two seconds.
+    this.sql("DELETE FROM senders WHERE last_ms <= ?", now - CHAT_COOLDOWN_MS);
     this.sql("INSERT INTO senders (wallet, last_ms) VALUES (?, ?) ON CONFLICT(wallet) DO UPDATE SET last_ms = excluded.last_ms", info.wallet, now);
     this.sql("INSERT INTO messages (id, author, text, attachments, ts) VALUES (?, ?, ?, ?, ?)", message.id, message.author, message.text, JSON.stringify(message.attachments), message.ts);
     // Keep the newest CHAT_HISTORY.
     this.sql("DELETE FROM messages WHERE seq <= (SELECT seq FROM messages ORDER BY seq DESC LIMIT 1 OFFSET ?)", CHAT_HISTORY);
     this.broadcast({ type: "message", message });
+    if (cid) this.send(ws, { type: "sent", cid, id: message.id });
   }
 
   webSocketClose(ws: RoomSocket, code: number): void {
