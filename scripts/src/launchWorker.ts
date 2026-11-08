@@ -45,7 +45,7 @@ export type Decision =
   | { action: "reject"; reason: string }
   /** Leave the ticket open and look again later. */
   | { action: "wait"; reason: string }
-  /** Too close to expiry: stop; the payer refunds it themselves. */
+  /** Too close to expiry to create: refund now with refund_ticket (the launch authority may refund at any time). */
   | { action: "abandon"; reason: string };
 
 export interface DecisionInput {
@@ -119,6 +119,20 @@ export function findRequestArgs(
 // Optional external checks (BACKEND_SPEC §1.2). Each returns null when fine,
 // or a rejection reason.
 // ---------------------------------------------------------------------------
+
+/**
+ * Whether an external check's failure may pass on a retry: a timeout, a dropped or refused connection, a DNS hiccup,
+ * or an HTTP 408 / 425 / 429 / 5xx from the metadata host, the image host or the X API. The worker retries those
+ * until the ticket nears expiry, then refunds. Everything else (bad JSON, a wrong content type, a 404, a blocked
+ * private address, too many redirects, a tweet that doesn't mention the ticker) is final: refund at once.
+ */
+export function isTransientCheckFailure(reason: string): boolean {
+  if (/refusing non-public address|EBLOCKED|too many redirects|response too large|refusing \w+: URL|bad URL/i.test(reason)) return false;
+  if (/(returned|X API returned) (408|425|429|5\d\d)\b/.test(reason)) return true;
+  // A body cut off mid-download surfaces as "aborted". ENOTFOUND (the name doesn't exist) is final; EAI_AGAIN (the
+  // resolver didn't answer) is not.
+  return /(unreachable|X API error):.*(timeout|timed out|aborted|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|socket hang up|fetch failed|network)/i.test(reason);
+}
 
 const ALLOWED_URI = /^(https:\/\/|ipfs:\/\/|ar:\/\/)/i;
 

@@ -24,7 +24,23 @@ interface Sent {
 }
 
 /** A fake cluster holding one open ticket; `send` applies create / refund_ticket to it. */
-async function harness(o: { metadataHash?: Buffer; paused?: boolean; open?: boolean; createErrors?: string[]; uri?: string } = {}) {
+async function harness(
+  o: {
+    metadataHash?: Buffer;
+    paused?: boolean;
+    open?: boolean;
+    createErrors?: string[];
+    uri?: string;
+    /** Unix seconds the worker starts at (default NOW; the ticket expires at NOW + 600). */
+    start?: bigint;
+    /** Sleeps move the fake clock forward by their length. */
+    sleepAdvances?: boolean;
+    delayMs?: number;
+    /** Results of successive external checks (the last one repeats). */
+    checks?: (string | null)[];
+    checkRetryMs?: number;
+  } = {},
+) {
   const payer = Keypair.generate().publicKey;
   const treasury = Keypair.generate().publicKey;
   const launchAuthority = Keypair.generate();
@@ -53,6 +69,9 @@ async function harness(o: { metadataHash?: Buffer; paused?: boolean; open?: bool
   const sent: Sent[] = [];
   const sleeps: number[] = [];
   const lookups: string[] = [];
+  let clock = o.start ?? NOW;
+  const checks = [...(o.checks ?? [])];
+  let checkCalls = 0;
 
   const program = {
     programId: real.programId,
@@ -100,12 +119,24 @@ async function harness(o: { metadataHash?: Buffer; paused?: boolean; open?: bool
     pdas,
     launchAuthority,
     skipMetadataFetch: o.uri === undefined,
-    delayMs: () => 4_321,
-    sleep: async (ms) => void sleeps.push(ms),
+    delayMs: () => o.delayMs ?? 4_321,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      if (o.sleepAdvances) clock += BigInt(Math.floor(ms / 1000));
+    },
     send,
-    now: () => NOW,
+    now: () => clock,
+    ...(o.checks
+      ? {
+          offChainCheck: async () => {
+            checkCalls++;
+            return checks.length > 1 ? checks.shift()! : checks[0];
+          },
+        }
+      : {}),
+    ...(o.checkRetryMs !== undefined ? { checkRetryMs: () => o.checkRetryMs! } : {}),
   });
-  return { worker, ticket, payer, treasury, launchAuthority, sent, sleeps, lookups };
+  return { worker, ticket, payer, treasury, launchAuthority, sent, sleeps, lookups, checkCalls: () => checkCalls };
 }
 
 test("worker runner: recovers the request, waits its delay, then creates with the launch authority and a fresh mint", async () => {
@@ -181,4 +212,48 @@ test("worker runner: one ticket is handled once at a time, and pollOnce covers e
   assert.equal(h.sent.length, 1);
   const p = await harness();
   assert.deepEqual((await p.worker.pollOnce()).map((x) => x.kind), ["created"]);
+});
+
+test("worker runner: a ticket found too close to expiry is refunded by the launch authority, not left open", async () => {
+  const h = await harness({ start: NOW + 590n });
+  const out = await h.worker.handle(h.ticket, "request-sig");
+  assert.deepEqual({ ...out, ticket: undefined }, { kind: "refunded", ticket: undefined, reason: "ticket expiring", signature: "refund-sig" });
+  assert.deepEqual(h.sent.map((s) => s.name), ["refundTicket"]);
+  const refund = h.sent[0];
+  assert.ok(refund.signers[0].publicKey.equals(h.launchAuthority.publicKey), "signed by the launch authority");
+  const keys = refund.ix.keys.map((k) => k.pubkey.toBase58());
+  assert.ok(keys.includes(h.payer.toBase58()) && keys.includes(h.ticket.toBase58()), "refund goes to the ticket's payer");
+});
+
+test("worker runner: a ticket that runs out of time before create (after the delay) is refunded", async () => {
+  const h = await harness({ sleepAdvances: true, delayMs: 590_000 });
+  const out = await h.worker.handle(h.ticket, "request-sig");
+  assert.equal(out.kind, "refunded");
+  assert.deepEqual(h.sent.map((s) => s.name), ["refundTicket"], "no create after expiry nears");
+});
+
+test("worker runner: a transient check failure (5xx, timeout) is retried, then the coin is created", async () => {
+  const h = await harness({ checks: ["metadata URI returned 503", "image unreachable: timeout", null], checkRetryMs: 5_000 });
+  const out = await h.worker.handle(h.ticket, "request-sig");
+  assert.equal(out.kind, "created");
+  assert.equal(h.checkCalls(), 3);
+  assert.deepEqual(h.sleeps, [5_000, 5_000, 4_321], "two retries, then the launch delay");
+  assert.deepEqual(h.sent.map((s) => s.name), ["create"]);
+});
+
+test("worker runner: a transient failure that lasts until expiry nears is refunded with its reason", async () => {
+  const h = await harness({ checks: ["X API returned 429"], checkRetryMs: 200_000, sleepAdvances: true });
+  const out = await h.worker.handle(h.ticket, "request-sig");
+  assert.equal(out.kind, "refunded");
+  if (out.kind !== "refunded") return;
+  assert.equal(out.reason, "X API returned 429 (still failing as the ticket nears expiry)");
+  assert.deepEqual(h.sent.map((s) => s.name), ["refundTicket"]);
+});
+
+test("worker runner: a final check failure is refunded at once, without retries", async () => {
+  const h = await harness({ checks: ["metadata JSON has no image"] });
+  const out = await h.worker.handle(h.ticket, "request-sig");
+  assert.deepEqual({ ...out, ticket: undefined }, { kind: "refunded", ticket: undefined, reason: "metadata JSON has no image", signature: "refund-sig" });
+  assert.equal(h.checkCalls(), 1);
+  assert.deepEqual(h.sleeps, []);
 });

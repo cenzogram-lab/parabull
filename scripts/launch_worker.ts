@@ -5,6 +5,10 @@
  *     -> validate (pause, metadata commitment, ticker/name/tweet locks,
  *        optional metadata URI fetch and X API tweet check)
  *     -> reject: refund_ticket now (launch authority; funds go to the payer)
+ *     -> a metadata / X API failure that may pass (timeout, 429, 5xx):
+ *        retried until the ticket nears expiry, then refunded
+ *     -> a ticket that can't be created before expiry (paused, found late):
+ *        refunded, never left for the payer to recover by hand
  *     -> otherwise wait a CSPRNG-uniform 3-15 s
  *     -> re-validate, then send `create` co-signed by the launch authority and
  *        a fresh in-memory mint keypair.
@@ -60,8 +64,10 @@ async function main() {
   }
 
   worker.listen();
+  // Passes don't wait for each other: a ticket still retrying its checks (or waiting out a pause) never holds up the
+  // next pass's discovery of new tickets. `handle` skips a ticket already in flight.
   for (;;) {
-    await worker.pollOnce().catch((e) => log(`poll failed: ${(e as Error).message}`));
+    void worker.pollOnce().catch((e) => log(`poll failed: ${(e as Error).message}`));
     await sleep(POLL_MS);
   }
 }

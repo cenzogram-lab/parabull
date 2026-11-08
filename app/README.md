@@ -18,7 +18,7 @@ npm run dev          # http://localhost:5173
 | --- | --- |
 | `/`, `/board` | Board: King of the Bull hero, then either **Terminal Pro** (Pro Screener with New / Soon / Graduated / Movers, a Filters menu for verified locks, X or website and a minimum market cap, and Expand to give it the whole row; Trending, Hot callouts, Leaderboard) or **Classic** (For you / Following feed, six callouts at a time with Show more updates, plus Movers / Trending cards). Each callout has a Follow toggle and a More menu (view the coin, copy its link, share) |
 | `/explore` | Explore table (sparkline, MCAP, ATH, AGE, TRADES, 24H VOL, TRADERS, 1H / 6H / 24H, sortable) or grid. Range filters and a "Verified locks only" toggle |
-| `/create` | Launch flow: a modal over the current page, or a full page when opened directly. Live name-lock key, ticker and tweet parsing, lock pre-check, itemized 0.230 SOL ticket, live preview, and the 3–15 s anti-bundle delay |
+| `/create` | Launch flow: a modal over the current page, or a full page when opened directly. Live name-lock key, ticker and tweet parsing, lock pre-check (re-checked at submit, failing closed), itemized 0.230 SOL ticket, live preview, the 3–15 s anti-bundle delay, and the wallet's open tickets with refunds |
 | `/coin/:mint` | Trading terminal: lock countdowns, metrics, candles (`1s`–`D`, Price/MCap), bonding-curve and DexScreener gauges, Trades / Holders / Callouts (with a composer for holders) / **Chat** tabs (the coin's live chat, see below), Buy/Sell panel, stats and audit |
 | `/c/:id` | A callout's share link: remembers the callout as the referral for its coin (24 h) and opens the coin. Buys of that coin then carry its referral memo |
 | `/leaderboard` | Traders / Squads / Rewards / Best Callouts, top-4 podium, 1D/1W/1M, Profit/Volume, Best callouts rail |
@@ -154,7 +154,10 @@ Set these in `app/.env.local` (see `src/config.ts`):
 **Coin chat** (`src/components/coin/CoinChat.tsx`, `src/hooks/useChatRoom.ts`) is on the coin page's Chat tab and on
 `/live`:
 - **Reading** needs no wallet. The socket replays the last 200 messages, shows how many are in the chat, and
-  reconnects with backoff.
+  reconnects with exponential backoff and jitter (1 s up to 30 s, each wait drawn from half to all of its step), so
+  clients dropped together don't all come back at once.
+- **Switching coins** keeps rooms apart: each coin keeps its own unsent draft and its own 2-second cooldown, and the
+  old room's socket closing late never signs the new room out or fails its sends.
 - **Posting** needs a connected wallet that can sign messages; without one, the composer is a "Connect wallet to chat"
   button.
   - The first post or image asks the wallet to sign the chat sign-in text once (no transaction, no fee). The session
@@ -164,13 +167,28 @@ Set these in `app/.env.local` (see `src/config.ts`):
 - The protocol is `src/lib/chatMessage.ts`, which the Worker imports too.
 
 **Wired to the program** (`src/hooks/useParabullProgram.ts`):
-- `request_launch`, then waiting for the launch worker (the ticket closes,
-  then the ticker registry tells which mint was created);
-- `buy` / `sell`, with `max_sol_cost` / `min_sol_output` from the chosen
-  slippage;
+- `request_launch`, then waiting for the launch worker. The ticket closes, then the ticker registry names a mint, and
+  it counts as this launch only if that coin's curve creator is this wallet. Another payer's ticket for the same
+  ticker can win the race; this one is then refunded, and the page says so.
+- `refund_ticket`: a ticket that expired without a launch (judged by the cluster clock) shows **Claim ticket refund**,
+  in the launch flow and in the launch page's list of the wallet's open tickets.
+- `buy` / `sell`, with `max_sol_cost` / `min_sol_output` from the chosen slippage. Sending (`src/lib/txSend.ts`):
+  - The curve is read again on-chain right before sending, and the trade is quoted on it. If the price has moved past
+    the slippage since the shown quote, nothing is sent and the new quote is shown.
+  - The transaction is simulated first, which fails early with the program's own error. It then gets a compute limit
+    of the simulated units plus 15%, and a priority fee: the 75th percentile of recent fees on the curve account,
+    within 10,000 to 2,000,000 micro-lamports per unit.
+  - It is confirmed by polling, rebroadcasting every 2 s until it lands or its blockhash expires. A trade is reported
+    failed only when the cluster says so; expired means nothing was spent. If no status can be read in time, it says
+    the trade is unconfirmed, with the explorer link, rather than inviting a second buy.
+  - The trade panel quotes from the curve account itself (subscribed), not only the indexer's copy.
+  - A complete curve (every curve token sold, awaiting migration) disables both Buy and Sell, on the panel and the
+    phone's trade bar. The program refuses both (`CurveComplete`) until the coin is on Raydium.
 - `claim_holder_reward`, after verifying the proof in the browser against
   the published root;
-- reads of the ticker, name and tweet registries (lock pre-check);
+- reads of the ticker, name and tweet registries (lock pre-check). They are judged at the cluster's time (the Clock
+  sysvar), and a registry that can't be read in time blocks the launch rather than passing. They are read again at
+  submit, before anything is paid;
 - the admin console at `/admin`: `set_paused`, `update_global_params` and
   `propose_admin` / `accept_admin` (see [Admin console](#admin-console)).
 
@@ -196,6 +214,8 @@ defaults and the fixed demo price that the seeded data is built on.
   - 24h stats and locks.
 - **Your position:** the trade panel's sell side reads the connected wallet's on-chain balances (`GET /portfolio`), with
   the indexer's cost basis.
+- **Curve progress** is the indexer's figure: tokens sold over the coin's launch reserves. It reaches 100% exactly when
+  the curve completes (demo coins use the same measure from their reserves).
 - **Unknown changes:** a price change the indexer can't know (its history doesn't reach that far) shows as "—", never
   as a flat 0%, and sorts last.
 - **Lists:** the board pages through `/coins` (up to 1,000 coins); an older coin still opens by address.

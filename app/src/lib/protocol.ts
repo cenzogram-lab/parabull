@@ -43,7 +43,13 @@ export const priceSol = (r: Reserves) => Number(r.virtualSol) / LAMPORTS_PER_SOL
 export const mcapSol = (r: Reserves) => priceSol(r) * (Number(PROTOCOL.totalSupply) / TOKEN_UNIT);
 
 /** Fraction of the curve sold, 0..1. */
-export const curveProgress = (r: Reserves) => Math.min(1, Number(r.realSol) / Number(GRADUATION_RAISE_LAMPORTS));
+/**
+ * Curve progress, 0..1, as the indexer measures it (services/parabull-indexer src/model.ts `progressOf`): the share of
+ * the curve's launch tokens sold. The curve completes when the last one sells, so this reaches 1 exactly then, unlike
+ * SOL raised (which `prepare_migration` moves out).
+ */
+export const curveProgress = (r: Reserves, initialRealToken: bigint = PROTOCOL.initialRealToken) =>
+  initialRealToken <= 0n ? 0 : Math.max(0, Math.min(1, Number(initialRealToken - r.realToken) / Number(initialRealToken)));
 
 /** Reserves after `tokensSold` base units have been bought from a fresh curve. */
 export function reservesAtSold(tokensSold: bigint): Reserves {

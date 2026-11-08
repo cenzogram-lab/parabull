@@ -20,6 +20,8 @@ export interface Coin {
   createdAt: number;
   stage: Stage;
   reserves: Reserves;
+  /** Curve progress 0..1 from the indexer (tokens sold / launch real tokens); absent for demo coins (see progressOf). */
+  progress?: number;
   complete: boolean;
   migrated: boolean;
   /** USD per whole token. */
