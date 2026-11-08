@@ -15,6 +15,11 @@ export interface LiveState {
   configured: boolean;
   /** At least one answer has arrived. */
   loaded: boolean;
+  /**
+   * The last poll succeeded, so `streams` is current. After a failed poll it is false and `streams` keeps the last good
+   * answer (empty if there never was one): callers must not read an empty list as "nobody is live".
+   */
+  ok: boolean;
   streams: LiveStream[];
   error: string | null;
 }
@@ -24,7 +29,7 @@ const endpoint = chatEndpoints(CONFIG.chatUrl)?.live ?? null;
 const host = streamHostOf(CONFIG.streamHost);
 const configured = !!(endpoint && host);
 
-let state: LiveState = { configured, loaded: false, streams: [], error: null };
+let state: LiveState = { configured, loaded: false, ok: false, streams: [], error: null };
 const listeners = new Set<() => void>();
 let timer: number | undefined;
 let inflight = false;
@@ -40,10 +45,10 @@ async function refresh() {
   try {
     const res = await fetch(endpoint!, { headers: { accept: "application/json" } });
     const json = (await res.json().catch(() => null)) as unknown;
-    if (!res.ok) set({ loaded: true, error: (json as { error?: string } | null)?.error ?? `Live list unavailable (${res.status})` });
-    else set({ loaded: true, error: null, streams: parseLiveList(json, host!) });
+    if (!res.ok) set({ loaded: true, ok: false, error: (json as { error?: string } | null)?.error ?? `Live list unavailable (${res.status})` });
+    else set({ loaded: true, ok: true, error: null, streams: parseLiveList(json, host!) });
   } catch {
-    set({ loaded: true, error: "Live list unreachable" });
+    set({ loaded: true, ok: false, error: "Live list unreachable" });
   } finally {
     inflight = false;
   }

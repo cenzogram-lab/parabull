@@ -36,14 +36,20 @@ export function StreamLivePage({ live }: { live: LiveState }) {
       <div className="flex items-center gap-3 max-md:flex-wrap max-md:gap-y-0.5">
         <h1 className="text-[28px] font-semibold tracking-tight max-md:text-[24px]">Live</h1>
         <span className="inline-flex items-center gap-1.5 text-sm text-muted" aria-live="polite">
-          <Radio className="h-4 w-4 text-ember" aria-hidden /> {live.loaded ? `${streams.length} live now` : "Checking who's live…"}
+          <Radio className="h-4 w-4 text-ember" aria-hidden /> {!live.loaded ? "Checking who's live…" : live.ok ? `${streams.length} live now` : "Live status unavailable"}
         </span>
       </div>
 
-      {live.error && <p className="mt-3 text-[13px] text-ember">{live.error}</p>}
+      {live.error && (
+        <p className="mt-3 text-[13px] text-ember" role="alert">
+          {live.error}
+          {streams.length > 0 ? ". Showing the last streams we heard about." : ". Trying again shortly."}
+        </p>
+      )}
 
       {!hero ? (
-        live.loaded && (
+        // Only a successful answer can say nobody is live; a failed poll says so above instead.
+        live.ok && (
           <div className="panel mt-5 flex flex-col items-center gap-2 px-6 py-14 text-center">
             <Radio className="h-7 w-7 text-muted" aria-hidden />
             <p className="text-[15px] font-semibold">Nobody is live right now</p>
