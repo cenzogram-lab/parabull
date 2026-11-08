@@ -19,11 +19,11 @@ npm run dev          # http://localhost:5173
 | `/`, `/board` | Board: King of the Bull hero, then either **Terminal Pro** (Pro Screener with New / Soon / Graduated / Movers, a Filters menu for verified locks, X or website and a minimum market cap, and Expand to give it the whole row; Trending, Hot callouts, Leaderboard) or **Classic** (For you / Following feed, six callouts at a time with Show more updates, plus Movers / Trending cards). Each callout has a Follow toggle and a More menu (view the coin, copy its link, share) |
 | `/explore` | Explore table (sparkline, MCAP, ATH, AGE, TRADES, 24H VOL, TRADERS, 1H / 6H / 24H, sortable) or grid. Range filters and a "Verified locks only" toggle |
 | `/create` | Launch flow: a modal over the current page, or a full page when opened directly. Live name-lock key, ticker and tweet parsing, lock pre-check, itemized 0.230 SOL ticket, live preview, and the 3–15 s anti-bundle delay |
-| `/coin/:mint` | Trading terminal: lock countdowns, metrics, candles (`1s`–`D`, Price/MCap), bonding-curve and DexScreener gauges, Holders / Trades / Callouts tabs, Buy/Sell panel, stats and audit |
+| `/coin/:mint` | Trading terminal: lock countdowns, metrics, candles (`1s`–`D`, Price/MCap), bonding-curve and DexScreener gauges, Trades / Holders / Callouts / **Chat** tabs (the coin's live chat, see below), Buy/Sell panel, stats and audit |
 | `/leaderboard` | Traders / Squads / Rewards / Best Callouts, top-4 podium, 1D/1W/1M, Profit/Volume, Best callouts rail |
 | `/portfolio` | Your profile, net equity with a 1D / 1W / 1M / ALL curve, then Open / Closed / Replies / Rewards and Deposit / Receive. On desktop it's a centered column |
 | `/search` | Recent searches and recently viewed coins at rest, coin and creator results as you type. On desktop it's a centered column; ⌘K still opens the overlay there |
-| `/live` | Spotlight stream with chat, then Most viewers / Highest market cap / Trending clips |
+| `/live` | Spotlight stream with the spotlight coin's live chat, then Most viewers / Highest market cap / Trending clips |
 | `/holder-rewards` | Holder-reward totals, top paying coins, how the fee split works |
 | `/parabull-token` (`/rewards`) | Buyback & burn tracker, daily ledger, earnings-to-valuation calculator, Merkle claims |
 | `/admin` | Operator console for the admin, crank and nominated-admin wallets (chain mode). See [Admin console](#admin-console) |
@@ -64,7 +64,7 @@ render, so there's no flash), and shared components change only through
   buttons. A row opens that trader's or squad's card; when your figure makes
   the listed ranking, your own row sits in it at that place.
 - **Coin page.** A compact header, the chart, gauges and stats, then Trades /
-  Holders / Callouts as lists, and a Buy / Sell bar that opens the trade
+  Holders / Callouts as lists and the coin's Chat, and a Buy / Sell bar that opens the trade
   panel in a sheet.
 - **Search.** The field is pinned above the nav, or above the on-screen
   keyboard, with Paste and close buttons. ⌘K (and anything else that opens
@@ -123,9 +123,21 @@ Set these in `app/.env.local` (see `src/config.ts`):
 | `VITE_REWARDS_BASE_URL` | unset | Where `epoch-<n>.json` snapshot artifacts (from `scripts/src/snapshot.ts`) are served |
 | `VITE_SENTINEL_URL` | unset | The X sentinel ([`services/twitter-sentinel`](../services/twitter-sentinel/README.md)). When the connected wallet launched the coin, its page shows an **X automation** button with a status dot. It opens a modal (a bottom sheet on a phone) to link, replace or disconnect the project's X account and set milestone posts, cashtag replies, persona and project context, any time after launch. Every change is signed by the wallet. Unset, the modal says the sentinel isn't connected; demo coins can't be saved, since they aren't on-chain |
 | `VITE_MEDIA_URL` | unset | The public R2 domain media is served from (`services/parabull-edge`). Added to the CSP's `connect-src` and `media-src` |
-| `VITE_CHAT_URL` | unset | Coin chat websocket (`wss://…`, a Durable Object behind the edge Worker; not built yet). Its `wss://` and `https://` origins are added to `connect-src` |
+| `VITE_CHAT_URL` | unset | The edge Worker's origin for coin chat (`wss://edge.parabull.xyz`; `https://` works too). Each coin's chat is a `ChatRoom` Durable Object ([`services/parabull-edge`](../services/parabull-edge/README.md)). Its `wss://` and `https://` origins are added to `connect-src`. Unset, the Chat tab and `/live` say live chat isn't connected; there's no simulated feed |
 | `VITE_STREAM_HOST` | unset | Cloudflare Stream playback host (`customer-<code>.cloudflarestream.com`; the player isn't built yet). Added to `connect-src` (hls.js) and `media-src` |
 | `VITE_II_SIGNER_CANISTER_ID` | unset | The Chain Fusion signer canister for Internet Identity users ([`src/lib/auth/solana_signer.did`](src/lib/auth/solana_signer.did)). Unset, "Continue with Google / Passkey / Email" uses a development key in demo builds and on the dev server, a local test identity on localnet, and is disabled in a production chain build (see [Connecting](#connecting)) |
+
+**Coin chat** (`src/components/coin/CoinChat.tsx`, `src/hooks/useChatRoom.ts`) is on the coin page's Chat tab and on
+`/live`:
+- **Reading** needs no wallet. The socket replays the last 200 messages, shows how many are in the chat, and
+  reconnects with backoff.
+- **Posting** needs a connected wallet that can sign messages; without one, the composer is a "Connect wallet to chat"
+  button.
+  - The first post or image asks the wallet to sign the chat sign-in text once (no transaction, no fee). The session
+    token that comes back is kept in memory for the tab, never in storage.
+  - Then: up to 280 characters, one message every 2 seconds, and images or GIFs uploaded through the Worker into R2
+    and sent as attachments.
+- The protocol is `src/lib/chatMessage.ts`, which the Worker imports too.
 
 **Wired to the program** (`src/hooks/useParabullProgram.ts`):
 - `request_launch`, then waiting for the launch worker (the ticket closes,

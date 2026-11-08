@@ -1,15 +1,14 @@
-import { ArrowRight, ChevronLeft, ChevronRight, Eye, Film, MessageSquare, Radio, Users } from "lucide-react";
-import { useMemo, useRef } from "react";
+import { ArrowRight, ChevronLeft, ChevronRight, Eye, Film, Radio, Users } from "lucide-react";
+import { useRef } from "react";
 import { Link } from "react-router-dom";
+import { CoinChat } from "../components/coin/CoinChat";
 import { ChangePill } from "../components/ui/primitives";
 import { TraderAvatar } from "../components/ui/visuals";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { useNow } from "../hooks/useNow";
 import { streamArt } from "../lib/art";
 import { age, compact, usdCompact } from "../lib/format";
-import { Rng } from "../lib/rng";
 import type { Coin, Stream, Trader } from "../lib/types";
-import { HANDLES } from "../mock/catalog";
 import { useMarket } from "../state/Market";
 
 function LivePill() {
@@ -131,8 +130,6 @@ function MobileSpotlight({ s, coin, trader }: { s: Stream; coin: Coin; trader?: 
   );
 }
 
-const CHAT = ["just aped 1 SOL", "curve almost done", "this dev actually ships", "LFG", "who's holding through raydium?", "tweet lock is a nice touch", "buying every dip", "the bull is charging", "chart looks healthy", "gm from the trading pit"];
-
 export function Live() {
   const { streams, byMint, traders } = useMarket();
   const now = useNow();
@@ -141,10 +138,6 @@ export function Live() {
   const hero = [...live].sort((a, b) => b.viewers - a.viewers)[0];
   const heroCoin = hero ? byMint.get(hero.mint) : undefined;
   const heroTrader = hero ? traders.find((t) => t.handle === hero.handle) : undefined;
-  const chat = useMemo(() => {
-    const rng = new Rng("chat");
-    return Array.from({ length: 14 }, (_, i) => ({ id: i, handle: HANDLES[rng.int(0, HANDLES.length - 1)][0], text: rng.pick(CHAT) }));
-  }, []);
   const byMcap = [...live].sort((a, b) => (byMint.get(b.mint)?.mcapUsd ?? 0) - (byMint.get(a.mint)?.mcapUsd ?? 0));
   const clips = streams.filter((s) => s.kind === "clip").sort((a, b) => b.viewers - a.viewers);
 
@@ -196,22 +189,10 @@ export function Live() {
               </div>
             </div>
           )}
-          {/* Below md the chat is a fixed-height panel that scrolls inside, like any chat. */}
-          <div className="panel flex min-h-0 flex-col max-md:h-[320px]">
-            <div className="flex items-center gap-2 border-b border-line px-4 py-3 text-[13.5px] font-semibold">
-              <MessageSquare className="h-4 w-4 text-copper" /> Live chat
-              <span className="ml-auto text-xs font-normal text-muted">{compact(hero.viewers)} in chat</span>
-            </div>
-            <ul className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-4 py-3 text-[13px]">
-              {chat.map((m) => (
-                <li key={m.id}>
-                  <span className="font-semibold text-copper">@{m.handle}</span> <span className="text-cream/90">{m.text}</span>
-                </li>
-              ))}
-            </ul>
-            <div className="border-t border-line p-3">
-              <input disabled className="input h-10 cursor-not-allowed text-sm" placeholder="Connect your wallet to chat" />
-            </div>
+          {/* The spotlight coin's real chat room, a fixed-height panel that scrolls inside. Beside the stream (xl) it
+              fills the row the video sets: absolutely placed, so 200 messages can't make the row taller. */}
+          <div className="relative h-[420px] max-md:h-[360px] xl:h-auto">
+            <CoinChat mint={heroCoin.mint} className="panel h-full xl:absolute xl:inset-0" />
           </div>
         </div>
       )}
