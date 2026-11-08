@@ -6,7 +6,7 @@
  *
  * An artifact is trusted only after the indexer rebuilds its whole Merkle tree from the leaves and gets the on-chain
  * root, total and leaf count. Proofs are then cut from that tree, never copied from the file. A file that doesn't
- * match is "mismatch" and none of its allocations are served. Trees are kept while their epoch can still be claimed
+ * match is "mismatch" and none of its allocations are served (it's checked again later, in case it's corrected). Trees are kept while their epoch can still be claimed
  * (until expire_reward_epoch runs).
  */
 import { base58Decode, isAddress } from "../../../app/src/lib/chatMessage";
@@ -119,7 +119,7 @@ export class RewardsIndex {
   due(now: number): number[] {
     return [...this.epochs.keys()].filter((n) => {
       const a = this.artifacts.get(n)!;
-      return (a.state === "loading" || a.state === "missing") && a.retryAt <= now;
+      return a.state !== "verified" && a.retryAt <= now;
     });
   }
 
@@ -138,7 +138,8 @@ export class RewardsIndex {
     }
     const v = verifyArtifact(raw, e);
     if (!v.ok) {
-      Object.assign(a, { state: "mismatch", error: v.error, kind: null });
+      // Served nothing, but looked at again (from 30 min, then hourly...): a corrected file is picked up without a restart.
+      Object.assign(a, { state: "mismatch", error: v.error, kind: null, retryAt: now + Math.min(1_800_000 * 2 ** (a.tries - 1), 21_600_000) });
       return;
     }
     Object.assign(a, { state: "verified", kind: v.kind, error: undefined, leaves: v.leaves, levels: e.expired ? undefined : v.levels });

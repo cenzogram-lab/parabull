@@ -94,7 +94,7 @@ test("rewards: a file that doesn't rebuild the on-chain root serves nothing; a m
   assert.deepEqual(alice.unverifiedEpochs, [2, 1]);
   assert.deepEqual(s.ix.rewards.artifactState(1), { state: "mismatch", kind: null, error: "leaves don't rebuild the on-chain root" });
   assert.equal(s.ix.rewards.artifactState(2)!.state, "missing");
-  // A mismatch is final; a missing file is asked for again once its back-off has passed.
+  // A missing file is asked for again after 30 s; a mismatched one after 30 min (it may be corrected).
   s.files.set(`${BASE}/epoch-1.json`, e1.artifact);
   s.files.set(`${BASE}/epoch-2.json`, e2.artifact);
   const before = s.fetched.length;
@@ -104,6 +104,10 @@ test("rewards: a file that doesn't rebuild the on-chain root serves nothing; a m
   await s.ix.loadArtifacts();
   assert.deepEqual(s.fetched.slice(before), [`${BASE}/epoch-2.json`]);
   assert.deepEqual((await s.get(`/rewards/${ALICE}`)).body.allocations.map((a: any) => a.epoch), [2]);
+  s.clock.advance(30 * 60_000);
+  await s.ix.loadArtifacts();
+  assert.deepEqual(s.fetched.slice(-1), [`${BASE}/epoch-1.json`]);
+  assert.deepEqual((await s.get(`/rewards/${ALICE}`)).body.allocations.map((a: any) => a.epoch), [2, 1], "the corrected file is verified and served");
 });
 
 test("rewards: an expired epoch lists its allocation without a proof; publishing is picked up from the event", async (t) => {
@@ -151,10 +155,11 @@ test("referrals API: per callout and by window, with coverage", async (t) => {
   assert.equal((await s.get("/referrals/ZyXwVuTsRqPn")).body.buys, 0);
   assert.equal((await s.get("/referrals/bad")).status, 400);
   const w = (await s.get("/referrals?limit=1")).body;
-  assert.deepEqual([w.events.length, w.next, w.coveredFrom], [1, "1", null]);
+  assert.deepEqual([w.events.length, w.next, w.coveredFrom], [1, `${w.events[0].timestamp}.${w.events[0].slot}.${w.events[0].signature}.${w.events[0].index}`, null]);
   assert.equal(w.events[0].trader, BOB);
   assert.equal(typeof w.events[0].solLamports, "string");
-  assert.deepEqual((await s.get("/referrals?cursor=1")).body.events.map((e: any) => e.trader), [CAROL]);
+  const p2 = (await s.get(`/referrals?cursor=${encodeURIComponent(w.next)}`)).body;
+  assert.deepEqual([p2.events.map((e: any) => e.trader), p2.next], [[CAROL], null]);
   assert.deepEqual((await s.get(`/referrals?since=${s.chain.time + 1}`)).body.events, []);
   for (const q of ["since=-1", "until=x", "cursor=-2", "limit=0"]) assert.equal((await s.get(`/referrals?${q}`)).status, 400, q);
 });

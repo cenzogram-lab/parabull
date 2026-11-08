@@ -338,7 +338,7 @@ All `GET`.
 | `/tickets?payer=` | `{ tickets }`, newest first, at most 50 |
 | `/stream[?mint=]` (WebSocket) | `{ type: "coin", coin }`, `{ type: "trade", trade }`, `{ type: "ticket", ticket }`; `?mint=` limits it to one coin |
 | `/referrals/:calloutId` | `{ calloutId, buys, volumeLamports, feeLamports, traders, byTrader: [{ wallet, buys, volumeLamports, feeLamports }], byMint, firstAt, lastAt }`: every referred buy recorded for the callout, by trader (largest first, at most 50) |
-| `/referrals?since=&until=&cursor=&limit=1..5000` | `{ events: [{ calloutId, signature, index, mint, trader, solLamports, feeLamports, tokenAmount, slot, timestamp }], next, coveredFrom }`, oldest first; `coveredFrom` is when the record is complete from (null: since the program's first transaction) |
+| `/referrals?since=&until=&cursor=&limit=1..5000` | `{ events: [{ calloutId, signature, index, mint, trader, solLamports, feeLamports, tokenAmount, slot, timestamp }], next, coveredFrom }`, oldest first. `next` is the last event's key (`timestamp.slot.signature.index`), so evictions between pages never skip events. `coveredFrom` is when the record is complete from (null: since the program's first transaction) |
 | `/rewards` | `{ epochs: [{ epoch, kind, artifact, root, totalLamports, claimedLamports, numLeaves, claimedCount, publishedAt, expiresAt, expired }], totals: { holder, caller }, vault }`; `artifact` is `verified`, `loading`, `missing` or `mismatch` |
 | `/rewards/:wallet` | `{ wallet, allocations: [{ epoch, kind, index, amount, proof, root, claimed, expired, claimable, publishedAt, expiresAt, totalLamports, numLeaves }], unclaimedLamports, unverifiedEpochs }`, newest first; `proof` is cut from the indexer's own rebuilt tree (null once the epoch is expired) |
 | `/health` | `{ ok, coins, tickets, newestSignature }` |
@@ -414,7 +414,8 @@ program's existing reward epochs. No program or IDL change is involved.
     its `mcapSol` and `priceSol` become the callout's "called at" figures.
 - One `CalloutStore` Durable Object (SQLite) stores every callout and applies
   the per-wallet limits in one place: one every 30 s, one per coin an hour, 20
-  a day. Ids are 12 random base58 characters.
+  a day. Ids are 12 random base58 characters. Reads are limited per IP
+  (`CALLOUT_READ_LIMITER`, 120 a minute), since they all reach that one object.
 - `GET /callouts?mint=&author=&ids=&before=&limit=`, `GET /callouts/:id`.
 - Fails closed: without `SOLANA_RPC_URL`, `INDEXER_URL` or the binding,
   posting answers 503.
@@ -436,7 +437,11 @@ program's existing reward epochs. No program or IDL change is involved.
 ### 6.3 Caller epochs (`scripts/src/callerEpoch.ts`)
 
 1. **Referred buys** in `[since, until)` from `GET /referrals`. The run fails
-   closed unless the indexer's record is complete from `since`.
+   closed unless:
+   - the indexer's record is complete from `since`;
+   - the window ended at least 10 minutes ago, so every buy in it is indexed;
+   - it doesn't overlap a window already paid. The published caller
+     artifacts in the output directory are that ledger.
 2. **Which buys count.** Each buy's callout comes from the Worker. A buy
    counts only if:
    - the callout exists, and the buy is of the callout's coin;
@@ -448,6 +453,10 @@ program's existing reward epochs. No program or IDL change is involved.
 3. **The split.** `CALLER_EPOCH_LAMPORTS` is split by counted volume, rounding
    down:
    - no caller gets more than `MAX_CALLER_SHARE_BPS` (25%);
+   - no caller gets more than `MAX_FEE_SHARE_BPS` (50%) of the platform fees
+     its counted buys paid. Buying through your own callout from other
+     wallets, then selling back, therefore always costs more in fees than it
+     can earn;
    - payouts under `MIN_PAYOUT_LAMPORTS` are dropped;
    - only system-owned wallets get a leaf (what `claim_holder_reward` can
      pay);
@@ -461,7 +470,9 @@ program's existing reward epochs. No program or IDL change is involved.
    - then `publish_reward_epoch`, signed by the crank.
 
    Being atomic, the holder snapshot never sees the top-up as distributable,
-   and publish's own funding check passes on exactly that money. Once a
+   and publish's own funding check passes on exactly that money. If the send
+   reports an error, the epoch account is read first: an epoch that landed
+   anyway is finalized, not paid again. Once a
    caller epoch is expired, its unclaimed rewards return to the vault's free
    balance, and the next holder snapshot distributes them.
 
@@ -475,7 +486,8 @@ program's existing reward epochs. No program or IDL change is involved.
   - its root, total and leaf count must equal the on-chain account;
   - proofs are cut from that tree, never copied from the file;
   - a file that doesn't match is `mismatch`, and none of its allocations are
-    served.
+    served. It is checked again after 30 minutes, then less often, so a
+    corrected file is picked up without a restart.
 - **App.** Chain mode lists exactly the indexer's allocations. Before sending
   `claim_holder_reward`, it reads the `RewardEpoch` account itself and checks:
   - the root and the proof;

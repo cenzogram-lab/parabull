@@ -48,6 +48,12 @@ simple = { limit = 60, period = 60 }
 name = "CHAT_ROOMS"
 class_name = "ChatRoom"
 
+# Callout reads, per IP (src/router.ts CALLOUT_READ_LIMITER): every read reaches the one CalloutStore object.
+[[ratelimits]]
+name = "CALLOUT_READ_LIMITER"
+namespace_id = "1004"
+simple = { limit = 120, period = 60 }
+
 # Every callout, in one object's SQLite (src/calloutStoreDO.ts), so per-wallet posting limits apply in one place.
 [[durable_objects.bindings]]
 name = "CALLOUTS"

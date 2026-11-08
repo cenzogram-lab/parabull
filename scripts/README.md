@@ -236,6 +236,8 @@ Each trader counts for at most `PER_TRADER_CAP_LAMPORTS` (10 SOL) per caller.
 
 **The split.** The budget is split by counted volume:
 - capped at `MAX_CALLER_SHARE_BPS` per caller (25%);
+- capped at `MAX_FEE_SHARE_BPS` (50%) of the platform fees the caller's counted buys paid, so wash buying through your
+  own callout always costs more than it earns;
 - payouts under `MIN_PAYOUT_LAMPORTS` dropped;
 - only system-owned wallets paid.
 
@@ -244,11 +246,16 @@ What isn't paid out stays with the treasury.
 **Safety.**
 - **Fails closed** when:
   - the indexer's referral record doesn't reach back to `--since`;
+  - the window ended less than 10 minutes ago;
+  - the window overlaps one already paid (the published `epoch-<n>.json` caller files in `snapshots/` are the ledger:
+    keep them);
   - the funding key (`TREASURY_KEYPAIR`, default the admin) isn't `Global.treasury`;
   - `CRANK_KEYPAIR` isn't `Global.crank_authority`;
   - the treasury can't cover the total.
 - **Atomic publish.** The top-up and `publish_reward_epoch` go in one transaction, so the holder snapshot never sees
   the top-up as its own.
+- **No double pay on a retry.** If the send reports an error, the script reads the epoch account first: one that landed
+  anyway is finalized, not paid again.
 - **Upload.** Afterwards, upload `epoch-<n>.json` to the indexer's `REWARDS_BASE_URL`. Claimants use the same
   claim page as holder rewards, where the epoch shows as a caller reward.
 

@@ -12,7 +12,7 @@ import { byCalloutResult, calloutMove, mergeCallouts, toCallout } from "../src/l
 import { buildLevels, leafHash, proofFor, rootOf } from "../src/lib/merkle";
 import { ata2022, ASSOCIATED_TOKEN_PROGRAM_ID, Pdas, TOKEN_2022_PROGRAM_ID } from "../src/lib/pdas";
 import { MEMO_PROGRAM_ID, referralFor, refMemoInstruction, rememberReferral, type KeyValue } from "../src/lib/referral";
-import { bytesToHex, checkBeforeClaim, proofMatches, type AllocationJson } from "../src/lib/rewardsClaim";
+import { bytesToHex, checkBeforeClaim, claimRows, proofMatches, type AllocationJson } from "../src/lib/rewardsClaim";
 import type { Callout, Coin } from "../src/lib/types";
 
 const MINT = Keypair.generate().publicKey.toBase58();
@@ -114,4 +114,15 @@ test("claims: checked against the epoch account itself before anything is sent",
   assert.match(checkBeforeClaim(onChain, wallet, { ...a, amount: "701" })!, /proof doesn't match/);
   assert.match(checkBeforeClaim(onChain, Keypair.generate().publicKey.toBytes(), a)!, /proof doesn't match/);
   assert.equal(proofMatches({ ...a, amount: "701" }, wallet), false);
+});
+
+test("claims: every claimable allocation is listed, however old, before the claimed and expired ones", () => {
+  const al = (epoch: number, claimable: boolean): AllocationJson => ({ epoch, kind: "holder", index: 0, amount: "1", proof: [], root: "", claimed: !claimable, expired: false, claimable, publishedAt: 0, expiresAt: 0, totalLamports: "1", numLeaves: 1 });
+  // Newest first, as the indexer serves them: 20 claimed epochs, then an old one still claimable.
+  const list = [...Array.from({ length: 20 }, (_, i) => al(40 - i, false)), al(3, true)];
+  const rows = claimRows(list);
+  assert.equal(rows.length, 12);
+  assert.deepEqual(rows.map((r) => r.epoch).slice(0, 3), [3, 40, 39], "the old claimable one first, then the newest of the rest");
+  const many = Array.from({ length: 15 }, (_, i) => al(i, true));
+  assert.equal(claimRows(many).length, 15, "claimable rows are never cut off");
 });

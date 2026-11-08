@@ -4,7 +4,7 @@ import { refMemo } from "../../../app/src/lib/callouts";
 import { Indexer } from "./indexer";
 import { MEMO_PROGRAM_ID, memoLogLines, topLevelMemos } from "./memo";
 import { MockChain, addressOf } from "./mockChain";
-import { Referrals, type ReferralEvent } from "./referrals";
+import { Referrals, parseReferralCursor, referralCursor, type ReferralEvent } from "./referrals";
 import { Rpc } from "./rpc";
 
 const ALICE = addressOf("alice");
@@ -83,19 +83,32 @@ test("referrals: a window pages oldest first; a truncated backfill or eviction s
   assert.equal(short.referrals.size, 3);
   assert.equal(short.referralsCoveredFrom(), chain.txs[chain.txs.length - 3].blockTime);
   await ix.start();
-  const all = ix.referrals.window(0, 2 ** 40, 0, 100).events;
+  const all = ix.referrals.window(0, 2 ** 40, null, 100).events;
   assert.equal(all.length, 6);
   assert.ok(all.every((e, i) => i === 0 || all[i - 1].timestamp <= e.timestamp));
-  const p1 = ix.referrals.window(0, 2 ** 40, 0, 4);
-  assert.deepEqual([p1.events.length, p1.next], [4, 4]);
-  assert.deepEqual(ix.referrals.window(0, 2 ** 40, 4, 4).events.map((e) => e.signature), all.slice(4).map((e) => e.signature));
-  assert.deepEqual(ix.referrals.window(all[2].timestamp, all[4].timestamp, 0, 100).events.map((e) => e.signature), [all[2].signature, all[3].signature]);
+  const p1 = ix.referrals.window(0, 2 ** 40, null, 4);
+  assert.deepEqual([p1.events.length, p1.next], [4, referralCursor(all[3])]);
+  const p2 = ix.referrals.window(0, 2 ** 40, p1.next, 4);
+  assert.deepEqual([p2.events.map((e) => e.signature), p2.next], [all.slice(4).map((e) => e.signature), null]);
+  assert.deepEqual(ix.referrals.window(all[2].timestamp, all[4].timestamp, null, 100).events.map((e) => e.signature), [all[2].signature, all[3].signature]);
 
   // Out-of-order inserts (the websocket before the backfill) still come out in time order, and eviction drops the oldest.
   const ev = (ts: number, sig: string): ReferralEvent => ({ calloutId: CALL, signature: sig, index: 0, mint, trader: BOB, solLamports: 1n, feeLamports: 0n, tokenAmount: 1n, slot: ts, timestamp: ts });
   const r = new Referrals({ maxEvents: 3, maxCallouts: 10 });
   for (const [ts, sig] of [[50, "e"], [10, "a"], [30, "c"], [20, "b"]] as const) r.add(ev(ts, sig));
   assert.equal(r.add(ev(20, "b")), false, "a repeat is ignored");
-  assert.deepEqual(r.window(0, 100, 0, 10).events.map((e) => e.signature), ["b", "c", "e"]);
+  assert.deepEqual(r.window(0, 100, null, 10).events.map((e) => e.signature), ["b", "c", "e"]);
   assert.equal(r.evictedThrough, 10);
+
+  // Paging by key: an eviction between two pages doesn't shift the next page past events (an offset would skip one).
+  const q = new Referrals({ maxEvents: 4, maxCallouts: 10 });
+  const sig = (c: string) => c.repeat(40);
+  for (const [ts, c] of [[1, "a"], [2, "b"], [3, "c"], [4, "d"]] as const) q.add(ev(ts, sig(c)));
+  const first = q.window(0, 100, null, 2);
+  assert.deepEqual(first.events.map((e) => e.signature), [sig("a"), sig("b")]);
+  q.add(ev(5, sig("e"))); // evicts "a"
+  assert.deepEqual(q.window(0, 100, first.next, 10).events.map((e) => e.signature), [sig("c"), sig("d"), sig("e")]);
+  assert.throws(() => q.window(0, 100, "nope", 10), /bad cursor/);
+  assert.equal(parseReferralCursor("nope"), null);
+  assert.deepEqual(parseReferralCursor(referralCursor(ev(7, "x".repeat(40)))), { timestamp: 7, slot: 7, signature: "x".repeat(40), index: 0 });
 });

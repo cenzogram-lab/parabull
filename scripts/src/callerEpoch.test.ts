@@ -5,7 +5,10 @@ import { Connection, Keypair, PublicKey, SystemInstruction, SystemProgram } from
 import type { Parabull } from "../../target/types/parabull";
 import type { CalloutJson } from "../../app/src/lib/callouts";
 import { leafHash as appLeafHash, verifyProof } from "../../app/src/lib/merkle";
-import { DEFAULT_RULES, allocateCallers, attribute, buildCallerArtifact, loadReferrals, parseTime, publishInstructions, type ReferralEvent } from "./callerEpoch";
+import { DEFAULT_RULES, WINDOW_SETTLE_SECONDS, allocateCallers, attribute, buildCallerArtifact, checkNotPaid, checkWindow, loadReferrals, paidWindows, parseTime, publishInstructions, type ReferralEvent } from "./callerEpoch";
+import { mkdtempSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { Pdas } from "./pdas";
 import { loadIdl } from "./program";
 
@@ -48,7 +51,8 @@ test("caller epoch: only buys a callout really brought in count (coin, timing, s
 });
 
 test("caller epoch: the budget is split by counted volume, floored and capped, never over the budget", () => {
-  const stats = (caller: string, counted: bigint) => ({ caller, countedLamports: counted, volumeLamports: counted, feeLamports: 0n, buys: 1, traders: 1, callouts: [] });
+  // Plenty of fees: the fee cap isn't what these cases are about.
+  const stats = (caller: string, counted: bigint) => ({ caller, countedLamports: counted, volumeLamports: counted, feeLamports: 10n * SOL, buys: 1, traders: 1, callouts: [] });
   const rules = { ...DEFAULT_RULES, maxCallerShareBps: 10_000n };
   // 3:1, a 1 SOL budget: 0.75 and 0.25 SOL.
   assert.deepEqual(allocateCallers([stats(CALLER_A, 3n), stats(CALLER_B, 1n)], SOL, rules), [
@@ -64,6 +68,40 @@ test("caller epoch: the budget is split by counted volume, floored and capped, n
   // Dust under the minimum payout is dropped.
   assert.deepEqual(allocateCallers([stats(CALLER_A, 1_000_000n), stats(CALLER_B, 1n)], SOL, rules).map((x) => x.caller), [CALLER_A]);
   assert.deepEqual(allocateCallers([], SOL, rules), []);
+});
+
+test("caller epoch: no caller earns more than half the fees its counted buys paid, so wash buying never pays", () => {
+  // Two sybil wallets buy 10 SOL each through their own caller's link and sell straight back: 0.2 SOL of buy fees (and
+  // 0.2 more selling). Against 50 SOL of organic volume elsewhere, the volume share alone would pay them 1.25 SOL.
+  const sybil = { caller: CALLER_A, countedLamports: 20n * SOL, volumeLamports: 20n * SOL, feeLamports: 20n * SOL / 100n, buys: 2, traders: 2, callouts: [] };
+  const organic = { caller: CALLER_B, countedLamports: 50n * SOL, volumeLamports: 50n * SOL, feeLamports: 50n * SOL / 100n, buys: 40, traders: 30, callouts: [] };
+  const [b, a] = allocateCallers([sybil, organic], 5n * SOL, DEFAULT_RULES);
+  assert.equal(a.caller, CALLER_A);
+  assert.equal(a.amount, SOL / 10n, "0.1 SOL: half its 0.2 SOL of buy fees");
+  assert.ok(a.amount < 2n * sybil.feeLamports, "less than the round trip's fees");
+  assert.deepEqual(b, { caller: CALLER_B, amount: SOL / 4n }, "the organic caller: also capped at half its fees (0.25 SOL)");
+});
+
+test("caller epoch: a window is paid once, and only once it has settled", () => {
+  const now = 2_000_000_000;
+  assert.throws(() => checkWindow(100, 100, now), /after --since/);
+  assert.throws(() => checkWindow(100, now - 60, now), /at least 10 minutes ago/);
+  assert.doesNotThrow(() => checkWindow(100, now - WINDOW_SETTLE_SECONDS, now));
+  const dir = mkdtempSync(join(tmpdir(), "caller-epochs-"));
+  const write = (n: number, a: object) => writeFileSync(join(dir, `epoch-${n}.json`), JSON.stringify(a));
+  write(4, { epoch: 4, kind: "caller", window: { since: 1_000, until: 2_000 }, publishSignature: "sig" });
+  write(5, { epoch: 5, kind: "caller", window: { since: 5_000, until: 6_000 } }); // never published
+  write(6, { epoch: 6, root: "aa", leaves: [] }); // a holder epoch
+  writeFileSync(join(dir, "epoch-7.draft.json"), "{}");
+  const paid = paidWindows(dir);
+  assert.deepEqual(paid, [{ epoch: 4, since: 1_000, until: 2_000 }]);
+  assert.throws(() => checkNotPaid(1_500, 3_000, paid), /caller epoch 4 already paid/);
+  assert.throws(() => checkNotPaid(1_000, 2_000, paid), /already paid/, "the same window again (a retry)");
+  assert.doesNotThrow(() => checkNotPaid(2_000, 3_000, paid), "back to back is fine");
+  assert.doesNotThrow(() => checkNotPaid(5_000, 6_000, paid), "a draft that was never published doesn't count");
+  assert.deepEqual(paidWindows(join(dir, "absent")), []);
+  writeFileSync(join(dir, "epoch-8.json"), "{broken");
+  assert.throws(() => paidWindows(dir), /ledger must be readable/);
 });
 
 test("caller epoch: the artifact's proofs verify with the app's and indexer's Merkle code too", () => {
@@ -110,14 +148,14 @@ test("caller epoch: one transaction, the treasury's top-up first and then publis
 test("caller epoch: referrals are read page by page and refused when the indexer's record starts after the window", async () => {
   const calls: { url: string; origin: string | null }[] = [];
   const pages: Record<string, unknown> = {
-    "0": { events: [ev("AAAAAAAAAAAA", T1, SOL)], next: "1", coveredFrom: null },
-    "1": { events: [ev("BBBBBBBBBBBB", T2, SOL)], next: null, coveredFrom: null },
+    "": { events: [ev("AAAAAAAAAAAA", T1, SOL)], next: "5.6.key.0", coveredFrom: null },
+    "5.6.key.0": { events: [ev("BBBBBBBBBBBB", T2, SOL)], next: null, coveredFrom: null },
   };
   const fetchImpl = (async (url: string, init?: RequestInit) => {
     const origin = new Headers(init?.headers).get("origin");
     calls.push({ url, origin });
     const u = new URL(url);
-    if (u.pathname === "/referrals") return Response.json(pages[u.searchParams.get("cursor")!]);
+    if (u.pathname === "/referrals") return Response.json(pages[u.searchParams.get("cursor") ?? ""]);
     if (u.pathname === "/callouts") return Response.json({ callouts: u.searchParams.get("ids")!.split(",").map((id) => callout(id, CALLER_A)) });
     return new Response("{}", { status: 404 });
   }) as typeof fetch;
@@ -126,14 +164,14 @@ test("caller epoch: referrals are read page by page and refused when the indexer
   assert.equal(events.length, 2);
   assert.deepEqual([...callouts.keys()].sort(), ["AAAAAAAAAAAA", "BBBBBBBBBBBB"]);
   assert.deepEqual(calls.map((c) => c.url), [
-    "https://ix.test/referrals?since=100&until=200&limit=5000&cursor=0",
-    "https://ix.test/referrals?since=100&until=200&limit=5000&cursor=1",
+    "https://ix.test/referrals?since=100&until=200&limit=5000",
+    "https://ix.test/referrals?since=100&until=200&limit=5000&cursor=5.6.key.0",
     "https://edge.test/callouts?ids=AAAAAAAAAAAA,BBBBBBBBBBBB&limit=100",
   ]);
   assert.equal(calls[2].origin, "https://app.test", "the Worker only answers the app's origin");
-  pages["0"] = { events: [], next: null, coveredFrom: 150 };
+  pages[""] = { events: [], next: null, coveredFrom: 150 };
   await assert.rejects(loadReferrals(o), /starts at .* after the window's start/);
-  pages["0"] = { events: [], next: null, coveredFrom: 100 };
+  pages[""] = { events: [], next: null, coveredFrom: 100 };
   assert.deepEqual((await loadReferrals(o)).events, [], "complete from exactly `since` is fine");
 });
 

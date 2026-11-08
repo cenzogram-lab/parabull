@@ -67,3 +67,9 @@ export function checkBeforeClaim(onChain: OnChainEpoch | null, wallet: Uint8Arra
   if (!verifyProof(a.proof.map(hexToBytes), Uint8Array.from(onChain.merkleRoot), leafHash(a.index, wallet, BigInt(a.amount)))) return "The proof doesn't match the on-chain root";
   return null;
 }
+
+/** The rows a claim panel shows: every claimable allocation first (never cut off), then the newest others, up to `max`. */
+export function claimRows(allocations: AllocationJson[], max = 12): AllocationJson[] {
+  const claimable = allocations.filter((a) => a.claimable);
+  return [...claimable, ...allocations.filter((a) => !a.claimable).slice(0, Math.max(0, max - claimable.length))];
+}

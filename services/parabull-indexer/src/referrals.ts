@@ -50,6 +50,19 @@ export interface ReferralEventJson {
   timestamp: number;
 }
 
+type EventKey = Pick<ReferralEvent, "timestamp" | "slot" | "signature" | "index">;
+
+/** The events' order: time, slot, signature, index. */
+export const compareEvents = (a: EventKey, b: EventKey) => a.timestamp - b.timestamp || a.slot - b.slot || (a.signature < b.signature ? -1 : a.signature > b.signature ? 1 : a.index - b.index);
+
+/** A page cursor: the last event's key, `<timestamp>.<slot>.<signature>.<index>`. */
+export const referralCursor = (e: EventKey) => `${e.timestamp}.${e.slot}.${e.signature}.${e.index}`;
+
+export function parseReferralCursor(s: string): EventKey | null {
+  const m = /^(\d{1,12})\.(\d{1,15})\.([1-9A-HJ-NP-Za-km-z]{32,90})\.(\d{1,5})$/.exec(s);
+  return m ? { timestamp: Number(m[1]), slot: Number(m[2]), signature: m[3], index: Number(m[4]) } : null;
+}
+
 export const referralJson = (e: ReferralEvent): ReferralEventJson => ({ ...e, solLamports: e.solLamports.toString(), feeLamports: e.feeLamports.toString(), tokenAmount: e.tokenAmount.toString() });
 
 const add = (t: Totals, e: ReferralEvent) => {
@@ -102,7 +115,7 @@ export class Referrals {
 
   private ordered(): ReferralEvent[] {
     if (!this.sorted) {
-      this.events.sort((a, b) => a.timestamp - b.timestamp || a.slot - b.slot || (a.signature < b.signature ? -1 : a.signature > b.signature ? 1 : a.index - b.index));
+      this.events.sort(compareEvents);
       this.sorted = true;
     }
     return this.events;
@@ -114,11 +127,16 @@ export class Referrals {
     this.evictedThrough = Math.max(this.evictedThrough ?? -Infinity, gone[gone.length - 1].timestamp);
   }
 
-  /** Events with since <= timestamp < until, oldest first, paged by offset. */
-  window(since: number, until: number, offset: number, limit: number): { events: ReferralEvent[]; next: number | null } {
-    const all = this.ordered().filter((e) => e.timestamp >= since && e.timestamp < until);
-    const events = all.slice(offset, offset + limit);
-    return { events, next: offset + limit < all.length ? offset + limit : null };
+  /**
+   * Events with since <= timestamp < until, oldest first, after `cursor` (the key of the last event of the previous
+   * page). A key, not an offset: evictions and late inserts between pages can't shift events past the reader.
+   */
+  window(since: number, until: number, cursor: string | null, limit: number): { events: ReferralEvent[]; next: string | null } {
+    const after = cursor === null ? null : parseReferralCursor(cursor);
+    if (cursor !== null && after === null) throw new Error("bad cursor");
+    const all = this.ordered().filter((e) => e.timestamp >= since && e.timestamp < until && (after === null || compareEvents(e, after) > 0));
+    const events = all.slice(0, limit);
+    return { events, next: all.length > limit ? referralCursor(events[events.length - 1]) : null };
   }
 
   /** One callout's totals: every recorded referred buy, by trader (largest first, at most 50) and by coin. */

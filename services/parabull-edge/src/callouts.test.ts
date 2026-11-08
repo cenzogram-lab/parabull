@@ -148,6 +148,10 @@ test("POST /callouts: refused without a session, a holding, a Parabull coin, a g
   assert.equal(w.db.prepare("SELECT name FROM sqlite_master WHERE name = 'callouts'").all().length, 0);
   assert.equal((await w.call("PUT", "/callouts", { wallet: ALICE, body: {} })).status, 405);
   assert.equal((await w.call("POST", "/callouts/AbCdEfGhJkLm", { wallet: ALICE, body: {} })).status, 405);
+  // Reads have their own per-IP limit: they all reach the one store.
+  const limitedReads = world({ CALLOUT_READ_LIMITER: { limit: async () => ({ success: false }) } });
+  assert.equal((await limitedReads.call("GET", "/callouts")).status, 429);
+  assert.equal((await limitedReads.call("GET", "/callouts/AbCdEfGhJkLm")).status, 429);
   const pre = await handle(new Request("https://edge.test/callouts", { method: "OPTIONS", headers: { origin: APP } }), w.env);
   assert.equal(pre.headers.get("access-control-allow-headers"), "authorization, content-type");
 });

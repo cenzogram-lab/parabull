@@ -13,7 +13,7 @@ import { useWalletRewards } from "../hooks/useRewards";
 import { compact, countdown, sol, usd, usdCompact } from "../lib/format";
 import { leafHash, verifyProof } from "../lib/merkle";
 import { BPS, bpsLabel } from "../lib/protocolParams";
-import { checkBeforeClaim, hexToBytes, proofMatches, type RewardKind } from "../lib/rewardsClaim";
+import { checkBeforeClaim, claimRows, hexToBytes, proofMatches, type RewardKind } from "../lib/rewardsClaim";
 import { fromHex } from "../lib/sha256";
 import { buybackLedger, DEMO_WALLET, PARABULL_PRICE, PARABULL_SUPPLY, walletEpochs } from "../mock/protocol";
 import { useApp } from "../state/AppState";
@@ -88,7 +88,8 @@ function ChainClaimPanel() {
   const [busy, setBusy] = useState<number | null>(null);
   const allocations = rewards.data?.allocations ?? [];
   const bytes = wallet?.toBytes();
-  const rows: ClaimRow[] = allocations.slice(0, 12).map((a) => ({
+  // What can still be claimed comes first and is never cut off; then the newest of the rest, up to 12 rows in all.
+  const rows: ClaimRow[] = claimRows(allocations).map((a) => ({
     epoch: a.epoch,
     kind: a.kind,
     root: a.root,

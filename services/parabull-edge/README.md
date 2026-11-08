@@ -193,6 +193,7 @@ So the Stream API sees one list call and one lifecycle check per input every 15 
 - `UPLOAD_LIMITER`: 10 metadata uploads per minute per IP.
 - `CHAT_LIMITER`: 20 chat sign-ins and uploads per minute per IP.
 - `CHAT_CONNECT_LIMITER`: 60 chat socket handshakes per minute per IP.
+- `CALLOUT_READ_LIMITER`: 120 callout reads per minute per IP (they all reach the one `CalloutStore`).
 
 **Chat setup:**
 1. Set the chat session key, a secret rather than a variable:

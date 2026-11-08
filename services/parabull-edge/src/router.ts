@@ -60,6 +60,8 @@ export interface Env extends BroadcastEnv, CalloutEnv {
   CHAT_CONNECT_LIMITER?: RateLimiter;
   /** The one CalloutStore Durable Object (named CALLOUT_STORE): callouts in SQLite. */
   CALLOUTS?: ChatNamespace;
+  /** Per-IP limit on callout reads, which all reach that one object. */
+  CALLOUT_READ_LIMITER?: RateLimiter;
 }
 
 async function limited(limiter: RateLimiter | undefined, request: Request, scope: string): Promise<boolean> {
@@ -141,6 +143,7 @@ async function calloutsRoute(request: Request, env: Env, allow: Record<string, s
     return body.ok ? json(res.status, body.body, { ...allow, ...headers }) : json(res.status, { error: body.error }, allow);
   };
   if (request.method === "GET") {
+    if (await limited(env.CALLOUT_READ_LIMITER, request, "callout-read")) return json(429, { error: "too many requests, try again in a minute" }, { ...allow, "retry-after": "60" });
     if (one !== null) return isCalloutId(one) ? forward(new Request(`https://store/get?id=${one}`), { "cache-control": "public, max-age=30" }) : json(400, { error: "not a callout id" }, allow);
     return forward(new Request(`https://store/list${new URL(request.url).search}`), { "cache-control": "public, max-age=5" });
   }

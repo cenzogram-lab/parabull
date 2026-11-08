@@ -12,19 +12,26 @@
  *    callout exists, the buy is of the callout's coin, came after the callout was posted, wasn't made by the callout's
  *    author (no self-referral) and cost at least MIN_REFERRED_BUY_LAMPORTS. Each trader counts for at most
  *    PER_TRADER_CAP_LAMPORTS per caller, so one wallet can't make a caller's epoch.
- * 3. CALLER_EPOCH_LAMPORTS is split by counted volume, rounding down, with no caller above MAX_CALLER_SHARE_BPS of it
- *    and nothing under MIN_PAYOUT_LAMPORTS. What isn't paid out stays with the treasury. Only wallets
- *    claim_holder_reward can pay (system-owned) get a leaf.
+ * 3. CALLER_EPOCH_LAMPORTS is split by counted volume, rounding down. No caller gets more than MAX_CALLER_SHARE_BPS of
+ *    it, nor more than MAX_FEE_SHARE_BPS of the platform fees its counted buys paid: so buying through your own
+ *    callout from other wallets (and selling back) always costs more in fees than it can earn. Nothing under
+ *    MIN_PAYOUT_LAMPORTS is paid. What isn't paid out stays with the treasury. Only wallets claim_holder_reward can pay
+ *    (system-owned) get a leaf.
  * 4. One Merkle tree (src/merkle.ts, every proof checked), written as an artifact with `kind: "caller"`.
  * 5. --publish sends ONE transaction: the treasury's SystemProgram transfer of exactly the epoch's total into the holder
  *    vault, then publish_reward_epoch (crank). Atomic, so the holder snapshot never sees the top-up as distributable,
  *    and publish's own funding check passes on exactly that money. Unclaimed caller rewards, once the epoch is expired,
  *    go back to the vault's free balance, which the next holder snapshot distributes.
  *
+ * Windows are paid once: the published caller artifacts in the output directory are the ledger, and a window that
+ * overlaps one of them is refused. The window must have ended at least WINDOW_SETTLE_SECONDS ago, so the indexer has
+ * every buy in it. If the send fails, the epoch account is checked: an epoch that landed anyway is finalized, not paid
+ * again.
+ *
  * Upload the final artifact to REWARDS_BASE_URL (where the indexer and the app read epoch-<n>.json).
  */
 import { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction, sendAndConfirmTransaction, type Keypair } from "@solana/web3.js";
-import { mkdirSync, renameSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { isCalloutId, type CalloutJson } from "../../app/src/lib/callouts";
 import { loadKeypair, roles } from "./config";
@@ -51,6 +58,8 @@ export interface CallerRules {
   minBuyLamports: bigint;
   perTraderCapLamports: bigint;
   maxCallerShareBps: bigint;
+  /** At most this share of the platform fees a caller's counted buys paid (wash buying never pays). */
+  maxFeeShareBps: bigint;
   minPayoutLamports: bigint;
 }
 
@@ -58,6 +67,7 @@ export const DEFAULT_RULES: CallerRules = {
   minBuyLamports: 50_000_000n, // 0.05 SOL
   perTraderCapLamports: 10_000_000_000n, // 10 SOL per trader per caller
   maxCallerShareBps: 2_500n, // 25% of the epoch
+  maxFeeShareBps: 5_000n, // half the fees the counted buys paid
   minPayoutLamports: 10_000n,
 };
 
@@ -112,7 +122,10 @@ export function attribute(events: ReferralEvent[], callouts: Map<string, Callout
   return { callers, dropped };
 }
 
-/** Step 3: the budget split by counted volume (floor), capped per caller, small payouts dropped. Sum <= budget. */
+/**
+ * Step 3: the budget split by counted volume (floor), capped per caller at a share of the epoch and at a share of the
+ * fees its counted buys paid; small payouts dropped. Sum <= budget.
+ */
 export function allocateCallers(callers: CallerStats[], budget: bigint, rules: CallerRules): { caller: string; amount: bigint }[] {
   const total = callers.reduce((s, c) => s + c.countedLamports, 0n);
   if (total === 0n || budget === 0n) return [];
@@ -120,7 +133,9 @@ export function allocateCallers(callers: CallerStats[], budget: bigint, rules: C
   return callers
     .map((c) => {
       const share = (budget * c.countedLamports) / total;
-      return { caller: c.caller, amount: share < cap ? share : cap };
+      const feeCap = (c.feeLamports * rules.maxFeeShareBps) / 10_000n;
+      const amount = [share, cap, feeCap].reduce((m, x) => (x < m ? x : m));
+      return { caller: c.caller, amount };
     })
     .filter((x) => x.amount > 0n && x.amount >= rules.minPayoutLamports)
     .sort((a, b) => (a.amount === b.amount ? (a.caller < b.caller ? -1 : 1) : a.amount > b.amount ? -1 : 1));
@@ -193,6 +208,37 @@ export async function publishInstructions(
   return [SystemProgram.transfer({ fromPubkey: a.funder, toPubkey: vault, lamports: a.total }), publish];
 }
 
+/** How long after a window ends before it can be paid: the indexer has polled every buy in it by then. */
+export const WINDOW_SETTLE_SECONDS = 600;
+
+/** A window that can be paid now: ordered, ended at least WINDOW_SETTLE_SECONDS ago. Throws with the reason. */
+export function checkWindow(since: number, until: number, nowSec: number): void {
+  if (until <= since) throw new Error("--until must be after --since");
+  if (until > nowSec - WINDOW_SETTLE_SECONDS) throw new Error(`the window must have ended at least ${WINDOW_SETTLE_SECONDS / 60} minutes ago, so every buy in it is indexed`);
+}
+
+/** The windows already paid: every published caller artifact (one with a publish signature) in `dir`. */
+export function paidWindows(dir: string): { epoch: number; since: number; until: number }[] {
+  if (!existsSync(dir)) return [];
+  const out: { epoch: number; since: number; until: number }[] = [];
+  for (const f of readdirSync(dir)) {
+    if (!/^epoch-\d+\.json$/.test(f)) continue;
+    try {
+      const a = JSON.parse(readFileSync(resolve(dir, f), "utf8")) as Partial<CallerArtifact>;
+      if (a.kind === "caller" && a.publishSignature && a.window) out.push({ epoch: Number(a.epoch), since: a.window.since, until: a.window.until });
+    } catch {
+      throw new Error(`can't read ${f}: the paid-window ledger must be readable`);
+    }
+  }
+  return out;
+}
+
+/** Refuses a window that overlaps one already paid. */
+export function checkNotPaid(since: number, until: number, paid: { epoch: number; since: number; until: number }[]): void {
+  const hit = paid.find((w) => since < w.until && w.since < until);
+  if (hit) throw new Error(`caller epoch ${hit.epoch} already paid ${new Date(hit.since * 1000).toISOString()} .. ${new Date(hit.until * 1000).toISOString()}, which overlaps this window`);
+}
+
 /** "2026-11-01", "2026-11-01T12:00:00Z" or unix seconds -> unix seconds. */
 export function parseTime(v: string): number {
   if (/^\d{9,11}$/.test(v)) return Number(v);
@@ -227,14 +273,14 @@ async function getJson<T>(fetchImpl: typeof fetch, url: string, headers: Record<
 export async function loadReferrals(o: Pick<CallerEpochOptions, "since" | "until" | "indexerUrl" | "edgeUrl" | "calloutsOrigin" | "fetchImpl">) {
   const fetchImpl = o.fetchImpl ?? fetch;
   const events: ReferralEvent[] = [];
-  let cursor: string | null = "0";
+  let cursor: string | null = null;
   let coveredFrom: number | null = null;
-  while (cursor !== null) {
-    const page: { events: ReferralEvent[]; next: string | null; coveredFrom: number | null } = await getJson(fetchImpl, `${o.indexerUrl}/referrals?since=${o.since}&until=${o.until}&limit=5000&cursor=${cursor}`);
+  do {
+    const page: { events: ReferralEvent[]; next: string | null; coveredFrom: number | null } = await getJson(fetchImpl, `${o.indexerUrl}/referrals?since=${o.since}&until=${o.until}&limit=5000${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
     events.push(...page.events);
     coveredFrom = page.coveredFrom;
     cursor = page.next;
-  }
+  } while (cursor !== null);
   if (coveredFrom !== null && coveredFrom > o.since) {
     throw new Error(`the indexer's referral record starts at ${new Date(coveredFrom * 1000).toISOString()}, after the window's start: raise its BACKFILL_LIMIT, or start the window later`);
   }
@@ -263,7 +309,9 @@ async function eligible(connection: Connection, wallets: string[]): Promise<Set<
 export async function runCallerEpoch(o: CallerEpochOptions) {
   const log = o.log ?? console.log;
   const rules = o.rules ?? DEFAULT_RULES;
-  if (o.until <= o.since) throw new Error("--until must be after --since");
+  checkWindow(o.since, o.until, Math.floor(Date.now() / 1000));
+  const outDir = o.outDir ?? resolve(__dirname, "../snapshots");
+  checkNotPaid(o.since, o.until, paidWindows(outDir));
   if (o.budgetLamports <= 0n) throw new Error("CALLER_EPOCH_LAMPORTS must be positive");
   const { crank, admin } = roles();
   const { connection, program, pdas } = connect(crank);
@@ -287,7 +335,6 @@ export async function runCallerEpoch(o: CallerEpochOptions) {
   const epoch = Number(vault.nextEpoch);
   const snapshotSlot = await connection.getSlot("confirmed");
   const { artifact, root, total } = buildCallerArtifact(epoch, payouts, stats, { snapshotSlot, window: { since: o.since, until: o.until }, rules, dropped, funder: funder.publicKey });
-  const outDir = o.outDir ?? resolve(__dirname, "../snapshots");
   mkdirSync(outDir, { recursive: true });
   const draft = resolve(outDir, `epoch-${epoch}.draft.json`);
   writeFileSync(draft, JSON.stringify(artifact));
@@ -298,7 +345,16 @@ export async function runCallerEpoch(o: CallerEpochOptions) {
   if (balance < total + 10_000_000n) throw new Error(`the treasury has ${balance} lamports; the epoch needs ${total} plus fees`);
   const ixs = await publishInstructions(program, pdas, { funder: funder.publicKey, crank: crank.publicKey, epoch, root, total, numLeaves: artifact.numLeaves, snapshotSlot });
   const signers = [crank, funder].filter((k, i, a) => a.findIndex((x) => x.publicKey.equals(k.publicKey)) === i);
-  const sig = await sendAndConfirmTransaction(connection, new Transaction().add(...ixs), signers, { commitment: "confirmed" });
+  let sig: string;
+  try {
+    sig = await sendAndConfirmTransaction(connection, new Transaction().add(...ixs), signers, { commitment: "confirmed" });
+  } catch (e) {
+    // A confirmation timeout can hide a transaction that landed: look before anyone retries (and pays again).
+    const landed = await program.account.rewardEpoch.fetchNullable(pdas.rewardEpoch(epoch));
+    if (!landed || !Buffer.from(landed.merkleRoot).equals(root)) throw e;
+    log(`the send reported an error, but epoch ${epoch} is on-chain with this root: finalizing`);
+    sig = "landed (confirmation lost)";
+  }
   const onChain = await program.account.rewardEpoch.fetch(pdas.rewardEpoch(epoch));
   if (!Buffer.from(onChain.merkleRoot).equals(root) || big(onChain.totalLamports) !== total) throw new Error(`epoch ${epoch}: on-chain root/total mismatch`);
   artifact.publishSignature = sig;
@@ -332,6 +388,7 @@ if (require.main === module) {
           minBuyLamports: BigInt(process.env.MIN_REFERRED_BUY_LAMPORTS ?? DEFAULT_RULES.minBuyLamports),
           perTraderCapLamports: BigInt(process.env.PER_TRADER_CAP_LAMPORTS ?? DEFAULT_RULES.perTraderCapLamports),
           maxCallerShareBps: BigInt(process.env.MAX_CALLER_SHARE_BPS ?? DEFAULT_RULES.maxCallerShareBps),
+          maxFeeShareBps: BigInt(process.env.MAX_FEE_SHARE_BPS ?? DEFAULT_RULES.maxFeeShareBps),
           minPayoutLamports: BigInt(process.env.MIN_PAYOUT_LAMPORTS ?? DEFAULT_RULES.minPayoutLamports),
         },
       }),

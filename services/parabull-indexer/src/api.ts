@@ -11,7 +11,8 @@
  *   GET /tickets/:ticket                 TicketJson
  *   GET /tickets?payer=                  { tickets: TicketJson[] } most recent first
  *   GET /referrals/:calloutId            { calloutId, buys, volumeLamports, feeLamports, traders, byTrader, byMint, firstAt, lastAt }
- *   GET /referrals?since=&until=&cursor=&limit=   { events, next, coveredFrom } referred buys, oldest first (unix seconds)
+ *   GET /referrals?since=&until=&cursor=&limit=   { events, next, coveredFrom } referred buys, oldest first (unix seconds;
+ *                                        `next` is the last event's key, so paging never skips events)
  *   GET /rewards                         { epochs, totals, vault } every reward epoch and its artifact's state
  *   GET /rewards/:wallet                 { wallet, allocations, unclaimedLamports, unverifiedEpochs } with proofs
  *   GET /stream[?mint=]                  WebSocket: { type: "coin", coin } | { type: "trade", trade } | { type: "ticket", ticket }
@@ -23,7 +24,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { isAddress } from "../../../app/src/lib/chatMessage";
 import { isCalloutId } from "../../../app/src/lib/callouts";
-import { referralJson } from "./referrals";
+import { parseReferralCursor, referralJson } from "./referrals";
 import type { Indexer } from "./indexer";
 import { CANDLE_INTERVALS, candlesOf, coinJson, mcapOf, progressOf, statusOf, ticketJson, tradeCursor, tradeJson, type CoinJson, type CoinRecord, type CoinStatus, type TradeRecord } from "./model";
 import { RpcError } from "./rpc";
@@ -239,10 +240,9 @@ export class Api {
         const since = time(q.get("since"), 0);
         const until = time(q.get("until"), Number.MAX_SAFE_INTEGER);
         const cursor = q.get("cursor");
-        const offset = cursor === null ? 0 : Number(cursor);
-        if (!Number.isInteger(offset) || offset < 0) throw new HttpError(400, "bad cursor");
-        const w = ix.referrals.window(since, until, offset, intParam(q.get("limit"), 1000, 5000));
-        return this.send(req, res, 200, { events: w.events.map(referralJson), next: w.next === null ? null : String(w.next), coveredFrom: ix.referralsCoveredFrom() });
+        if (cursor !== null && !parseReferralCursor(cursor)) throw new HttpError(400, "bad cursor");
+        const w = ix.referrals.window(since, until, cursor, intParam(q.get("limit"), 1000, 5000));
+        return this.send(req, res, 200, { events: w.events.map(referralJson), next: w.next, coveredFrom: ix.referralsCoveredFrom() });
       }
       if (parts[0] === "rewards" && parts.length === 1) return this.send(req, res, 200, ix.rewards.summary(), "public, max-age=10");
       if (parts[0] === "rewards" && parts.length === 2) {
