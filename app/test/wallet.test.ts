@@ -127,3 +127,32 @@ test("Path A: which sign-in a build offers", () => {
   assert.equal(resolveIiMode({ ...base, dev: true }).kind, "mock-signer");
   assert.equal(resolveIiMode({ ...base, cluster: "localnet" }).kind, "offline");
 });
+
+test("connect dialog: Phantom and Solflare are detected from their injected providers", async () => {
+  const { WALLET_BRANDS } = await import("../src/wallet/brands");
+  const [phantom, solflare] = WALLET_BRANDS;
+  assert.deepEqual(WALLET_BRANDS.map((b) => b.name), ["Phantom", "Solflare"]);
+  assert.equal(phantom.install, "https://phantom.com/download");
+  assert.equal(solflare.install, "https://solflare.com/download");
+  assert.match(phantom.icon ?? "", /^data:image\/svg\+xml;base64,/, "Phantom's official icon is embedded");
+  assert.equal(solflare.icon, null, "Solflare's icon comes from its registered adapter");
+  const g = globalThis as unknown as { window?: unknown };
+  const had = "window" in g;
+  const saved = g.window;
+  try {
+    g.window = {};
+    assert.equal(phantom.injected(), false);
+    assert.equal(solflare.injected(), false);
+    g.window = { phantom: { solana: { isPhantom: true } } };
+    assert.equal(phantom.injected(), true, "window.phantom.solana");
+    g.window = { solana: { isPhantom: true } };
+    assert.equal(phantom.injected(), true, "legacy window.solana");
+    g.window = { solana: { isPhantom: false } };
+    assert.equal(phantom.injected(), false, "another wallet on window.solana isn't Phantom");
+    g.window = { solflare: { isSolflare: true } };
+    assert.equal(solflare.injected(), true, "window.solflare");
+  } finally {
+    if (had) g.window = saved;
+    else delete g.window;
+  }
+});

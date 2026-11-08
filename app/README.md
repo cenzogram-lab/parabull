@@ -313,9 +313,15 @@ The connect dialog (`src/components/ConnectModal.tsx`) replaces the wallet adapt
   - Anyone who knows a principal can rebuild its development key, so never fund one.
 
 **Path B: native Solana.**
-- **Browser wallets.** Detected Wallet Standard wallets (Phantom, Solflare, Backpack) are listed, plus Solflare's web
-  wallet.
-- **"Import Private Key (Disposable / Fast Execution)".**
+Everything below sits on the dialog's first screen, under the Internet Identity button; nothing is behind a sub-menu.
+- **Phantom and Solflare.** A dedicated button each, in the wallet's own colours and icon (`src/wallet/brands.ts`).
+  - Detected extension (a registered `Installed` adapter, or `window.phantom.solana` / `window.solana` with `isPhantom`,
+    or `window.solflare.isSolflare`): the button connects in one click and reads "Detected · 1-click".
+  - Not installed: the button is a link to the wallet's download page, opened in a new tab.
+- **Other wallets.** Any other detected Wallet Standard wallet (Backpack, ...) and, without the Solflare extension,
+  Solflare's web wallet are listed below.
+- **"Import Private Key (Ephemeral)".** Opens a Base58 paste box (focused) with an "Import & Start Trading" button and
+  the memory-only warning.
   - Accepts a base58 private key or a `solana-keygen` JSON array, checked with `Keypair.fromSecretKey`.
   - The key is held only in this tab's memory: it is never written to localStorage or sessionStorage, and reloading or
     closing the tab forgets it.
