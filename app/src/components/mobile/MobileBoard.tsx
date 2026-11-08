@@ -1,5 +1,5 @@
 /**
- * Mobile board (below md, spec 2A): a compact King of the Bull card, then a
+ * Mobile board (below md, spec 2A): a compact King of the Bull card, the "Live now" streams, then a
  * sticky Movers / New / Soon / Graduated tab row with the quick filters and
  * the row-density toggle, then the coin cards.
  */
@@ -12,6 +12,7 @@ import { progressOf } from "../../mock/coins";
 import { kingOf, useMarket } from "../../state/Market";
 import { BullMark } from "../brand/BullMark";
 import { Meter } from "../ui/visuals";
+import { LiveNowStrip } from "./MobileLiveStrip";
 import { CoinFilterButton, filterCount, MobileCoinFilterSheet, NO_FILTERS, passesFilters, type CoinFilters } from "./MobileCoinFilters";
 import { FilterSummary, MobileCoinList, RowDensityButton, useListTop, useRemembered } from "./MobileCoinList";
 import { shortUsd, useRowDensity } from "./MobileCoinRow";
@@ -110,6 +111,7 @@ export function MobileBoard() {
           <KingCard coin={king} />
         </div>
       )}
+      <LiveNowStrip />
       <div ref={listTop} className="h-2" />
       <MobileTabs
         sticky
