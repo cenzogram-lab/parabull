@@ -13,6 +13,7 @@ import type { Parabull } from "../idl/parabull";
 import { launchWaitDeadline } from "../lib/launchRules";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, ata2022, Pdas, TOKEN_2022_PROGRAM_ID } from "../lib/pdas";
 import { quoteBuyWithSol, quoteSellTokens } from "../lib/quote";
+import { buyMethod } from "../lib/buy";
 import { useUnifiedWallet } from "../wallet/UnifiedWallet";
 
 const idl = idlJson as unknown as Parabull;
@@ -121,11 +122,14 @@ export function useParabullProgram() {
     [pdas],
   );
 
-  /** `buy(amount, max_sol_cost)`: exact tokens, total cost (incl. 1% fee) capped. */
+  /**
+   * `buy(amount, max_sol_cost)`: exact tokens, total cost (incl. 1% fee) capped. `refCalloutId` adds the referral Memo
+   * instruction after it (src/lib/referral.ts).
+   */
   const buy = useCallback(
-    async (mint: PublicKey, tokens: bigint, maxSolCost: bigint) => {
+    async (mint: PublicKey, tokens: bigint, maxSolCost: bigint, refCalloutId: string | null = null) => {
       const w = requireWallet();
-      return program.methods.buy(bn(tokens), bn(maxSolCost)).accountsStrict(tradeAccounts(mint, w.publicKey)).rpc();
+      return buyMethod(program, tradeAccounts(mint, w.publicKey), bn(tokens), bn(maxSolCost), refCalloutId).rpc();
     },
     [program, requireWallet, tradeAccounts],
   );

@@ -259,7 +259,13 @@ const STEP_AVATAR: Record<number, number> = { 2: 60, 3: 52, 4: 44 };
 /** Top four: a full-width #1 plaque, then #2-#4 stepping down beneath it. */
 export function Podium({ entries, label, word, onOpen, className }: { entries: Entry[]; label: string; word: string; onOpen: (e: Entry, rank: number) => void; className?: string }) {
   const [first, ...rest] = entries.slice(0, 4);
-  if (!first) return null;
+  if (!first)
+    return (
+      <section aria-label="Top 4" className={cx("rounded-2xl border border-line bg-surface px-4 py-8 text-center", className)}>
+        <p className="text-[14.5px] font-semibold text-cream">No rankings yet</p>
+        <p className="mt-1 text-[12.5px] leading-[18px] text-muted">Rankings appear once there's activity to rank. Callouts can be posted now, from any coin's Callouts tab.</p>
+      </section>
+    );
   const aria = (e: Entry, rank: number) => `Rank ${rank}, ${e.you ? "you" : e.name}: ${fmtUsd(e.value, e.money)} ${word}. ${e.you ? "Open your portfolio" : "Details"}`;
   return (
     <section aria-label="Top 4" className={cx("relative", className)}>

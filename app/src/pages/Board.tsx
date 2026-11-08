@@ -252,12 +252,24 @@ function Trending() {
   );
 }
 
+/** No callouts at all yet (a fresh deployment): how to make the first. */
+function CalloutsEmpty() {
+  return (
+    <div className="flex flex-col items-center gap-2 px-6 py-12 text-center">
+      <Megaphone className="h-7 w-7 text-copper" aria-hidden />
+      <p className="text-[14.5px] font-semibold text-cream">No callouts yet</p>
+      <p className="max-w-xs text-[13px] text-muted">A callout is a public call on a coin you hold. Post one from any coin's Callouts tab, then share its link.</p>
+    </div>
+  );
+}
+
 function HotCallouts() {
   const { callouts, traders, byMint } = useMarket();
   return (
     <Panel className="h-[660px]">
       <PanelHeader icon={Megaphone} title="Hot callouts" />
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {!callouts.length && <CalloutsEmpty />}
         {callouts.map((c) => (
           <CalloutCard key={c.id} callout={c} trader={traders.find((t) => t.handle === c.handle)} coin={byMint.get(c.mint)} dense />
         ))}
@@ -342,7 +354,7 @@ function ClassicBoard() {
         {posts.map((c) => (
           <CalloutCard key={c.id} callout={c} trader={traders.find((t) => t.handle === c.handle)} coin={byMint.get(c.mint)} />
         ))}
-        {all.length === 0 && <p className="py-10 text-center text-[14px] text-muted">No updates yet from traders you follow.</p>}
+        {all.length === 0 && (feed === "Following" ? <p className="py-10 text-center text-[14px] text-muted">No updates yet from traders you follow.</p> : <CalloutsEmpty />)}
         {/* Only while there is more to show; each click adds a page. */}
         {posts.length < all.length && (
           <button type="button" onClick={() => setShown((n) => nextFeedCount(n, all.length))} className="mt-4 text-[14px] font-semibold text-gold hover:underline">

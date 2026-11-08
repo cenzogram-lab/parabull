@@ -20,7 +20,6 @@ test("IC hosting: connect-src covers the configured endpoints, hosted RPCs, webs
     VITE_RPC_URL: "https://my-node.example.com/rpc?token=secret",
     VITE_SENTINEL_URL: "https://sentinel.example.com",
     VITE_METADATA_UPLOAD_URL: "https://upload.example.com/pin",
-    VITE_REWARDS_BASE_URL: "https://rewards.example.com/epochs/",
   });
   for (const s of [
     "'self'",
@@ -28,7 +27,6 @@ test("IC hosting: connect-src covers the configured endpoints, hosted RPCs, webs
     "wss://my-node.example.com",
     "https://sentinel.example.com",
     "https://upload.example.com",
-    "https://rewards.example.com",
     "https://api.devnet.solana.com",
     "wss://api.mainnet-beta.solana.com",
     "https://*.helius-rpc.com",

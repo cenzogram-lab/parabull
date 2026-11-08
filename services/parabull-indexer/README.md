@@ -23,6 +23,14 @@ signs nothing and holds no keys.
   The two are deduplicated by signature.
 - **On-demand lookups.** A coin created since the last poll is found by its curve PDA when someone asks for it, so a
   just-launched coin's page never says "Coin not found".
+- **Referred buys** (`src/memo.ts`, `src/referrals.ts`). A buy whose transaction has a top-level
+  `parabull:ref:<calloutId>` SPL Memo is recorded for that callout, from the same logs as its `TradeEvent`. Served
+  per callout and by time window (`/referrals`) for `scripts/src/callerEpoch.ts`.
+- **Reward epochs** (`src/rewards.ts`). Every `RewardEpoch` account (root, total, claimed bitmap, expiry) and the
+  snapshot file it was published from (`REWARDS_BASE_URL/epoch-<n>.json`).
+  - Each file's tree is rebuilt and checked against the on-chain root before any allocation is served.
+  - Proofs come from that rebuilt tree, never from the file.
+  - Claims show at once from `HolderRewardClaimed` and are confirmed by the bitmap on the next sync.
 
 Everything is rebuilt from the chain on start (in memory, `src/store.ts`). See the spec's §5.3 for limits.
 
@@ -45,6 +53,8 @@ RPC_URL=https://your-rpc.example.com npm start
 | `POLL_MS`, `CURVES_MS`, `TICKETS_MS`, `HOLDERS_MS` | `3000`, `30000`, `15000`, `120000` | |
 | `RPC_REQUESTS_PER_MINUTE` | `60` | Per-IP limit on requests that reach the RPC (holders, portfolio, not-yet-indexed coins). |
 | `TRUST_PROXY` | off | `1` takes the client IP from `X-Forwarded-For` (only behind your own proxy). |
+| `REWARDS_BASE_URL` | none | Where `epoch-<n>.json` snapshot files are served (from `scripts/src/snapshot.ts` and `callerEpoch.ts`). Unset, epochs are listed but no allocations are served. |
+| `REWARDS_MS` | `60000` | Reward-epoch sync cadence. |
 
 Then build the app with `VITE_INDEXER_URL=https://indexer.example.com`. The app's CSP `connect-src` picks up its
 `https://` and `wss://` origins.

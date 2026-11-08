@@ -8,6 +8,9 @@
  *   GET     /chat/:mint    websocket into that coin's ChatRoom (src/chatRoom.ts)
  *   GET     /live          coins streaming now on Cloudflare Stream, with their HLS URLs (src/live.ts)
  *   POST    /live/input    the coin creator's Stream live input: RTMPS / SRT stream keys (src/broadcast.ts)
+ *   GET     /callouts      callouts, newest first (mint= / author= / ids= / before=), src/callouts.ts
+ *   POST    /callouts      a callout on a coin the signed-in wallet holds (Bearer session token)
+ *   GET     /callouts/:id  one callout
  *   OPTIONS               CORS preflight for the POST routes
  *   GET     /health        "ok"
  *
@@ -21,6 +24,8 @@ import type { BroadcastEnv, BroadcastResult } from "./broadcast";
 import { LIVE_INPUT_PATH, LIVE_INPUT_ROOM } from "./chatRoom";
 import { liveStreams } from "./live";
 import { createSession, verifyToken } from "./session";
+import { CALLOUT_STORE, checkCallout, type CalloutEnv } from "./callouts";
+import { isCalloutId, normalizeCalloutText } from "../../../app/src/lib/callouts";
 
 /** Cloudflare's rate limiting binding ([[ratelimits]] in wrangler.toml). */
 export interface RateLimiter {
@@ -33,7 +38,7 @@ export interface ChatNamespace {
   get(id: unknown): { fetch(request: Request): Promise<Response> };
 }
 
-export interface Env extends BroadcastEnv {
+export interface Env extends BroadcastEnv, CalloutEnv {
   /** R2 bucket, public through a custom domain (MEDIA_PUBLIC_URL). */
   MEDIA: MediaBucket;
   /** https base the bucket is served from, e.g. https://media.parabull.xyz. */
@@ -53,6 +58,10 @@ export interface Env extends BroadcastEnv {
    * how many rooms one client can open; rooms allocate storage only when a signed-in wallet posts.
    */
   CHAT_CONNECT_LIMITER?: RateLimiter;
+  /** The one CalloutStore Durable Object (named CALLOUT_STORE): callouts in SQLite. */
+  CALLOUTS?: ChatNamespace;
+  /** Per-IP limit on callout reads, which all reach that one object. */
+  CALLOUT_READ_LIMITER?: RateLimiter;
 }
 
 async function limited(limiter: RateLimiter | undefined, request: Request, scope: string): Promise<boolean> {
@@ -118,11 +127,55 @@ async function uploadRoute(request: Request, env: Env, allow: Record<string, str
   return json(200, { url: `${base}/${key}` }, allow);
 }
 
+/**
+ * GET /callouts, GET /callouts/:id and POST /callouts. Reads go straight to the store; a post is checked first
+ * (session, per-IP limit, text, the wallet's holding and the coin's market cap) and the store applies the per-wallet
+ * limits.
+ */
+async function calloutsRoute(request: Request, env: Env, allow: Record<string, string>, origin: string, pathname: string, now: number, fetchImpl: typeof fetch): Promise<Response> {
+  const one = pathname.startsWith("/callouts/") ? pathname.slice("/callouts/".length) : null;
+  if (request.method === "OPTIONS") return preflight(origin, one === null ? "GET, POST" : "GET", "authorization, content-type");
+  if (!env.CALLOUTS) return json(503, { error: "callouts are not configured" }, allow);
+  const store = env.CALLOUTS.get(env.CALLOUTS.idFromName(CALLOUT_STORE));
+  const forward = async (r: Request, headers: Record<string, string> = {}) => {
+    const res = await store.fetch(r);
+    const body = (await res.json()) as { ok: boolean; body?: unknown; error?: string };
+    return body.ok ? json(res.status, body.body, { ...allow, ...headers }) : json(res.status, { error: body.error }, allow);
+  };
+  if (request.method === "GET") {
+    if (await limited(env.CALLOUT_READ_LIMITER, request, "callout-read")) return json(429, { error: "too many requests, try again in a minute" }, { ...allow, "retry-after": "60" });
+    if (one !== null) return isCalloutId(one) ? forward(new Request(`https://store/get?id=${one}`), { "cache-control": "public, max-age=30" }) : json(400, { error: "not a callout id" }, allow);
+    return forward(new Request(`https://store/list${new URL(request.url).search}`), { "cache-control": "public, max-age=5" });
+  }
+  if (request.method !== "POST" || one !== null) return json(405, { error: "method not allowed" }, { ...allow, allow: one === null ? "GET, POST, OPTIONS" : "GET, OPTIONS" });
+  const auth = request.headers.get("authorization") ?? "";
+  const session = auth.startsWith("Bearer ") ? await verifyToken(env.CHAT_SECRET, auth.slice(7), now) : null;
+  if (!session) return json(401, { error: "sign in with your wallet first" }, allow);
+  if (await limited(env.CHAT_LIMITER, request, "callout")) return json(429, { error: "too many requests, try again in a minute" }, { ...allow, "retry-after": "60" });
+  const body = await readJson(request, 4_096);
+  if (body === null) return json(400, { error: "expected a small JSON body" }, allow);
+  const { mint, text: raw } = body as { mint?: unknown; text?: unknown };
+  if (!isAddress(mint)) return json(400, { error: "mint must be a Solana address" }, allow);
+  const text = normalizeCalloutText(raw);
+  if (!text) return json(400, { error: "write 1-280 characters" }, allow);
+  const checked = await checkCallout(env, session.wallet, mint, text, fetchImpl);
+  if (!checked.ok) return json(checked.status, { error: checked.error }, allow);
+  return forward(new Request("https://store/post", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(checked.callout) }));
+}
+
 /** `fetchImpl` reaches the Stream API and lifecycle endpoints (tests and the local harness pass a stand-in). */
 export async function handle(request: Request, env: Env, now = Date.now(), fetchImpl: typeof fetch = fetch): Promise<Response> {
   const { pathname } = new URL(request.url);
   if (pathname === "/health" && request.method === "GET") return new Response("ok", { headers: { "cache-control": "no-store" } });
-  const route = pathname === "/live/input" ? "broadcast" : pathname === "/live" ? "live" : pathname === "/metadata" ? "metadata" : pathname === "/chat/session" ? "session" : pathname === "/chat/upload" ? "upload" : /^\/chat\/[^/]+$/.test(pathname) ? "room" : null;
+  const route =
+    pathname === "/live/input" ? "broadcast"
+    : pathname === "/live" ? "live"
+    : pathname === "/metadata" ? "metadata"
+    : pathname === "/chat/session" ? "session"
+    : pathname === "/chat/upload" ? "upload"
+    : /^\/chat\/[^/]+$/.test(pathname) ? "room"
+    : pathname === "/callouts" || /^\/callouts\/[^/]+$/.test(pathname) ? "callouts"
+    : null;
   if (!route) return json(404, { error: "not found" });
 
   const origin = request.headers.get("origin") ?? "";
@@ -136,6 +189,8 @@ export async function handle(request: Request, env: Env, now = Date.now(), fetch
     // Short shared caching: every viewer of /live polls this, and the Worker caches the upstream answer too.
     return result.ok ? json(200, { streams: result.streams }, { ...allow, "cache-control": "public, max-age=15" }) : json(result.status, { error: result.error, streams: [] }, allow);
   }
+
+  if (route === "callouts") return calloutsRoute(request, env, allow, origin, pathname, now, fetchImpl);
 
   if (route === "broadcast") {
     if (request.method === "OPTIONS") return preflight(origin, "POST", "authorization, content-type");

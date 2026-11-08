@@ -38,13 +38,12 @@ interface AppState {
   /** Edit the recently viewed list (`recent`). */
   removeRecent: (mint: string) => void;
   clearRecent: () => void;
-  /** Holder-reward epochs a wallet (base58) has claimed this visit, shared by the claim panel, notifications and Portfolio; every wallet starts with #4 and #5, as the claim panel always has. */
+  /** Demo mode: holder-reward epochs a wallet (base58) claimed this visit, shared by the claim panel, notifications and Portfolio. Chain mode reads claims from the chain instead. */
   claimedFor: (wallet: string) => ReadonlySet<number>;
   markClaimed: (wallet: string, epoch: number) => void;
 }
 
-/** What every wallet starts with: the claim panel has always shown epochs #4 and #5 as claimed. */
-const STARTING_CLAIMS: ReadonlySet<number> = new Set([4, 5]);
+const NO_CLAIMS: ReadonlySet<number> = new Set();
 
 const Ctx = createContext<AppState | null>(null);
 
@@ -105,8 +104,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const clearSearchHistory = useCallback(() => setSearchHistory([]), []);
   const removeRecent = useCallback((mint: string) => setRecent((r) => r.filter((m) => m !== mint)), []);
   const clearRecent = useCallback(() => setRecent([]), []);
-  const claimedFor = useCallback((wallet: string) => claims.get(wallet) ?? STARTING_CLAIMS, [claims]);
-  const markClaimed = useCallback((wallet: string, epoch: number) => setClaims((m) => new Map(m).set(wallet, new Set(m.get(wallet) ?? STARTING_CLAIMS).add(epoch))), []);
+  const claimedFor = useCallback((wallet: string) => claims.get(wallet) ?? NO_CLAIMS, [claims]);
+  const markClaimed = useCallback((wallet: string, epoch: number) => setClaims((m) => new Map(m).set(wallet, new Set(m.get(wallet) ?? NO_CLAIMS).add(epoch))), []);
 
   const value = useMemo<AppState>(
     () => ({

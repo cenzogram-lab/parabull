@@ -113,7 +113,6 @@ export interface HeaderEnv {
   VITE_RPC_URL?: string;
   VITE_SENTINEL_URL?: string;
   VITE_METADATA_UPLOAD_URL?: string;
-  VITE_REWARDS_BASE_URL?: string;
   /** Public R2 domain media is served from (services/parabull-edge). */
   VITE_MEDIA_URL?: string;
   /** Coin chat endpoint (wss://), a Durable Object behind the edge Worker. */
@@ -132,7 +131,6 @@ export function connectSources(env: HeaderEnv): string[] {
     rpcWebsocketOrigin(rpc),
     originOf(env.VITE_SENTINEL_URL),
     originOf(env.VITE_METADATA_UPLOAD_URL),
-    originOf(env.VITE_REWARDS_BASE_URL),
     originOf(env.VITE_MEDIA_URL),
     ...socketOrigins(env.VITE_CHAT_URL),
     // The indexer's REST API and its /stream websocket.

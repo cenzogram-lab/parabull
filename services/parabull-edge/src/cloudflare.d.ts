@@ -12,6 +12,8 @@ declare module "cloudflare:workers" {
 
 interface DurableObjectState {
   setWebSocketAutoResponse(pair: WebSocketRequestResponsePair): void;
+  /** The object's storage; its `sql` (SQLite) is what ChatRoomCore and CalloutStoreCore use. */
+  storage: unknown;
 }
 
 declare class WebSocketRequestResponsePair {

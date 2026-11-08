@@ -19,7 +19,8 @@ npm run dev          # http://localhost:5173
 | `/`, `/board` | Board: King of the Bull hero, then either **Terminal Pro** (Pro Screener with New / Soon / Graduated / Movers, a Filters menu for verified locks, X or website and a minimum market cap, and Expand to give it the whole row; Trending, Hot callouts, Leaderboard) or **Classic** (For you / Following feed, six callouts at a time with Show more updates, plus Movers / Trending cards). Each callout has a Follow toggle and a More menu (view the coin, copy its link, share) |
 | `/explore` | Explore table (sparkline, MCAP, ATH, AGE, TRADES, 24H VOL, TRADERS, 1H / 6H / 24H, sortable) or grid. Range filters and a "Verified locks only" toggle |
 | `/create` | Launch flow: a modal over the current page, or a full page when opened directly. Live name-lock key, ticker and tweet parsing, lock pre-check, itemized 0.230 SOL ticket, live preview, and the 3–15 s anti-bundle delay |
-| `/coin/:mint` | Trading terminal: lock countdowns, metrics, candles (`1s`–`D`, Price/MCap), bonding-curve and DexScreener gauges, Trades / Holders / Callouts / **Chat** tabs (the coin's live chat, see below), Buy/Sell panel, stats and audit |
+| `/coin/:mint` | Trading terminal: lock countdowns, metrics, candles (`1s`–`D`, Price/MCap), bonding-curve and DexScreener gauges, Trades / Holders / Callouts (with a composer for holders) / **Chat** tabs (the coin's live chat, see below), Buy/Sell panel, stats and audit |
+| `/c/:id` | A callout's share link: remembers the callout as the referral for its coin (24 h) and opens the coin. Buys of that coin then carry its referral memo |
 | `/leaderboard` | Traders / Squads / Rewards / Best Callouts, top-4 podium, 1D/1W/1M, Profit/Volume, Best callouts rail |
 | `/portfolio` | Your profile, net equity with a 1D / 1W / 1M / ALL curve, then Open / Closed / Replies / Rewards and Deposit / Receive. On desktop it's a centered column |
 | `/search` | Recent searches and recently viewed coins at rest, coin and creator results as you type. On desktop it's a centered column; ⌘K still opens the overlay there |
@@ -121,7 +122,6 @@ Set these in `app/.env.local` (see `src/config.ts`):
 | `VITE_CLUSTER` | `devnet` | `devnet`, `mainnet-beta` or `localnet` (explorer links, default RPC) |
 | `VITE_RPC_URL` | the cluster's public RPC | Your RPC endpoint |
 | `VITE_METADATA_UPLOAD_URL` | unset | Backend that stores the image and metadata JSON and returns `{ uri }`: the [`services/parabull-edge`](../services/parabull-edge/README.md) Worker's `POST /metadata` (R2). Images up to 5,000,000 bytes, the launch worker's limit. Without it, chain mode asks for a metadata URI |
-| `VITE_REWARDS_BASE_URL` | unset | Where `epoch-<n>.json` snapshot artifacts (from `scripts/src/snapshot.ts`) are served |
 | `VITE_SENTINEL_URL` | unset | The X sentinel ([`services/twitter-sentinel`](../services/twitter-sentinel/README.md)). When the connected wallet launched the coin, its page shows an **X automation** button with a status dot. It opens a modal (a bottom sheet on a phone) to link, replace or disconnect the project's X account and set milestone posts, cashtag replies, persona and project context, any time after launch. Every change is signed by the wallet. Unset, the modal says the sentinel isn't connected; demo coins can't be saved, since they aren't on-chain |
 | `VITE_MEDIA_URL` | unset | The public R2 domain media is served from (`services/parabull-edge`). Added to the CSP's `connect-src` and `media-src` |
 | `VITE_CHAT_URL` | unset | The edge Worker's origin for coin chat (`wss://edge.parabull.xyz`; `https://` works too). Each coin's chat is a `ChatRoom` Durable Object ([`services/parabull-edge`](../services/parabull-edge/README.md)). Its `wss://` and `https://` origins are added to `connect-src`. Unset, the Chat tab and `/live` say live chat isn't connected; there's no simulated feed |
@@ -200,11 +200,33 @@ defaults and the fixed demo price that the seeded data is built on.
   as a flat 0%, and sorts last.
 - **Lists:** the board pages through `/coins` (up to 1,000 coins); an older coin still opens by address.
 
-**Still demo data:** leaderboards, squads and callouts (in chain mode these are empty, with no on-chain source yet),
-protocol totals, and the portfolio page's history, cash, PnL and reward epochs. The UI labels them:
+**Callouts** (chain mode) come from the edge Worker (`VITE_CHAT_URL`, `src/state/callouts.ts`). Posting works like
+this:
+- A holder posts from the coin's Callouts tab, after signing in to the edge once (the chat session).
+- The Worker records the market cap at the call.
+- Cards show the move since the call. Real callouts have no made-up views, likes or positions.
+- A callout's menu copies or shares its `/c/<id>` link.
+- A buy made through someone else's link carries an SPL Memo `parabull:ref:<id>` after `buy`
+  (`src/lib/referral.ts`, `src/lib/buy.ts`). The trade panel says so, and your own callout's link never does.
+
+**Rewards** (chain mode) come from the indexer's `/rewards/:wallet`: holder and caller epochs, with the claimed state
+read from the chain. Claiming works like this:
+- The claim panel lists only those allocations.
+- Before claiming, it reads the epoch's account and checks the proof against its root and the leaf's bitmap bit
+  (`src/lib/rewardsClaim.ts`).
+- The toast shows the amount actually claimed.
+- The portfolio's Rewards tab, the phone's notification and `/holder-rewards` use the same data.
+
+**Still demo data:** leaderboards and squads (in chain mode these are empty, with no on-chain source yet), protocol
+totals, and the portfolio page's history, cash and PnL. The UI labels them:
 - the header pill and footer;
-- on a phone, the footnote, a Demo tag by the header's balance and the portfolio's Demo chip;
-- in both layouts, a Demo tag by the Rewards tab's unclaimed figure.
+- on a phone, the footnote, a Demo tag by the header's balance and the portfolio's Demo chip.
+
+In demo mode, simulated rewards are tagged too:
+- `/holder-rewards`' totals carry a Demo tag;
+- the claim panel's and the Rewards tab's unclaimed figures carry one;
+- the phone's reward notification starts "Demo:";
+- no epoch starts claimed.
 
 ## Admin console
 

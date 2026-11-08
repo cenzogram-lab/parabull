@@ -59,6 +59,11 @@ CLUSTER=devnet npm run crank -- --once
 CLUSTER=devnet SKIP_METADATA_FETCH=1 npm run worker
 ```
 
+```bash
+# 6. Pre-deployment check: the whole lifecycle, checked to the lamport (see "Devnet end-to-end test").
+CLUSTER=devnet npm run e2e:devnet
+```
+
 Path A (Internet Identity accounts) has its own devnet smoke test, which drives the deployed Chain Fusion signer
 canister: see "Devnet smoke test" in [`canisters/solana_signer/README.md`](../canisters/solana_signer/README.md).
 
@@ -116,9 +121,70 @@ CLUSTER=devnet GRADUATE=1 npm run smoke -- --no-create
   image. Without `--no-create`, the smoke test sends `create` itself and a
   running worker just finds the ticket closed.
 
+## Devnet end-to-end test
+
+`test_devnet_e2e.ts` (`npm run e2e:devnet`, or `make e2e`) is the final check
+before deploying. It runs one coin through its lifecycle on the deployed
+program and compares every on-chain result with the local quote, exactly:
+
+1. **Ticket.** A throwaway wallet, funded by the admin, sends
+   `request_launch`. Checks:
+   - the wallet paid exactly the deposit plus the network fee;
+   - the ticket holds the deposit, its payer, fee and TTL;
+   - the metadata and name commitments;
+   - the `LaunchRequested` event.
+2. **Launch worker.** `src/launchWorkerRunner.ts` handles the ticket. It's
+   the same code `npm run worker` runs: it recovers the request, validates it,
+   waits its CSPRNG 3–15 s and sends `create`. Checks:
+   - the worker's delay is in range, and the ticket is closed;
+   - the curve starts at `Global`'s reserves, with the slot delay;
+   - the whole supply is minted, and mint and freeze authority are both gone;
+   - the Token-2022 name, symbol and URI;
+   - the ticker registry;
+   - `TokenCreated`, with the deposit fully settled (rent back to the launch
+     authority, the rest to the treasury).
+3. **Buy, 0.230 SOL.** Once trading opens, it buys the most tokens whose
+   cost plus the 1% fee fits in 0.230 SOL. Checks:
+   - what the wallet and the curve account paid and received;
+   - token balances and all four reserves;
+   - the fee buckets grew by exactly the fee;
+   - the `TradeEvent` fields and fee split.
+4. **Partial sell.** It sells half the tokens back, with the same checks,
+   plus that some tokens are still held. It ends by checking that the curve
+   account holds exactly its rent, plus real SOL, plus every fee bucket.
+5. **Indexer (optional, with `E2E_INDEXER_URL`).** It checks that
+   `services/parabull-indexer` serves the coin, both trades (newest first)
+   and the wallet's remaining position.
+
+The first mismatch stops the run with exit code 1. At the end, the wallet's
+remaining SOL goes back to the admin. The admin needs about 0.5 SOL on hand,
+and a run spends about 0.35 SOL of it:
+- the 0.2 SOL launch fee goes to the treasury (back to the admin if the admin
+  is the treasury, the devnet default);
+- about 0.12 SOL stays in the curve, backing the unsold half and the fees;
+- plus the token account's rent and network fees.
+
+It runs the worker itself, so it needs the launch authority's key
+(`LAUNCH_AUTHORITY_KEYPAIR`, which defaults to the admin on devnet). Stop any
+`npm run worker` against the same program first, or the two race for the
+ticket. It's refused on mainnet-beta.
+
+Variables:
+- `E2E_BUY_SOL` (default `0.230`, fee included) and `E2E_SELL_BPS` (default
+  `5000`).
+- `E2E_SLIPPAGE_BPS` (default `200`).
+- `E2E_URI`: real metadata JSON. With it set, the worker also fetches the
+  metadata and its image; without it, the fetch is skipped.
+- `E2E_INDEXER_URL`.
+- `E2E_KEEP_FUNDS=1`: leave the wallet's SOL where it is instead of returning
+  it to the admin.
+
+The default 0.230 SOL buy needs a curve that it doesn't buy out. The mainnet
+curve is fine, and so is `CURVE_PRESET=small` with a target of 1 SOL or more.
+
 The same steps are available from the repository root with `make`: `make keys`,
 `make build`, `make build-sbf`, `make test`, `make scripts-check`,
-`make deploy`, `make init`, `make smoke`, `make crank`, `make worker` (`CLUSTER=devnet` by
+`make deploy`, `make init`, `make smoke`, `make e2e`, `make crank`, `make worker` (`CLUSTER=devnet` by
 default). `npm run build:program` (from `scripts/`) runs `anchor build`.
 
 The first SBF build is where stack-frame and compute-unit problems will show
@@ -130,15 +196,70 @@ the instruction it names.
 | --- | --- |
 | `deploy_and_init.ts` | Checks that the program is deployed with `ADMIN_KEYPAIR` as upgrade authority, that the Raydium programs are executable, and that the AmmConfig is owned by the configured CPMM program. Then initialises `Global`. It does nothing if `Global` already exists. On devnet it creates a test Token-2022 `$PARABULL` mint unless `PARABULL_MINT` is set. |
 | `test_launch_and_trade.ts` | Funds a throwaway user, then runs `request_launch` and `create` (signed by the launch authority and a new mint keypair). It shows a buy inside the slot delay being rejected, then buys and sells with slippage limits from `src/curve.ts`. `--no-create` leaves `create` to the launch worker; `GRADUATE=1` then buys out the curve and graduates it (see "Devnet test curve"). |
-| `launch_worker.ts` | Launch worker (`docs/BACKEND_SPEC.md` §1). Listens for `LaunchRequested` events (plus a `POLL_MS` poll of open tickets), recovers name/symbol/URI from the user's `request_launch` transaction and checks them against the ticket's commitment, pre-checks pause and the ticker/name/tweet locks, optionally fetches the metadata URI and checks the tweet with the X API, then waits a CSPRNG-uniform 3–15 s and sends `create` with a fresh in-memory mint keypair. Rejected tickets are refunded at once with `refund_ticket`. `--once` runs one poll and exits. |
+| `test_devnet_e2e.ts` | Devnet end-to-end lifecycle check: `request_launch`, then `create` by the launch worker's own code (`src/launchWorkerRunner.ts`), a 0.230 SOL buy and a partial sell. Every step is checked against the local quote to the lamport (see "Devnet end-to-end test"). |
+| `launch_worker.ts` | Launch worker (`docs/BACKEND_SPEC.md` §1; the ticket handling is `src/launchWorkerRunner.ts`). Listens for `LaunchRequested` events (plus a `POLL_MS` poll of open tickets), recovers name/symbol/URI from the user's `request_launch` transaction and checks them against the ticket's commitment, pre-checks pause and the ticker/name/tweet locks, optionally fetches the metadata URI and checks the tweet with the X API, then waits a CSPRNG-uniform 3–15 s and sends `create` with a fresh in-memory mint keypair. Rejected tickets are refunded at once with `refund_ticket`. `--once` runs one poll and exits. |
 | `crank_worker.ts` | Reference crank: graduation (3 transactions), escrow release, fee sweeps, LP-fee collection, buyback and burn with a quoted `min_amount_out`, reward-epoch expiry, optional DexScreener-target refresh (`--sol-usd`), and optional holder-reward publishing (`--publish-rewards`). |
 | `src/snapshot.ts` (`npm run snapshot [-- --publish]`) | Takes a $PARABULL holder snapshot and turns it into reward epochs. It writes `snapshots/epoch-<n>.draft.json` on a dry run, or publishes and writes `snapshots/epoch-<n>.json` (root, total, and every leaf with its amount, balance and proof) for the claim UI. |
+| `src/callerEpoch.ts` (`npm run caller-epoch`) | Caller-reward epoch from the indexer's referred buys and the Worker's callouts: rules, split, Merkle tree, and the atomic treasury top-up + `publish_reward_epoch` (see "Caller epochs"). |
 | `src/lpFees.ts` | Fetches the claimable Burn & Earn LP fee for one locked position from Raydium's lock-position API. |
 
 Backend services that aren't built as scripts here (the 20-slot bundle-risk
 indexer and image/lookalike flags, plus the durable job table and X account
 linking the launch worker would need in production) are specified in
 [`docs/BACKEND_SPEC.md`](../docs/BACKEND_SPEC.md).
+
+## Caller epochs
+
+`src/callerEpoch.ts` (`npm run caller-epoch`) pays callout authors for the buys their callout links brought in. The
+treasury funds it, and the program's existing reward epochs pay it out, with no program change
+(`docs/BACKEND_SPEC.md` §6).
+
+```bash
+# Dry run: writes snapshots/epoch-<n>.draft.json and prints the plan.
+CLUSTER=devnet INDEXER_URL=https://indexer.example.com EDGE_URL=https://edge.example.com \
+  CALLOUTS_ORIGIN=https://app.example.com CALLER_EPOCH_LAMPORTS=2000000000 \
+  npm run caller-epoch -- --since 2026-11-01 --until 2026-11-08
+```
+
+```bash
+# Publish: one transaction (treasury top-up, then publish_reward_epoch), then snapshots/epoch-<n>.json.
+CLUSTER=devnet ... npm run caller-epoch -- --since 2026-11-01 --until 2026-11-08 --publish
+```
+
+**Which buys count.** A referred buy (from the indexer's `/referrals`) counts only if:
+- its callout exists (from the edge Worker), and the buy is of the callout's coin;
+- it came after the callout;
+- the buyer isn't the callout's author;
+- it cost at least `MIN_REFERRED_BUY_LAMPORTS` (default 0.05 SOL).
+
+Each trader counts for at most `PER_TRADER_CAP_LAMPORTS` (10 SOL) per caller.
+
+**The split.** The budget is split by counted volume:
+- capped at `MAX_CALLER_SHARE_BPS` per caller (25%);
+- capped at `MAX_FEE_SHARE_BPS` (50%) of the platform fees the caller's counted buys paid, so wash buying through your
+  own callout always costs more than it earns;
+- payouts under `MIN_PAYOUT_LAMPORTS` dropped;
+- only system-owned wallets paid.
+
+What isn't paid out stays with the treasury.
+
+**Safety.**
+- **Fails closed** when:
+  - the indexer's referral record doesn't reach back to `--since`;
+  - the window ended less than 10 minutes ago;
+  - the window overlaps one already paid (the published `epoch-<n>.json` caller files in `snapshots/` are the ledger:
+    keep them);
+  - the funding key (`TREASURY_KEYPAIR`, default the admin) isn't `Global.treasury`;
+  - `CRANK_KEYPAIR` isn't `Global.crank_authority`;
+  - the treasury can't cover the total.
+- **Atomic publish.** The top-up and `publish_reward_epoch` go in one transaction, so the holder snapshot never sees
+  the top-up as its own.
+- **No double pay on a retry.** If the send reports an error, the script reads the epoch account first: one that landed
+  anyway is finalized, not paid again.
+- **Upload.** Afterwards, upload `epoch-<n>.json` to the indexer's `REWARDS_BASE_URL`. Claimants use the same
+  claim page as holder rewards, where the epoch shows as a caller reward.
+
+`CALLOUTS_ORIGIN` is the app's origin. The Worker only answers its `ALLOWED_ORIGINS`.
 
 ## LP-fee collection
 

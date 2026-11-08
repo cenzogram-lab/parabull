@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { XLogo } from "../components/brand/Wordmark";
 import { CalloutCard } from "../components/coin/CoinViews";
+import { byCalloutResult, calloutMove } from "../lib/calloutsClient";
 import { MobileLeaderboard } from "../components/mobile/MobileLeaderboard";
 import { cx, Segmented, UnderlineTabs } from "../components/ui/primitives";
 import { TraderAvatar } from "../components/ui/visuals";
@@ -30,8 +31,13 @@ interface Entry {
   verified?: boolean;
   value: number;
   money: boolean;
+  /** The value is a fraction shown as a percentage (a real callout's move since the call). */
+  pct?: boolean;
   extra: string;
 }
+
+const fmtEntry = (e: Entry) => (e.pct ? pct(e.value, 0) : e.money ? usdSigned(e.value) : `$${compact(e.value)}`);
+const signed = (e: Entry) => e.money || e.pct;
 
 function Plaque({ e, rank, big }: { e: Entry; rank: number; big?: boolean }) {
   const f = FRAMES[rank - 1];
@@ -47,13 +53,20 @@ function Plaque({ e, rank, big }: { e: Entry; rank: number; big?: boolean }) {
               {e.name}
               {e.x && <XLogo className="h-3 w-3 text-muted" />}
             </div>
-            <div className={cx("num text-[15px] font-semibold", e.money ? "text-gold" : "text-cream")}>{e.money ? usdSigned(e.value) : `$${compact(e.value)}`}</div>
+            <div className={cx("num text-[15px] font-semibold", signed(e) ? (e.value >= 0 ? "text-gold" : "text-ember") : "text-cream")}>{fmtEntry(e)}</div>
             {e.sub && <div className="text-[11px] text-muted">{e.sub}</div>}
           </div>
         </div>
       </div>
     </div>
   );
+}
+
+/** Why a tab has nobody ranked: callouts can be posted now; traders, squads and rewards need data the indexer doesn't serve yet. */
+function emptyNote(tab: Tab): string {
+  if (tab === "Best Callouts") return "Post a callout from a coin's Callouts tab: the best calls since then rank here.";
+  if (tab === "Rewards") return "Earners rank here once reward epochs are published.";
+  return "Trader and squad rankings aren't served by the indexer yet.";
 }
 
 /** Below md the mobile leaderboard replaces this page's whole tree; desktop renders unchanged. */
@@ -80,11 +93,14 @@ function DesktopLeaderboard() {
         .sort((a, b) => b.value - a.value);
     if (tab === "Best Callouts")
       return [...callouts]
-        .sort((a, b) => b.pnlPct - a.pnlPct)
-        .map((c) => {
+        .filter((c) => byMint.has(c.mint))
+        .map((c) => ({ c, move: calloutMove(c, byMint.get(c.mint)!) }))
+        .sort((a, b) => b.move - a.move)
+        .map(({ c, move }) => {
           const t = traders.find((x) => x.handle === c.handle);
-          const coin = byMint.get(c.mint);
-          return { key: c.id, name: c.handle, avatar: t?.avatar ?? coin?.image ?? "", sub: `$${coin?.ticker} · ${pct(c.pnlPct, 0)}`, x: t?.x, verified: t?.verified, value: c.pnlUsd, money: true, extra: `Called $${coin?.ticker} at ${usdCompact(c.calledAtMcap)}` };
+          const coin = byMint.get(c.mint)!;
+          // A demo callout shows the caller's PnL; a real one has no position, so it shows the move since the call.
+          return { key: c.id, name: c.handle, avatar: t?.avatar ?? coin.image, sub: `$${coin.ticker} · ${pct(move, 0)}`, x: t?.x, verified: t?.verified, value: c.position ? c.position.pnlUsd : move, money: !!c.position, pct: !c.position, extra: `Called $${coin.ticker} at ${usdCompact(c.calledAtMcap)}` };
         });
     return [...traders]
       .map((t) => ({ key: t.handle, name: t.handle, avatar: t.avatar, sub: t.squad, x: t.x, verified: t.verified, value: metric === "Profit" ? t.pnl[period] : t.volume[period], money: metric === "Profit", extra: `${t.trades[period]} trades · ${(t.winRate * 100).toFixed(0)}% win rate` }))
@@ -92,7 +108,7 @@ function DesktopLeaderboard() {
   }, [tab, traders, squads, callouts, byMint, period, metric]);
 
   const top = entries.slice(0, 4);
-  const best = useMemo(() => [...callouts].filter((c) => side === "1W" || Date.now() - c.ts < 24 * 3600_000).sort((a, b) => b.pnlUsd - a.pnlUsd), [callouts, side]);
+  const best = useMemo(() => [...callouts].filter((c) => side === "1W" || Date.now() - c.ts < 24 * 3600_000).sort(byCalloutResult(byMint)), [callouts, side, byMint]);
 
   return (
     <div className="mx-auto grid max-w-[1500px] grid-cols-1 gap-10 px-8 py-6 xl:grid-cols-[minmax(0,1fr)_440px]">
@@ -101,16 +117,23 @@ function DesktopLeaderboard() {
         <div className="mt-5">
           <UnderlineTabs options={["Traders", "Squads", "Rewards", "Best Callouts"] as const} value={tab} onChange={setTab} />
         </div>
-        <div className="flex items-center gap-2 border-b border-line-soft px-1 py-3.5 text-[13.5px] text-muted">
-          <Info className="h-4 w-4" />A callout is a public call on a coin you hold. Make at least one to be ranked on the leaderboard.
+        <button type="button" onClick={() => setTab("Best Callouts")} className="flex w-full items-center gap-2 border-b border-line-soft px-1 py-3.5 text-left text-[13.5px] text-muted hover:text-cream">
+          <Info className="h-4 w-4" />A callout is a public call on a coin you hold: post one from the coin's Callouts tab. Make at least one to be ranked on the leaderboard.
           <ChevronRight className="ml-auto h-4 w-4" />
-        </div>
+        </button>
 
         {top[0] && (
           <div className="mt-6 flex items-center justify-center gap-3">
             <span className="metal-text font-display text-6xl font-bold leading-none">1</span>
             <span className="text-[30px] font-semibold">{top[0].name}</span>
-            <span className={cx("num text-[30px] font-semibold", top[0].money ? "text-gold" : "text-cream")}>{top[0].money ? usdSigned(top[0].value) : `$${compact(top[0].value)}`}</span>
+            <span className={cx("num text-[30px] font-semibold", signed(top[0]) ? "text-gold" : "text-cream")}>{fmtEntry(top[0])}</span>
+          </div>
+        )}
+        {!top.length && (
+          <div className="panel mt-8 flex flex-col items-center gap-2 px-6 py-12 text-center">
+            <Trophy className="h-8 w-8 text-copper" aria-hidden />
+            <p className="text-[15px] font-semibold text-cream">No rankings yet</p>
+            <p className="max-w-md text-[13.5px] text-muted">{emptyNote(tab)}</p>
           </div>
         )}
         <div className="relative mt-12 flex items-end justify-center gap-5">
@@ -148,7 +171,7 @@ function DesktopLeaderboard() {
                   </span>
                   <span className="text-xs text-muted">{e.extra}</span>
                 </span>
-                <span className={cx("num text-[17px] font-semibold", e.money ? (e.value >= 0 ? "text-gold" : "text-ember") : "text-cream")}>{e.money ? usdSigned(e.value) : `$${compact(e.value)}`}</span>
+                <span className={cx("num text-[17px] font-semibold", signed(e) ? (e.value >= 0 ? "text-gold" : "text-ember") : "text-cream")}>{fmtEntry(e)}</span>
                 <ChevronDown className={cx("h-4 w-4 text-muted transition-transform", open === e.key && "rotate-180")} />
               </button>
               {open === e.key && (
@@ -192,6 +215,7 @@ function DesktopLeaderboard() {
         <h2 className="text-[28px] font-semibold tracking-tight">Best callouts</h2>
         <Segmented className="mt-5" options={["1D", "1W"] as const} value={side} onChange={setSide} label="Callout period" />
         <div className="panel mt-4 px-4">
+          {!best.length && <p className="py-8 text-center text-[13.5px] text-muted">No callouts {side === "1D" ? "in the last 24 hours" : "this week"} yet.</p>}
           {best.slice(0, 8).map((c) => (
             <CalloutCard key={c.id} callout={c} trader={traders.find((t) => t.handle === c.handle)} coin={byMint.get(c.mint)} dense />
           ))}

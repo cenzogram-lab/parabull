@@ -9,6 +9,9 @@
  *   METADATA_ORIGINS   comma-separated origins the metadata JSON may be fetched from (e.g. the media CDN); unset: none
  *   BACKFILL_LIMIT     program transactions read on start (default 1000)
  *   POLL_MS, CURVES_MS, TICKETS_MS, HOLDERS_MS   cadences (default 3000, 30000, 15000, 120000)
+ *   REWARDS_BASE_URL   where epoch-<n>.json snapshot artifacts are served (scripts/src/snapshot.ts, callerEpoch.ts);
+ *                      unset, reward epochs are listed but no allocations are served
+ *   REWARDS_MS         reward-epoch sync cadence (default 60000)
  *   RPC_REQUESTS_PER_MINUTE          per-IP limit on requests that reach the RPC (default 60)
  *   TRUST_PROXY=1      take the client IP from X-Forwarded-For
  */
@@ -37,6 +40,7 @@ async function main() {
     programId: env.PROGRAM_ID || undefined,
     backfillLimit: num(env.BACKFILL_LIMIT, 1000),
     metadataOrigins: list(env.METADATA_ORIGINS),
+    rewardsBaseUrl: env.REWARDS_BASE_URL || undefined,
     log,
   });
   for (let delay = 2_000; ; delay = Math.min(delay * 2, 60_000)) {
@@ -55,6 +59,7 @@ async function main() {
   every(num(env.TICKETS_MS, 15_000), "tickets", () => ix.syncTickets());
   every(num(env.HOLDERS_MS, 120_000), "holders", () => ix.syncHolderCounts());
   every(300_000, "global", () => ix.syncGlobal());
+  every(num(env.REWARDS_MS, 60_000), "rewards", () => ix.syncRewards());
   if (env.RPC_WS_URL !== "off") ix.subscribe(env.RPC_WS_URL || wsUrlFor(rpcUrl));
 
   const api = new Api(ix, { allowedOrigins: list(env.ALLOWED_ORIGINS), rpcRequestsPerMinute: num(env.RPC_REQUESTS_PER_MINUTE, 60), trustProxy: env.TRUST_PROXY === "1" });

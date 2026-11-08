@@ -17,9 +17,12 @@ function EpochRow({ e, now }: { e: RewardEpoch; now: number }) {
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[13.5px] font-semibold leading-5 text-cream">
-          <span className="sr-only">Epoch {e.epoch}, </span>Published {shortDate.format(e.publishedAt)}
+          <span className="sr-only">Epoch {e.epoch}, </span>
+          {e.kind === "caller" ? "Caller rewards · " : ""}Published {shortDate.format(e.publishedAt)}
         </span>
-        {e.verified ? (
+        {e.expired ? (
+          <span className="block text-[11.5px] font-medium leading-4 text-muted">Claim window closed</span>
+        ) : e.verified ? (
           <span className="flex items-center gap-1 text-[11.5px] font-medium leading-4 text-gold">
             <ShieldCheck className="h-3.5 w-3.5 shrink-0" aria-hidden />
             <span className="truncate">Proof verified · {e.you.proof.length} hashes</span>
@@ -73,15 +76,14 @@ export function RewardsPanel({ summary, solUsd }: { summary: RewardSummary | und
         <div aria-hidden className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-gold/60 to-transparent" />
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
-            <p className="text-[13px] font-medium leading-5 text-muted">Unclaimed holder rewards</p>
+            <p className="text-[13px] font-medium leading-5 text-muted">{isDemo ? "Unclaimed holder rewards" : "Unclaimed rewards"}</p>
             {/*
-              Chain mode still builds these epochs from simulated holders (there's no indexer yet), even for a connected
-              wallet: say so by the figure, as the header does. Where the two don't fit side by side (a 320px phone),
-              the tag drops below the figure rather than cutting it.
+              Demo mode's epochs are simulated: say so by the figure. Chain mode's come from the indexer, checked against
+              the chain. Where the two don't fit side by side (a 320px phone), the tag drops below the figure.
             */}
             <p className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2">
               <span className="min-w-0 truncate text-[28px] font-semibold leading-8 tracking-tight text-gold">{sol(unclaimed, 4)}</span>
-              {!isDemo && <span className="shrink-0 rounded border border-line px-1 text-[9px] font-bold uppercase leading-[13px] tracking-wide text-rosebronze">Demo</span>}
+              {isDemo && <span className="shrink-0 rounded border border-line px-1 text-[9px] font-bold uppercase leading-[13px] tracking-wide text-rosebronze">Demo</span>}
             </p>
             <p className="num mt-1 text-[12.5px] leading-[18px] text-muted">
               ≈ {usd(unclaimed * solUsd)} · {summary.openEpochs} open {summary.openEpochs === 1 ? "epoch" : "epochs"}
@@ -92,8 +94,7 @@ export function RewardsPanel({ summary, solUsd }: { summary: RewardSummary | und
           </span>
         </div>
         <Link to="/parabull-token#claim" className="btn-gold mt-4 h-11 w-full rounded-xl text-[14.5px]">
-          {/* In chain mode the figure is demo data, so the button doesn't offer to claim it. */}
-          {unclaimed > 0 && isDemo ? "Claim on the $PARABULL page" : "Open the $PARABULL page"}
+          {unclaimed > 0 ? "Claim on the $PARABULL page" : "Open the $PARABULL page"}
           <ArrowRight className="h-4 w-4" strokeWidth={2.5} aria-hidden />
         </Link>
         {first && (
@@ -111,10 +112,16 @@ export function RewardsPanel({ summary, solUsd }: { summary: RewardSummary | und
           ))}
         </ul>
       ) : (
-        <EmptyNote>This wallet wasn't in any holder snapshot yet. Hold $PARABULL through a weekly snapshot to earn a share of the fees.</EmptyNote>
+        <EmptyNote>
+          {isDemo
+            ? "This wallet wasn't in any holder snapshot yet. Hold $PARABULL through a weekly snapshot to earn a share of the fees."
+            : "No reward allocations for this wallet yet. Hold $PARABULL through a weekly snapshot, or post callouts whose links bring in buys."}
+        </EmptyNote>
       )}
       <p className="mt-3 text-[11.5px] leading-4 text-muted">
-        {isDemo ? "Demo epochs: real Merkle trees over simulated $PARABULL holders. " : "Demo epochs: holder-reward snapshots aren't served by the indexer yet. "}Each proof is checked in your browser against the epoch's root before you claim.
+        {isDemo
+          ? "Demo epochs: real Merkle trees over simulated $PARABULL holders. Each proof is checked in your browser against the epoch's root before you claim."
+          : "From the indexer, which rebuilds each published snapshot and checks it against the on-chain root. Before a claim, your browser checks the proof against the epoch account itself."}
       </p>
     </div>
   );

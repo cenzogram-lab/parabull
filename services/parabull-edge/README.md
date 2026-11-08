@@ -22,7 +22,10 @@ It implements:
 | `GET /chat/:mint` | WebSocket into that coin's `ChatRoom` (`src/chatRoom.ts`, `src/chatRoomDO.ts`). |
 | `GET /live` | Coins streaming now: `{ streams: [{ mint, input, title, creator, hls }] }` (`src/live.ts`). |
 | `POST /live/input` | `{ mint, title? }` with `Authorization: Bearer <session token>`. Returns the coin creator's live input: `{ input, rtmps {url, streamKey}, srt {url, streamId, passphrase}, hls }` (`src/broadcast.ts`). |
-| `OPTIONS /metadata`, `/chat/session`, `/chat/upload` | CORS preflight for the allowed origins. |
+| `GET /callouts` | Callouts, newest first: `{ callouts, next }`, filtered by `mint=`, `author=` or `ids=a,b,c`, paged by `before=` (`src/callouts.ts`). |
+| `POST /callouts` | `{ mint, text }` with `Authorization: Bearer <session token>`. Stores a callout on a coin the wallet holds: `{ callout }`. |
+| `GET /callouts/:id` | One callout: `{ callout }`. |
+| `OPTIONS /metadata`, `/chat/session`, `/chat/upload`, `/callouts` | CORS preflight for the allowed origins. |
 | `GET /health` | `ok` |
 
 **The image** must be a PNG, JPEG, WebP or GIF of at most 5,000,000 bytes.
@@ -91,6 +94,20 @@ Anything else gets `{type:"error", code}`: `sign_in_required`, `session_expired`
 - Sockets from origins outside `ALLOWED_ORIGINS` are refused, which also stops cross-site websocket hijacking.
 - `CHAT_LIMITER` limits sign-ins and uploads per IP, and `CHAT_CONNECT_LIMITER` limits socket handshakes per IP. A
   client outside a browser can fake `Origin`, so the handshake limit is what caps how many rooms one client opens.
+
+## Callouts
+
+A callout is a wallet's public call on a coin it holds (`docs/BACKEND_SPEC.md` §6).
+
+- **Posting** uses the chat session (one wallet signature). Before storing, the Worker checks three things:
+  - the text: 1–280 characters, with control, zero-width and bidi-override characters removed;
+  - the holding: at least 1 token of the coin, from `SOLANA_RPC_URL`;
+  - the coin's market cap and price now, from `INDEXER_URL`. These become the "called at" figures, and a mint that
+    isn't a Parabull coin is refused.
+- **Storage.** One `CalloutStore` Durable Object (SQLite, `src/calloutStoreDO.ts`) stores them all. It applies the
+  per-wallet limits in one place: one callout every 30 seconds, one per coin an hour, 20 a day.
+- **Links.** The app links a callout as `/c/<id>`. Buys made through that link carry the memo
+  `parabull:ref:<id>`, which the indexer records and `scripts/src/callerEpoch.ts` pays from.
 
 ## Live streams (Cloudflare Stream)
 
@@ -176,6 +193,7 @@ So the Stream API sees one list call and one lifecycle check per input every 15 
 - `UPLOAD_LIMITER`: 10 metadata uploads per minute per IP.
 - `CHAT_LIMITER`: 20 chat sign-ins and uploads per minute per IP.
 - `CHAT_CONNECT_LIMITER`: 60 chat socket handshakes per minute per IP.
+- `CALLOUT_READ_LIMITER`: 120 callout reads per minute per IP (they all reach the one `CalloutStore`).
 
 **Chat setup:**
 1. Set the chat session key, a secret rather than a variable:
@@ -188,6 +206,12 @@ So the Stream API sees one list call and one lifecycle check per input every 15 
    get SQLite storage.
 3. Build the app with `VITE_CHAT_URL=wss://edge.parabull.xyz` (the Worker's origin). The CSP's `connect-src` picks up
    its `wss://` and `https://` origins.
+
+**Callouts setup:**
+1. `wrangler deploy` creates the `CalloutStore` class from the `v2` migration (SQLite storage).
+2. Set `SOLANA_RPC_URL` and `INDEXER_URL` (the indexer's public URL) in `wrangler.toml`. `CHAT_SECRET` (above) signs
+   the sessions. Without these, reading works and posting answers 503.
+3. The app reaches it through `VITE_CHAT_URL` (the Worker's origin); nothing else to build.
 
 **Stream setup:**
 1. Set `CF_ACCOUNT_ID` and `STREAM_HOST` (`customer-<code>.cloudflarestream.com`, shown on the Stream dashboard) in

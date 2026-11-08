@@ -58,8 +58,9 @@ reading only.
     (`docs/BACKEND_SPEC.md` §1.2).
 - **Off-chain parity** (random 3–15 s create delay, 20-slot bundle check,
   image and lookalike flags): specified in `docs/BACKEND_SPEC.md`. The launch
-  worker (§1) is implemented in `scripts/launch_worker.ts`, with its pure
-  logic in `scripts/src/launchWorker.ts`.
+  worker (§1) is implemented in `scripts/launch_worker.ts`. Its ticket
+  handling is in `scripts/src/launchWorkerRunner.ts`, and its pure logic in
+  `scripts/src/launchWorker.ts`.
 - **Devnet test curve.** `deploy_and_init.ts` accepts `CURVE_PRESET=small`
   (graduates at `CURVE_TARGET_SOL`, default 2 SOL) or all four explicit
   `INITIAL_*` / `TOKEN_TOTAL_SUPPLY` overrides; `scripts/src/curveParams.ts`
@@ -232,7 +233,7 @@ reading only.
 | `docs/BACKEND_SPEC.md` | Off-chain services: launch worker (random delay, tweet verification), bundle-risk indexer, similarity flags |
 | `docs/DESIGN.md` | Bronze/copper design system: tokens, contrast, materials, typography, brand mark, data-viz rules |
 | `app/` | Web app (React + Vite + Tailwind). See `app/README.md` for routes, modes, and what's wired to the program vs demo data |
-| `services/parabull-indexer/` | Market indexer: curves, tickets, trades and holders from RPC (IDL-driven decoding, logsSubscribe + polling), served over REST and a WebSocket stream for chain mode (`VITE_INDEXER_URL`). See `docs/BACKEND_SPEC.md` §5 |
+| `services/parabull-indexer/` | Market indexer: curves, tickets, trades and holders from RPC (IDL-driven decoding, logsSubscribe + polling), served over REST and a WebSocket stream for chain mode (`VITE_INDEXER_URL`). Also referred buys (callout memos) and reward epochs with verified allocations. See `docs/BACKEND_SPEC.md` §5 and §6 |
 | `services/twitter-sentinel/` | X sentinel: posts a coin's curve milestones and answers cashtag mentions of its account; settings come from the creator's signed request. Separate package, never bundled into `app/`. See its README |
 | `reference/` | Byte-matching pump.fun reconstructions. Read-only |
 
@@ -292,6 +293,13 @@ pins both index-0 addresses.
 
 - TypeScript, typed against the IDL from `anchor build`. `npm run typecheck`
   fails on any wrong instruction, account or argument name.
+- `test_devnet_e2e.ts` (`npm run e2e:devnet`) is the pre-deployment check.
+  It runs one coin through its lifecycle on devnet: a ticket, then `create` by
+  the launch worker's own code, a 0.230 SOL buy and a partial sell. Every
+  balance, reserve, fee bucket, token balance and event is compared with the
+  local quote, exactly. Its pure helpers (`src/e2e.ts`) and the worker runner
+  are unit-tested, but the sandbox can't reach devnet, so the script itself
+  only runs on a machine that can.
 - `src/lpFees.ts` gets the claimable Burn & Earn fee per locked position
   (fee-key NFT) from Raydium's lock-position API, the same one raydium-sdk-v2
   uses. It never throws, and the crank caps the result at the on-chain locked

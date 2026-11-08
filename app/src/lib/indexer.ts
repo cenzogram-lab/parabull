@@ -5,6 +5,7 @@
  */
 import { coinArt } from "./art";
 import { shortAddr } from "./format";
+import type { RewardsSummaryJson, WalletRewardsJson } from "./rewardsClaim";
 import type { Candle, Coin, Holder, Stage, Trade } from "./types";
 
 export interface CoinJson {
@@ -152,6 +153,13 @@ export class IndexerClient {
   }
   portfolio(wallet: string): Promise<PortfolioJson> {
     return this.get<PortfolioJson>(`/portfolio/${wallet}?limit=100`);
+  }
+  /** The wallet's reward allocations (holder and caller epochs) with proofs and on-chain claimed state. */
+  rewards(wallet: string): Promise<WalletRewardsJson> {
+    return this.get<WalletRewardsJson>(`/rewards/${wallet}`);
+  }
+  rewardsSummary(): Promise<RewardsSummaryJson> {
+    return this.get<RewardsSummaryJson>("/rewards");
   }
 
   get streamUrl(): string {

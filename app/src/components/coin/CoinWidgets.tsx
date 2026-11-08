@@ -1,12 +1,16 @@
-import { ExternalLink, GraduationCap, Megaphone } from "lucide-react";
-import { useMemo } from "react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { ExternalLink, GraduationCap, Loader2, Megaphone } from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { explorer, isDemo } from "../../config";
 import { useNow } from "../../hooks/useNow";
 import { age, compact, price, shortAddr, sol, usd, usdCompact, usdSigned } from "../../lib/format";
+import { CALLOUT_MAX_CHARS, CALLOUT_MIN_HOLDING } from "../../lib/callouts";
 import { GRADUATION_RAISE_LAMPORTS } from "../../lib/protocol";
 import type { Coin } from "../../lib/types";
 import { progressOf } from "../../mock/coins";
 import { holders as holderList } from "../../mock/market";
+import { useApp } from "../../state/AppState";
 import { useMarket } from "../../state/Market";
 import { useProtocol } from "../../state/Protocol";
 import { cx, Empty } from "../ui/primitives";
@@ -155,14 +159,74 @@ export function TradesTable({ coin }: { coin: Coin }) {
   );
 }
 
+/**
+ * Post a callout on this coin. Chain mode: the connected wallet signs in to the edge Worker once, which checks that it
+ * holds at least 1 token and records the market cap now. Demo mode: it stays in this visit.
+ */
+function CalloutComposer({ coin }: { coin: Coin }) {
+  const { postCallout, calloutPosting, positions } = useMarket();
+  const { publicKey } = useWallet();
+  const { setVisible } = useWalletModal();
+  const { toast } = useApp();
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (calloutPosting === "unconfigured") return <p className="px-3 pt-3 text-xs text-muted">Posting callouts isn't set up on this deployment.</p>;
+  const chars = [...text.trim()].length;
+  const holds = isDemo || (positions[coin.mint]?.tokens ?? 0n) >= CALLOUT_MIN_HOLDING;
+  const needWallet = !isDemo && !publicKey;
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (needWallet) return setVisible(true);
+    setBusy(true);
+    try {
+      await postCallout(coin.mint, text);
+      setText("");
+      toast({ tone: "good", title: "Callout posted", body: isDemo ? "Demo: it stays in this visit" : "Share its link from the callout's menu: buys through it count toward caller rewards" });
+    } catch (err) {
+      toast({ tone: "bad", title: "Couldn't post the callout", body: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form onSubmit={submit} className="border-b border-line-soft py-3 max-md:px-2">
+      <label htmlFor={`callout-${coin.mint}`} className="text-xs font-semibold text-muted">
+        Your callout on ${coin.ticker}
+      </label>
+      <textarea
+        id={`callout-${coin.mint}`}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={2}
+        maxLength={CALLOUT_MAX_CHARS * 2}
+        placeholder={holds ? `Why $${coin.ticker}, why now?` : `Hold at least 1 $${coin.ticker} to call it out`}
+        disabled={busy || (!needWallet && !holds)}
+        className="mt-1.5 w-full resize-none rounded-lg border border-line bg-canvas-2 px-3 py-2 text-[14px] leading-5 text-cream placeholder:text-muted focus:border-line-accent focus:outline-none disabled:opacity-60"
+      />
+      <div className="mt-1.5 flex items-center gap-3">
+        <span className={cx("num text-[11.5px]", chars > CALLOUT_MAX_CHARS ? "text-ember" : "text-muted")} aria-live="polite">
+          {chars}/{CALLOUT_MAX_CHARS}
+        </span>
+        {!isDemo && !needWallet && !holds && <span className="min-w-0 truncate text-[11.5px] text-muted">Only holders can post</span>}
+        <button type="submit" disabled={busy || (!needWallet && (!holds || !chars || chars > CALLOUT_MAX_CHARS))} className="btn-gold ml-auto h-9 shrink-0 px-4 text-[13px] max-md:h-11">
+          {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+          {needWallet ? "Connect to post" : "Post callout"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function CoinCallouts({ coin }: { coin: Coin }) {
-  const { callouts, traders, byMint } = useMarket();
+  const { callouts, traders, byMint, loadCalloutsFor } = useMarket();
+  useEffect(() => loadCalloutsFor(coin.mint), [coin.mint, loadCalloutsFor]);
   const mine = callouts.filter((c) => c.mint === coin.mint);
   const list = mine.length ? mine : callouts.slice(0, 3);
-  if (!list.length) return <Empty>No callouts yet.</Empty>;
   return (
     <div className="px-3 max-md:px-1">
-      {!mine.length && <p className="pt-3 text-xs text-muted max-md:px-3">No callouts on ${coin.ticker} yet. Recent callouts across Parabull:</p>}
+      <CalloutComposer coin={coin} />
+      {!list.length && <Empty>No callouts yet. Be the first to call ${coin.ticker}.</Empty>}
+      {!mine.length && list.length > 0 && <p className="pt-3 text-xs text-muted max-md:px-3">No callouts on ${coin.ticker} yet. Recent callouts across Parabull:</p>}
       {list.map((c) => (
         <CalloutCard key={c.id} callout={c} trader={traders.find((t) => t.handle === c.handle)} coin={byMint.get(c.mint)} dense />
       ))}

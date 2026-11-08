@@ -16,6 +16,7 @@
   "include": [
     "src/**/*.ts",
     "../../app/src/lib/metadata.ts",
-    "../../app/src/lib/chatMessage.ts"
+    "../../app/src/lib/chatMessage.ts",
+    "../../app/src/lib/callouts.ts"
   ]
 }

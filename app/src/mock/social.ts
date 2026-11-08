@@ -55,21 +55,20 @@ export function generateCallouts(coins: Coin[], now = Date.now()): Callout[] {
     const calledAtMcap = coin.mcapUsd / rng.range(1.4, 4.2);
     const positionUsd = rng.logRange(120, 9_500);
     const pnlPct = coin.mcapUsd / calledAtMcap - 1;
+    // Same draw order as before, so the demo's callouts are unchanged.
+    const closed = rng.bool(0.25);
+    const ts = now - rng.range(2, 22 * 60) * 60_000;
+    const engagement = { views: rng.int(20, 6_000), comments: rng.int(0, 40), likes: rng.int(1, 120), shares: rng.int(0, 18) };
     return {
       id: `callout-${i}`,
       handle,
+      wallet: null,
       text,
       mint: coin.mint,
-      positionUsd,
-      pnlUsd: positionUsd * (pnlPct / (1 + pnlPct)),
-      pnlPct,
-      closed: rng.bool(0.25),
       calledAtMcap,
-      ts: now - rng.range(2, 22 * 60) * 60_000,
-      views: rng.int(20, 6_000),
-      comments: rng.int(0, 40),
-      likes: rng.int(1, 120),
-      shares: rng.int(0, 18),
+      ts,
+      position: { usd: positionUsd, pnlUsd: positionUsd * (pnlPct / (1 + pnlPct)), closed },
+      engagement,
     };
   }).sort((a, b) => b.ts - a.ts);
 }
