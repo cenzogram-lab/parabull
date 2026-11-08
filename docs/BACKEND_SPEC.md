@@ -275,3 +275,102 @@ wallet_funding(wallet, funder, lamports, slot, signature)
 bundle_reports(mint PK, status, badge, report_json, computed_at)
 flags(mint, type, match_mint, distance, detected_at)
 ```
+
+---
+
+## 5. Market indexer API (`services/parabull-indexer`)
+
+Serves the app's market data in chain mode (`VITE_INDEXER_URL`). It has no
+database of its own: everything is rebuilt from the chain on start, so it can be
+restarted or replaced at any time.
+
+### 5.1 Sources
+
+| Data | How it's read |
+| --- | --- |
+| Curves (`BondingCurve`) | `getProgramAccounts(program, memcmp discriminator)` every 30 s; a trade's own reserves update its curve at once |
+| Name, symbol, URI | The mint's Token-2022 metadata extension (set at `create`, immutable), or `TokenCreated` |
+| Image, description, links | The URI's JSON, fetched only from `METADATA_ORIGINS` (https, no redirects, 64 KB, 5 s) |
+| Launch tickets | `getProgramAccounts(LaunchTicket)` every 15 s, plus `LaunchRequested` / `TokenCreated` / `TicketRefunded` |
+| Trades, graduation | Program events (`TradeEvent`, `TokenCreated`, `GraduationReady`, `MigratedToRaydium`, `DexEscrowReleased`) from transaction logs |
+| Graduated price | The Raydium pool's two vaults (`["pool_vault", pool, mint]` under `Global.cpmm_program`) |
+| Holders | `getProgramAccounts(Token-2022, memcmp mint at 0)`, cached 20 s; counts for active coins every 2 min |
+| Portfolio | `getTokenAccountsByOwner(wallet, Token-2022)` and `getBalance`, cached 10 s |
+
+Transactions arrive two ways, deduplicated by signature:
+
+- **`logsSubscribe({ mentions: [program] })`** gives latency: a new coin is on
+  the board as soon as `create` lands.
+- **`getSignaturesForAddress(program)` + `getTransaction`**, polled every 3 s,
+  is the source of truth. It pages with `before` on start (backfill,
+  `BACKFILL_LIMIT`) and with `until` afterwards. It applies oldest first, and
+  moves its cursor only after a page is fully applied.
+
+A data line counts only while this program is on top of the invoke stack, so
+Raydium's own events inside a CPI are never read as ours. Failed transactions
+are skipped. A reserves update never goes backwards: each is tagged with its
+slot.
+
+### 5.2 Endpoints
+
+All `GET`.
+
+- **JSON:** u64 amounts (lamports, base units, slots) are decimal strings;
+  prices and market caps are SOL numbers (SOL per whole token); times are Unix
+  seconds.
+- **Errors** are `{ "error": "…" }`:
+  - 400: a bad address or parameter;
+  - 404: not a Parabull coin, or an unknown ticket;
+  - 429: the per-IP limit on RPC-backed requests;
+  - 502: the RPC is unavailable.
+
+| Endpoint | Returns |
+| --- | --- |
+| `/coins?status=all\|new\|active\|graduating\|graduated&sort=new\|mcap\|volume\|progress\|last_trade&limit=1..200&cursor=` | `{ coins: Coin[], next }` |
+| `/coins/:mint` | `Coin`; a mint not indexed yet is looked up on-chain (curve PDA + mint) before answering 404 |
+| `/coins/:mint/trades?limit=1..100&before=<signature:index>` | `{ trades: Trade[], next }`, newest first |
+| `/coins/:mint/holders?limit=1..100` | `{ mint, totalSupply, count, holders: [{ owner, amount, pct, label }] }`, largest first; `label` is `bonding_curve`, `migration`, `raydium_pool`, `creator` or null |
+| `/portfolio/:wallet?limit=&before=` | `{ wallet, lamports, holdings: [{ mint, amount, valueSol, coin }], trades: Trade[], next }` |
+| `/tickets/:ticket` | `{ ticket, payer, ticker, depositLamports, createdAt, expiresAt, state: pending\|created\|refunded\|closed, mint }` |
+| `/tickets?payer=` | `{ tickets }`, newest first, at most 50 |
+| `/stream[?mint=]` (WebSocket) | `{ type: "coin", coin }`, `{ type: "trade", trade }`, `{ type: "ticket", ticket }`; `?mint=` limits it to one coin |
+| `/health` | `{ ok, coins, tickets, newestSignature }` |
+
+`Coin` has these fields:
+
+- **Identity and links:** `mint`, `curve`, `creator`, `ticket`, `name`,
+  `symbol`, `uri`, `image`, `description`, `socials {x, website, telegram}`.
+- **Lifecycle:** `createdAt`, `createdSlot`, `tradingOpenSlot`, and
+  `status`: `new` (first hour), `active`, `graduating` (complete, not yet
+  migrated) or `graduated`. Also `complete`, `migrated`, `escrowReleased`.
+- **Curve and price:** `reserves {virtualToken, virtualSol, realToken,
+  realSol}`, `totalSupply`, `priceSol`, `mcapSol`, `athMcapSol`.
+- **Progress:** `progress`, the share of the curve's sellable tokens sold,
+  0..1.
+- **Other state:** `escrowAccruedLamports`, `raydiumPool`, `tweetLocked`,
+  `holders` (a count, or null until counted).
+- **`stats`:**
+  - `volume24hLamports` (the curve side, `TradeEvent.sol_amount`; fees not
+    included), plus `buyVolume24hLamports` and `sellVolume24hLamports`;
+  - `trades24h`, `buys24h`, `sells24h`, `traders24h`;
+  - `change1h`, `change6h`, `change24h`: fractions, null when the indexed
+    history doesn't reach back that far;
+  - `spark`: 24 hourly prices;
+  - `lastTradeAt`.
+
+`Trade` has `signature`, `index` (the event's position in its transaction),
+`mint`, `user`, `side`, `tokenAmount`, `solAmount`, `fee`, `slot`,
+`timestamp`, and the price and market cap after the trade (`priceSol`,
+`mcapSol`).
+
+### 5.3 Limits and what's not indexed
+
+- **In memory:** state is held in memory, capped at 5,000 trades per coin and
+  1,000 per wallet. A restart re-reads the last `BACKFILL_LIMIT` program
+  transactions. Coins older than that have no full history, so their price
+  changes can be null. Durable storage means implementing the same `Store`
+  methods over SQLite or Postgres.
+- **After graduation:** trades on Raydium aren't indexed; graduated coins are
+  priced from the pool.
+- **Abuse limits:** RPC-backed requests are limited per IP. The stream drops a
+  client that falls 1 MB behind.

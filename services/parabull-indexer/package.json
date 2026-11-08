@@ -1,0 +1,20 @@
+{
+  "name": "@parabull/indexer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Indexes Parabull's on-chain curves, launch tickets, trades and holders from Solana RPC and serves them over REST and a WebSocket stream. Runs apart from app/.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "test": "tsx --test src/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}
