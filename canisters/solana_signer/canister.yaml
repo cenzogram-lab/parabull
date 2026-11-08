@@ -1,0 +1,5 @@
+# The Chain Fusion Solana signer (Path A of the app's connect dialog). Built by the Motoko recipe from mops.toml in
+# this directory; see README.md for deploying and configuring it.
+name: solana_signer
+recipe:
+  type: "@dfinity/motoko@v5.0.0"

@@ -299,11 +299,13 @@ The connect dialog (`src/components/ConnectModal.tsx`) replaces the wallet adapt
   - sends the canister the transaction message together with the address it expects to sign as;
   - checks the 64-byte signature against that address;
   - attaches the signature to the transaction.
-- **The canister's contract is in `src/lib/auth/solana_signer.did`.** The frontend cannot enforce it:
+- **The canister is [`canisters/solana_signer`](../canisters/solana_signer/README.md)** (Motoko); its contract is in
+  `src/lib/auth/solana_signer.did`. It enforces what the frontend cannot:
   - derive the key from `msg.caller` only, never from an argument;
-  - refuse the anonymous principal;
-  - trap if the expected address doesn't match the caller's key;
-  - bound the message size and rate-limit or charge callers, since every signature costs cycles.
+  - refuse anonymous callers;
+  - refuse the request, before any signature, if the expected address isn't the caller's;
+  - bound the message size (1232 bytes) and rate-limit callers, per caller and globally, since every signature
+    costs cycles.
 - **Without a signer canister** (`VITE_II_SIGNER_CANISTER_ID` unset):
   - demo builds and the dev server sign with a development key derived from the principal, and the dialog says so;
   - localnet builds skip II and use a random per-tab test principal;

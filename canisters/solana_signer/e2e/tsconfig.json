@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "typeRoots": ["../../../app/node_modules/@types"],
+    "types": ["node"]
+  },
+  "files": ["signer.test.ts"]
+}

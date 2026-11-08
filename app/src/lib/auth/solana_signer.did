@@ -1,19 +1,37 @@
 // Chain Fusion signer for Internet Identity users (Path A): an ICP canister holds no Solana keys of its own. Each user's
 // Solana address is a threshold Ed25519 public key (`schnorr_public_key`, algorithm ed25519) derived from their
-// principal, and transactions are signed with `sign_with_schnorr` under the same derivation path. Both methods are
-// update calls (they call the management canister). The app's client is app/src/lib/auth/chainFusionSigner.ts.
+// principal, and transactions are signed with `sign_with_schnorr` under the same derivation path.
 //
-// Security contract (the canister MUST enforce it; the frontend cannot):
+// The canister is canisters/solana_signer (Motoko); its own copy of this interface, canisters/solana_signer/
+// solana_signer.did, is what `mops build` checks it against. The app's client (chainFusionSigner.ts, solanaSignerIdl.ts)
+// calls get_solana_address and sign_solana_transaction.
+//
+// Security contract, enforced by the canister (the frontend cannot):
 //   * sign_solana_transaction derives the key ONLY from msg.caller. It never signs with a key chosen by an argument.
-//     The anonymous principal is rejected.
+//     Anonymous callers are refused.
 //   * Its second argument is the 32-byte Solana public key the client expects to sign as. The canister derives the
-//     caller's key, compares, and traps on a mismatch, so a client can never sign as someone else, and a stale
-//     address is caught instead of producing a signature for the wrong account.
-//   * Its first argument is the serialized Solana transaction message (the bytes Ed25519 signs over); the result is the
-//     64-byte signature. The canister should bound the message size, charge or rate-limit callers (every signature
-//     costs cycles), and may decode the message to refuse transactions it doesn't recognise.
-//   * get_solana_address only reads a public key, so any principal can be looked up.
+//     caller's key, compares, and refuses a mismatch before requesting any signature, so a client can never sign as
+//     someone else, and a stale address is caught instead of producing a signature for the wrong account.
+//   * Its first argument is the serialized Solana transaction message (the bytes Ed25519 signs over, 1 to 1232 bytes);
+//     the result is the 64-byte signature. Callers are rate-limited, per caller and globally (every signature costs
+//     cycles).
+//   * get_solana_address is an update call: deriving a key calls the management canister, which a query can't. It
+//     only reads a public key, so any principal can be looked up. lookup_solana_address is the query for an address
+//     the canister has already derived.
+// Refusals are rejects whose message says why.
+type Limits = record { per_caller_per_minute : nat; global_per_minute : nat };
+type ConfigUpdate = record { key_name : opt text; signing_paused : opt bool; limits : opt Limits };
+type Status = record {
+  key_name : text;
+  signing_paused : bool;
+  limits : Limits;
+  known_addresses : nat;
+  signatures_issued : nat;
+};
 service : {
-  "get_solana_address" : (principal) -> (text);
-  "sign_solana_transaction" : (blob, vec nat8) -> (blob);
+  get_solana_address : (principal) -> (text);
+  lookup_solana_address : (principal) -> (opt text) query;
+  sign_solana_transaction : (blob, vec nat8) -> (blob);
+  configure : (ConfigUpdate) -> ();
+  status : () -> (Status) query;
 }

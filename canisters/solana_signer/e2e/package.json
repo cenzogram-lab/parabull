@@ -1,0 +1,18 @@
+{
+  "name": "@parabull/solana-signer-e2e",
+  "private": true,
+  "type": "module",
+  "description": "PocketIC integration tests for the solana_signer canister, driven by the app's Chain Fusion client.",
+  "scripts": {
+    "test": "tsx --test signer.test.ts",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@dfinity/pic": "0.25.0",
+    "@icp-sdk/core": "6.1.1",
+    "@noble/curves": "2.4.0",
+    "bs58": "6.0.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}
