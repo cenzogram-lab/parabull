@@ -56,16 +56,25 @@ export function useChatRoom(mint: string): ChatRoom {
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const socket = useRef<WebSocket | null>(null);
+  /** The token the socket last authenticated with: a replacement session must be sent even for the same wallet. */
+  const socketToken = useRef<string | null>(null);
   const readyWaiters = useRef<((wallet: string | null) => void)[]>([]);
+  /** A post waiting for the room's answer: its own message coming back, or an error. */
+  const pendingSend = useRef<{ text: string; resolve: (ok: boolean) => void } | null>(null);
   const walletRef = useRef(wallet);
   walletRef.current = wallet;
   const roomUrl = endpoints?.room(mint) ?? null;
 
   const authenticate = useCallback((ws: WebSocket, w: string | null) => {
     const s = w ? validSession(w) : null;
+    socketToken.current = s?.token ?? null;
     if (s) ws.send(JSON.stringify({ type: "auth", token: s.token }));
     else ws.send(JSON.stringify({ type: "signout" }));
   }, []);
+  const settleSend = (ok: boolean) => {
+    pendingSend.current?.resolve(ok);
+    pendingSend.current = null;
+  };
 
   // The socket: connect, replay, reconnect with backoff.
   useEffect(() => {
@@ -97,7 +106,11 @@ export function useChatRoom(mint: string): ChatRoom {
           return;
         }
         if (f.type === "history") setMessages(f.messages.slice(-CHAT_HISTORY));
-        else if (f.type === "message") setMessages((m) => (m.some((x) => x.id === f.message.id) ? m : [...m, f.message].slice(-CHAT_HISTORY)));
+        else if (f.type === "message") {
+          setMessages((m) => (m.some((x) => x.id === f.message.id) ? m : [...m, f.message].slice(-CHAT_HISTORY)));
+          const p = pendingSend.current;
+          if (p && f.message.author === walletRef.current && f.message.text === p.text) settleSend(true);
+        }
         else if (f.type === "presence") setOnline(f.count);
         else if (f.type === "ready") {
           setSignedInAs(f.wallet);
@@ -105,9 +118,11 @@ export function useChatRoom(mint: string): ChatRoom {
         } else if (f.type === "error") {
           if (f.code === "session_expired" || f.code === "sign_in_required") {
             if (walletRef.current) sessions.delete(walletRef.current);
+            socketToken.current = null;
             setSignedInAs(null);
             readyWaiters.current.splice(0).forEach((r) => r(null));
           }
+          settleSend(false);
           if (f.code === "rate_limited" && f.retryAfterMs) setCooldownUntil(Date.now() + f.retryAfterMs);
           setError(f.error);
         }
@@ -115,6 +130,8 @@ export function useChatRoom(mint: string): ChatRoom {
       ws.onclose = () => {
         window.clearInterval(ping);
         if (socket.current === ws) socket.current = null;
+        socketToken.current = null;
+        settleSend(false);
         setSignedInAs(null);
         readyWaiters.current.splice(0).forEach((r) => r(null));
         if (closed) return;
@@ -159,12 +176,15 @@ export function useChatRoom(mint: string): ChatRoom {
         setSigningIn(false);
       }
     }
+    // Authenticate unless the socket already holds this very token: a replacement session (the old one ran out)
+    // has to be sent even though the socket is signed in as the same wallet.
     const ws = socket.current;
-    if (ws?.readyState === WebSocket.OPEN && signedInAs !== wallet) {
+    if (ws?.readyState === WebSocket.OPEN && (signedInAs !== wallet || socketToken.current !== s.token)) {
       const ready = new Promise<string | null>((resolve) => {
         readyWaiters.current.push(resolve);
         window.setTimeout(() => resolve(null), 5_000);
       });
+      socketToken.current = s.token;
       ws.send(JSON.stringify({ type: "auth", token: s.token }));
       if ((await ready) !== wallet) throw new Error("Couldn't sign in to the chat: try again");
     }
@@ -182,9 +202,15 @@ export function useChatRoom(mint: string): ChatRoom {
         await ensureSignedIn();
         const ws = socket.current;
         if (ws?.readyState !== WebSocket.OPEN) throw new Error("Chat is reconnecting: try again in a moment");
+        // Done when the room answers: our message comes back (true) or an error does (false, the draft stays).
+        settleSend(false);
+        const answered = new Promise<boolean>((resolve) => {
+          pendingSend.current = { text: t.value, resolve };
+          window.setTimeout(() => pendingSend.current?.resolve === resolve && (settleSend(false), setError("The chat didn't answer: try again")), 8_000);
+        });
         ws.send(JSON.stringify({ type: "send", text: t.value, attachments }));
         setCooldownUntil(Date.now() + CHAT_COOLDOWN_MS);
-        return true;
+        return await answered;
       } catch (e) {
         setError((e as Error).message);
         return false;

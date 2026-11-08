@@ -89,7 +89,8 @@ async function uploadRoute(request: Request, env: Env, allow: Record<string, str
   const length = Number(request.headers.get("content-length"));
   if (!request.headers.has("content-length") || !Number.isFinite(length)) return json(411, { error: "content-length is required" }, allow);
   if (length > MAX_REQUEST_BYTES) return json(413, { error: `request is larger than ${MAX_REQUEST_BYTES} bytes` }, allow);
-  if (await limited(env.CHAT_LIMITER, request, `chat-upload:${session.wallet}`)) return json(429, { error: "too many uploads, try again in a minute" }, { ...allow, "retry-after": "60" });
+  // Keyed by IP (as sign-ins are), so switching between wallets doesn't buy more uploads.
+  if (await limited(env.CHAT_LIMITER, request, "chat-upload")) return json(429, { error: "too many uploads, try again in a minute" }, { ...allow, "retry-after": "60" });
   let form: FormData;
   try {
     form = await request.formData();

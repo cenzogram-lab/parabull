@@ -427,3 +427,51 @@ test("routing: POST /chat/upload stores a chat image for a signed-in wallet", as
   await send(room, sock, { type: "send", text: "", attachments: [url] });
   assert.deepEqual(sock.last("message")?.message.attachments, [{ kind: "gif", url }]);
 });
+
+test("review: /chat/session caps a streamed body without Content-Length at 2 KB while reading", async () => {
+  const { readJson } = await import("./http");
+  let pulled = 0;
+  const endless = new ReadableStream<Uint8Array>({
+    pull(c) {
+      pulled++;
+      c.enqueue(new Uint8Array(1024).fill(0x20));
+    },
+  });
+  const req = new Request("https://edge.test/chat/session", { method: "POST", body: endless, duplex: "half" } as RequestInit);
+  assert.equal(req.headers.has("content-length"), false);
+  assert.equal(await readJson(req, 2048), null);
+  assert.ok(pulled <= 4, `stopped reading early (${pulled} chunks)`);
+  // Bytes, not characters: 1,000 three-byte characters are 3,000 bytes.
+  const wide = new Request("https://edge.test/chat/session", { method: "POST", body: JSON.stringify("€".repeat(1000)) });
+  assert.equal(await readJson(wide, 2048), null);
+  const ok = new Request("https://edge.test/chat/session", { method: "POST", body: '{"a":1}' });
+  assert.deepEqual(await readJson(ok, 2048), { a: 1 });
+  // Through the route: refused, nothing issued.
+  const e = env();
+  const streamed = new ReadableStream<Uint8Array>({ pull: (c) => c.enqueue(new Uint8Array(1024).fill(0x20)) });
+  const res = await handle(new Request("https://edge.test/chat/session", { method: "POST", headers: { origin: APP }, body: streamed, duplex: "half" } as RequestInit), e, T0);
+  assert.equal(res.status, 400);
+});
+
+test("review: chat uploads are limited per IP, whichever wallet signs them", async () => {
+  const keys: string[] = [];
+  const e = env({ CHAT_LIMITER: { limit: async ({ key }) => (keys.push(key), { success: true }) } });
+  for (const w of [await wallet(), await wallet()]) {
+    const token = await issueToken(SECRET, w.address, T0 + CHAT_SESSION_MS);
+    const form = new FormData();
+    form.append("image", new File([new TextEncoder().encode("GIF89a\x01\x00\x01\x00")], "x.gif"));
+    const encoded = new Response(form);
+    const body = new Uint8Array(await encoded.arrayBuffer());
+    const res = await handle(
+      new Request("https://edge.test/chat/upload", {
+        method: "POST",
+        headers: { origin: APP, authorization: `Bearer ${token}`, "cf-connecting-ip": "198.51.100.9", "content-type": encoded.headers.get("content-type")!, "content-length": String(body.length) },
+        body,
+      }),
+      e,
+      T0,
+    );
+    assert.equal(res.status, 200);
+  }
+  assert.deepEqual(keys, ["chat-upload:198.51.100.9", "chat-upload:198.51.100.9"], "one key for the IP, not one per wallet");
+});

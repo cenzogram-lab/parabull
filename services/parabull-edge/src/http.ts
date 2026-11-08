@@ -45,14 +45,35 @@ export function base64UrlToBytes(s: string): Uint8Array | null {
   return base64ToBytes(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
 }
 
-/** Reads a JSON body of at most `max` bytes, or null. */
+/**
+ * Reads a JSON body of at most `max` bytes, or null. The cap holds while reading: a body without Content-Length (or
+ * longer than it claims) is cut off at `max` bytes rather than buffered whole.
+ */
 export async function readJson(request: Request, max: number): Promise<unknown | null> {
   const length = Number(request.headers.get("content-length"));
   if (request.headers.has("content-length") && (!Number.isFinite(length) || length > max)) return null;
-  const text = await request.text();
-  if (text.length > max) return null;
+  if (!request.body) return null;
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    bytes.set(c, at);
+    at += c.byteLength;
+  }
   try {
-    return JSON.parse(text);
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch {
     return null;
   }
