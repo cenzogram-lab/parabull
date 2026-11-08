@@ -17,7 +17,8 @@
 import { isAddress } from "../../../app/src/lib/chatMessage";
 import { allowedOrigins, cors, json, preflight, readJson } from "./http";
 import { MAX_IMAGE_BYTES, MAX_REQUEST_BYTES, publicBase, putOnce, sha256Hex, sniffImage, storeMetadata, type MediaBucket } from "./metadata";
-import { broadcastInput, type BroadcastEnv } from "./broadcast";
+import type { BroadcastEnv, BroadcastResult } from "./broadcast";
+import { LIVE_INPUT_PATH } from "./chatRoom";
 import { liveStreams } from "./live";
 import { createSession, verifyToken } from "./session";
 
@@ -145,7 +146,13 @@ export async function handle(request: Request, env: Env, now = Date.now(), fetch
     if (await limited(env.CHAT_LIMITER, request, "live-input")) return json(429, { error: "too many requests, try again in a minute" }, { ...allow, "retry-after": "60" });
     const body = await readJson(request, 1_024);
     if (body === null) return json(400, { error: "expected a small JSON body" }, allow);
-    const result = await broadcastInput(env, session.wallet, body, fetchImpl, now);
+    const mint = (body as { mint?: unknown }).mint;
+    if (!isAddress(mint)) return json(400, { error: "mint must be a Solana address" }, allow);
+    // The coin's room runs these one at a time (two first-time requests must not both create an input).
+    if (!env.CHAT_ROOMS) return json(503, { error: "going live is not configured" }, allow);
+    const room = env.CHAT_ROOMS.get(env.CHAT_ROOMS.idFromName(mint));
+    const forwarded = await room.fetch(new Request(`https://room${LIVE_INPUT_PATH}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ wallet: session.wallet, body }) }));
+    const result = (await forwarded.json()) as BroadcastResult;
     // Carries the stream key: never cached anywhere.
     return result.ok ? json(200, result.value, allow) : json(result.status, { error: result.error }, allow);
   }

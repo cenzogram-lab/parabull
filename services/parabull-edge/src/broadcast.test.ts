@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 import { base58Decode, CHAT_SESSION_MS } from "../../../app/src/lib/chatMessage";
-import { broadcastInput, CREATE_KEY_WINDOW_MS, type BroadcastEnv } from "./broadcast";
+import { broadcastInput, type BroadcastEnv } from "./broadcast";
+import { ChatRoomCore, type RoomState } from "./chatRoom";
 import { resetLiveCache } from "./live";
-import { handle, type Env } from "./router";
+import { handle, type ChatNamespace, type Env } from "./router";
 import { issueToken } from "./session";
 import { base58Encode, bondingCurveAddress, BONDING_CURVE_DISCRIMINATOR, curveCreator, isOnCurve, PARABULL_PROGRAM_ID } from "./solana";
 
@@ -36,10 +37,9 @@ function curveAccount(mint: string, creator: string, disc = BONDING_CURVE_DISCRI
 
 /** RPC + Stream API stand-in. */
 function upstream(opts: { creator?: string; owner?: string; disc?: number[]; accountMint?: string; missing?: boolean; rpcDown?: boolean; inputs?: Record<string, unknown>[]; streamDown?: boolean } = {}) {
-  const calls: { method: string; url: string; body: unknown; auth: string | null; idem: string | null }[] = [];
-  const inputs = opts.inputs ?? [];
-  // Cloudflare's Idempotency-Key: a repeated key gets the input the first create made; a new key, a new input.
-  const created = new Map<string, string>();
+  const calls: { method: string; url: string; body: unknown; auth: string | null }[] = [];
+  // Like the real API, the list shows the inputs created so far.
+  const inputs = [...(opts.inputs ?? [])];
   const creds = (uid: string, meta: unknown) => ({
     uid,
     meta,
@@ -50,8 +50,8 @@ function upstream(opts: { creator?: string; owner?: string; disc?: number[]; acc
   const f = async (url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     const body = init?.body ? JSON.parse(String(init.body)) : null;
-    const headers = new Headers(init?.headers);
-    calls.push({ method, url, body, auth: headers.get("authorization"), idem: headers.get("idempotency-key") });
+    calls.push({ method, url, body, auth: new Headers(init?.headers).get("authorization") });
+    await new Promise((r) => setTimeout(r, 2)); // network time: racing requests interleave as they would for real
     if (url === RPC) {
       if (opts.rpcDown) return new Response("down", { status: 503 });
       if (opts.missing) return Response.json({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: null } });
@@ -61,9 +61,8 @@ function upstream(opts: { creator?: string; owner?: string; disc?: number[]; acc
     if (opts.streamDown) return Response.json({ success: false }, { status: 500 });
     if (url === api && method === "GET") return Response.json({ success: true, result: { liveInputs: inputs.map((i) => ({ uid: i.uid, meta: i.meta, enabled: true })) } });
     if (url === api && method === "POST") {
-      const key = headers.get("idempotency-key");
-      const uid = (key && created.get(key)) ?? "cdef"[created.size % 4].repeat(32);
-      if (key) created.set(key, uid);
+      const uid = "cdef"[(inputs.length - (opts.inputs?.length ?? 0)) % 4].repeat(32);
+      inputs.push({ uid, meta: body.meta });
       return Response.json({ success: true, result: creds(uid, body.meta) });
     }
     const one = url.startsWith(`${api}/`) ? url.slice(api.length + 1) : null;
@@ -72,6 +71,32 @@ function upstream(opts: { creator?: string; owner?: string; disc?: number[]; acc
     return new Response("unexpected", { status: 599 });
   };
   return { fetchImpl: f as unknown as typeof fetch, calls };
+}
+
+/** A coin's room for going live: no sockets, and storage that must never be touched. */
+function liveRoom(fetchImpl: typeof fetch, e: BroadcastEnv = env) {
+  const state: RoomState = {
+    storage: { sql: { exec: () => assert.fail("going live must not touch chat storage") } },
+    acceptWebSocket: () => assert.fail("no sockets"),
+    getWebSockets: () => [],
+  };
+  return new ChatRoomCore(state, e, { now: () => 0, newId: () => "id", fetch: fetchImpl });
+}
+
+/** CHAT_ROOMS as the Worker sees it: one room per mint, made on first use, like Durable Objects. */
+function rooms(fetchImpl: typeof fetch) {
+  const made = new Map<string, ChatRoomCore>();
+  const ns: ChatNamespace = {
+    idFromName: (name) => name,
+    get: (id) => ({
+      fetch: (req) => {
+        const key = id as string;
+        if (!made.has(key)) made.set(key, liveRoom(fetchImpl));
+        return made.get(key)!.fetch(req);
+      },
+    }),
+  };
+  return { ns, made };
 }
 
 beforeEach(resetLiveCache);
@@ -119,28 +144,26 @@ test("broadcast: the on-chain creator gets a new live input on first use", async
   assert.ok(u.calls.filter((c) => c.url.startsWith("https://api.cloudflare.com")).every((c) => c.auth === "Bearer write-token"));
 });
 
-test("broadcast: racing first-time requests for a coin make one input (Idempotency-Key per mint and window)", async () => {
+test("broadcast: racing first-time requests for a coin make one input (serialized in the coin's room)", async () => {
+  const creates = (u: ReturnType<typeof upstream>) => u.calls.filter((c) => c.method === "POST" && c.url.startsWith("https://api.cloudflare.com")).length;
+  // Unserialized, both requests list no input and both create one: two inputs, two stream keys.
+  const raw = upstream();
+  const [x, y] = await Promise.all([broadcastInput(env, CREATOR, { mint: MINT }, raw.fetchImpl), broadcastInput(env, CREATOR, { mint: MINT }, raw.fetchImpl)]);
+  assert.ok(x.ok && y.ok);
+  assert.equal(creates(raw), 2, "the race this guards against");
+  assert.notEqual(x.value.input, y.value.input);
+  // Through the room, the second waits for the first, finds its input and reuses it.
   const u = upstream();
-  const t = 5 * CREATE_KEY_WINDOW_MS + 1_000;
-  // Both see no input yet (the stand-in's list stays empty), so both create.
-  const [a, b] = await Promise.all([
-    broadcastInput(env, CREATOR, { mint: MINT }, u.fetchImpl, t),
-    broadcastInput(env, CREATOR, { mint: MINT, title: "AMA" }, u.fetchImpl, t + 30_000),
-  ]);
-  assert.ok(a.ok && b.ok);
-  assert.equal(a.value.input, b.value.input, "one input for the coin");
-  assert.equal(a.value.rtmps?.streamKey, b.value.rtmps?.streamKey);
-  const creates = u.calls.filter((c) => c.method === "POST" && c.url.startsWith("https://api.cloudflare.com"));
-  assert.equal(creates.length, 2);
-  assert.ok(creates.every((c) => c.idem === `parabull-live-input:${MINT}:5`), JSON.stringify(creates.map((c) => c.idem)));
-  // Another coin, or the same coin in a later window, is a different key.
-  const OTHER = "CWh5S2rBmLoHGSvGfSHQDkUhZzCxAGVDYbspyu2MN7R2";
-  const o = upstream({ accountMint: OTHER });
-  assert.ok((await broadcastInput(env, CREATOR, { mint: OTHER }, o.fetchImpl, t)).ok);
-  assert.equal(o.calls.find((c) => c.method === "POST" && c.url.startsWith("https://api.cloudflare.com"))?.idem, `parabull-live-input:${OTHER}:5`);
-  const later = upstream();
-  await broadcastInput(env, CREATOR, { mint: MINT }, later.fetchImpl, t + CREATE_KEY_WINDOW_MS);
-  assert.equal(later.calls.find((c) => c.method === "POST" && c.url.startsWith("https://api.cloudflare.com"))?.idem, `parabull-live-input:${MINT}:6`);
+  const room = liveRoom(u.fetchImpl);
+  const results = await Promise.all([room.liveInput(CREATOR, { mint: MINT }), room.liveInput(CREATOR, { mint: MINT, title: "AMA" }), room.liveInput(CREATOR, { mint: MINT })]);
+  assert.ok(results.every((r) => r.ok));
+  assert.equal(creates(u), 1, "one input for the coin");
+  assert.equal(new Set(results.map((r) => r.ok && r.value.rtmps?.streamKey)).size, 1, "one stream key");
+  // A failed request doesn't block the next one.
+  const flaky = upstream({ rpcDown: true });
+  const r2 = liveRoom(flaky.fetchImpl);
+  assert.equal((await r2.liveInput(CREATOR, { mint: MINT })).ok, false);
+  assert.equal((await r2.liveInput(STRANGER, { mint: MINT })).ok, false);
 });
 
 test("broadcast: the coin's existing input is reused; a new title updates it", async () => {
@@ -176,7 +199,8 @@ test("broadcast: refused for anyone but the creator, bad input, missing config, 
 
 test("broadcast: POST /live/input needs a wallet session; the answer is never cached", async () => {
   const u = upstream();
-  const e = { ...env, MEDIA: { head: async () => null, put: async () => ({}) }, MEDIA_PUBLIC_URL: "https://media.parabull.test", ALLOWED_ORIGINS: APP, CHAT_SECRET: SECRET } as Env;
+  const r = rooms(u.fetchImpl);
+  const e = { ...env, MEDIA: { head: async () => null, put: async () => ({}) }, MEDIA_PUBLIC_URL: "https://media.parabull.test", ALLOWED_ORIGINS: APP, CHAT_SECRET: SECRET, CHAT_ROOMS: r.ns } as Env;
   const post = (auth: string | null, origin = APP) =>
     new Request("https://edge.test/live/input", { method: "POST", headers: { origin, "content-type": "application/json", ...(auth ? { authorization: auth } : {}) }, body: JSON.stringify({ mint: MINT, title: "AMA" }) });
   assert.equal((await handle(post(null), e, 0, u.fetchImpl)).status, 401);
@@ -189,6 +213,16 @@ test("broadcast: POST /live/input needs a wallet session; the answer is never ca
   assert.equal(res.headers.get("cache-control"), "no-store");
   assert.equal(res.headers.get("access-control-allow-origin"), APP);
   assert.ok(((await res.json()) as { rtmps: { streamKey: string } }).rtmps.streamKey);
+  assert.deepEqual([...r.made.keys()], [MINT], "handled in the coin's own room");
+  // Racing requests through the Worker: one input.
+  const racing = await Promise.all([1, 2, 3].map(() => handle(post(`Bearer ${token}`), e, 0, u.fetchImpl)));
+  assert.equal(new Set(await Promise.all(racing.map(async (x) => ((await x.json()) as { input: string }).input))).size, 1);
+  assert.equal(u.calls.filter((c) => c.method === "POST" && c.url.startsWith("https://api.cloudflare.com")).length, 1);
+  // A bad mint never reaches a room; no CHAT_ROOMS binding fails closed.
+  const bad = await handle(new Request("https://edge.test/live/input", { method: "POST", headers: { origin: APP, authorization: `Bearer ${token}` }, body: JSON.stringify({ mint: "../x" }) }), e, 0, u.fetchImpl);
+  assert.equal(bad.status, 400);
+  assert.deepEqual([...r.made.keys()], [MINT]);
+  assert.equal((await handle(post(`Bearer ${token}`), { ...e, CHAT_ROOMS: undefined }, 0, u.fetchImpl)).status, 503);
   assert.equal((await handle(post(`Bearer ${token}`, "https://evil.test"), e, 0, u.fetchImpl)).status, 403);
   const pre = await handle(new Request("https://edge.test/live/input", { method: "OPTIONS", headers: { origin: APP } }), e, 0, u.fetchImpl);
   assert.match(pre.headers.get("access-control-allow-headers") ?? "", /authorization/);

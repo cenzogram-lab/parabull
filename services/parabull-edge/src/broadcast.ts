@@ -8,9 +8,9 @@
  * - What: one live input per coin, found by `meta.mint` and reused; created the first time with
  *   `meta {mint, creator, title}` and automatic recording. A new title updates `meta.title`. The answer carries the
  *   stream key, so it is never cached.
- * - Races: two first-time requests for a coin (a double click, two devices) both find no input. The create carries an
- *   `Idempotency-Key` for the mint and a 10-minute window, so Cloudflare makes one input and answers both with it. The
- *   window keeps a key from pointing at an input deleted long ago.
+ * - Races: two first-time requests for a coin (a double click, two devices) would both find no input and both create
+ *   one. So the Worker never calls this directly: it runs inside the coin's ChatRoom Durable Object (one instance per
+ *   mint), one request at a time (ChatRoomCore.liveInput).
  * Needs CF_STREAM_TOKEN with Stream Write (create/update), plus CF_ACCOUNT_ID, STREAM_HOST and SOLANA_RPC_URL; without
  * them it answers 503. Fails closed on every upstream error.
  */
@@ -38,10 +38,6 @@ export interface BroadcastInput {
 export type BroadcastResult = { ok: true; value: BroadcastInput } | { ok: false; status: number; error: string };
 
 export const MAX_TITLE = 80;
-/** How long one create key stays the same: long enough to cover racing requests, short enough to go stale quickly. */
-export const CREATE_KEY_WINDOW_MS = 10 * 60_000;
-
-export const createKey = (mint: string, now: number) => `parabull-live-input:${mint}:${Math.floor(now / CREATE_KEY_WINDOW_MS)}`;
 
 type Fetch = typeof fetch;
 interface CfInput {
@@ -62,7 +58,8 @@ function shape(i: CfInput, mint: string, host: string): BroadcastInput | null {
   return { input: uid, mint, title: s(meta.title), rtmps, srt, hls: hlsUrl(host, uid) };
 }
 
-export async function broadcastInput(env: BroadcastEnv, wallet: string, body: unknown, fetchImpl: Fetch = fetch, now = Date.now()): Promise<BroadcastResult> {
+/** Run it through ChatRoomCore.liveInput (serialized per coin), never directly from a request handler. */
+export async function broadcastInput(env: BroadcastEnv, wallet: string, body: unknown, fetchImpl: Fetch = fetch): Promise<BroadcastResult> {
   const host = streamHost(env.STREAM_HOST);
   if (!env.CF_ACCOUNT_ID || !/^[0-9a-f]{32}$/.test(env.CF_ACCOUNT_ID) || !env.CF_STREAM_TOKEN || !host || !env.SOLANA_RPC_URL) return { ok: false, status: 503, error: "going live is not configured" };
   const b = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
@@ -78,9 +75,9 @@ export async function broadcastInput(env: BroadcastEnv, wallet: string, body: un
 
   const api = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/stream/live_inputs`;
   const auth = { authorization: `Bearer ${env.CF_STREAM_TOKEN}` };
-  const call = async (url: string, init: RequestInit = {}, extra: Record<string, string> = {}): Promise<{ ok: boolean; result: unknown }> => {
+  const call = async (url: string, init: RequestInit = {}): Promise<{ ok: boolean; result: unknown }> => {
     try {
-      const res = await fetchImpl(url, { ...init, headers: { ...auth, ...(init.body ? { "content-type": "application/json" } : {}), ...extra } });
+      const res = await fetchImpl(url, { ...init, headers: { ...auth, ...(init.body ? { "content-type": "application/json" } : {}) } });
       const json = (await res.json()) as { success?: boolean; result?: unknown };
       return { ok: res.ok && json.success === true, result: json.result };
     } catch {
@@ -98,11 +95,7 @@ export async function broadcastInput(env: BroadcastEnv, wallet: string, body: un
 
   let got: { ok: boolean; result: unknown };
   if (!existing) {
-    got = await call(
-      api,
-      { method: "POST", body: JSON.stringify({ meta: { mint, creator: wallet, ...(title ? { title } : {}) }, recording: { mode: "automatic" }, enabled: true }) },
-      { "idempotency-key": createKey(mint, now) },
-    );
+    got = await call(api, { method: "POST", body: JSON.stringify({ meta: { mint, creator: wallet, ...(title ? { title } : {}) }, recording: { mode: "automatic" }, enabled: true }) });
   } else {
     const meta: Record<string, unknown> = { ...(existing.meta as Record<string, unknown>), mint, creator: wallet };
     if (title && meta.title !== title) {

@@ -9,6 +9,9 @@
  * - Anyone can read: a new socket gets the last CHAT_HISTORY messages and the reader count. Posting needs
  *   `{type:"auth",token}` with a session token (src/session.ts), at most one message per CHAT_COOLDOWN_MS per wallet,
  *   CHAT_MAX_CHARS characters, and attachments only from MEDIA_PUBLIC_URL/img/.
+ * - The room also serializes going live for its coin (POST /live/input, src/broadcast.ts): the Worker forwards each
+ *   request here, and they run one at a time, so two first-time requests can't both create a Stream input. That path
+ *   is internal: the Worker only ever forwards /chat/:mint from the outside.
  */
 import {
   CHAT_COOLDOWN_MS,
@@ -23,7 +26,11 @@ import {
   type ChatMessage,
   type ServerFrame,
 } from "../../../app/src/lib/chatMessage";
+import { broadcastInput, type BroadcastEnv, type BroadcastResult } from "./broadcast";
 import { verifyToken } from "./session";
+
+/** The Worker forwards POST /live/input to the coin's room on this path, with `{ wallet, body }`. */
+export const LIVE_INPUT_PATH = "/__live-input";
 
 /** The parts of the Durable Object APIs the room uses (the runtime's objects satisfy them). */
 export interface SqlCursor<T> {
@@ -43,7 +50,7 @@ export interface RoomState {
   acceptWebSocket(ws: RoomSocket, tags?: string[]): void;
   getWebSockets(tag?: string): RoomSocket[];
 }
-export interface RoomEnv {
+export interface RoomEnv extends BroadcastEnv {
   CHAT_SECRET?: string;
   MEDIA_PUBLIC_URL?: string;
 }
@@ -54,6 +61,8 @@ export interface RoomDeps {
   newPair?(): { client: unknown; server: RoomSocket };
   /** The 101 response handing `client` to the caller (`new Response(null, {status: 101, webSocket})` in Workers). */
   upgradeResponse?(client: unknown): Response;
+  /** Reaches Solana RPC and the Stream API for going live (the global fetch in Workers; tests pass a stand-in). */
+  fetch?: typeof fetch;
 }
 
 /** What a socket remembers across hibernation. */
@@ -77,6 +86,8 @@ type Row = { id: string; author: string; text: string; attachments: string; ts: 
 
 export class ChatRoomCore {
   private ready = false;
+  /** Going-live requests for this coin, chained so each starts after the previous one finished. */
+  private liveInputs: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly state: RoomState,
@@ -113,9 +124,27 @@ export class ChatRoomCore {
     return rows.reverse().map((r) => ({ id: r.id, mint, author: r.author, text: r.text, attachments: JSON.parse(r.attachments) as ChatAttachment[], ts: Number(r.ts) }));
   }
 
-  /** GET /chat/:mint with Upgrade: websocket, forwarded by the Worker (which already checked the origin and mint). */
+  /**
+   * The coin's live input for `wallet` (src/broadcast.ts), one request at a time. This object is the only one for its
+   * mint, so a request that waited here sees the input the one before it created, and reuses it.
+   */
+  liveInput(wallet: string, body: unknown): Promise<BroadcastResult> {
+    const run = this.liveInputs.then(() => broadcastInput(this.env, wallet, body, this.deps.fetch ?? fetch));
+    this.liveInputs = run.catch(() => undefined);
+    return run;
+  }
+
+  /**
+   * GET /chat/:mint with Upgrade: websocket, forwarded by the Worker (which already checked the origin and mint), or
+   * the Worker's internal POST LIVE_INPUT_PATH.
+   */
   async fetch(request: Request): Promise<Response> {
-    const mint = new URL(request.url).pathname.split("/")[2] ?? "";
+    const { pathname } = new URL(request.url);
+    if (pathname === LIVE_INPUT_PATH && request.method === "POST") {
+      const { wallet, body } = (await request.json()) as { wallet: string; body: unknown };
+      return Response.json(await this.liveInput(wallet, body));
+    }
+    const mint = pathname.split("/")[2] ?? "";
     if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return new Response("expected a websocket", { status: 426 });
     if (!isAddress(mint)) return new Response("bad mint", { status: 400 });
     if (!this.deps.newPair || !this.deps.upgradeResponse) return new Response("websockets unavailable", { status: 500 });

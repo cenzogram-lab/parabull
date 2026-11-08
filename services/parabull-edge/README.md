@@ -119,9 +119,11 @@ real Stream account.
    - it requires `creator` to be that wallet.
    Anyone else gets 403. A coin that isn't on chain (demo coins) gets 404, and nothing is asked of Stream.
 3. **One live input per coin:** the Worker finds the input by `meta.mint` and reuses it. The first time, it creates
-   one with `meta {mint, creator, title}` and automatic recording. A new title updates `meta.title`. The create sends
-   an `Idempotency-Key` built from the mint and a 10-minute window, so two first-time requests at once (a double
-   click, two devices) still get one input.
+   one with `meta {mint, creator, title}` and automatic recording. A new title updates `meta.title`.
+   - Two first-time requests at once (a double click, two devices) would both find no input and both create one.
+   - So the Worker forwards each request to the coin's `ChatRoom` Durable Object, the one instance for that mint, which
+     runs them one at a time (`ChatRoomCore.liveInput`).
+   - The second request then finds the first one's input and reuses it. This touches none of the room's chat storage.
 4. **The answer** carries the stream key, so it is `Cache-Control: no-store`. `CHAT_LIMITER` limits these requests per
    IP, and only allowed origins can call it.
 
@@ -138,7 +140,7 @@ So the Stream API sees one list call and one lifecycle check per input every 15 
 
 **Fails closed:**
 - Without `CF_ACCOUNT_ID`, `CF_STREAM_TOKEN` and `STREAM_HOST`, `/live` answers 503; `/live/input` also needs
-  `SOLANA_RPC_URL`.
+  `SOLANA_RPC_URL` and the `CHAT_ROOMS` binding.
 - A Stream API failure answers 502, not "nobody is live".
 - An input whose lifecycle check fails counts as not live.
 - Only allowed origins can call it.
