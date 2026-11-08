@@ -124,8 +124,9 @@ jobs:
             canisters/solana_signer/e2e/package-lock.json
       - name: Install mops and icp-cli
         run: npm install -g ic-mops@3.5.1 @icp-sdk/icp-cli@1.8.0 @icp-sdk/ic-wasm@0.11.1
+      # --locked: fails if mops.lock is missing or doesn't match mops.toml (and verifies package hashes against it).
       - name: mops install
-        run: mops install && echo "MOPS_LOCK_BASE64=$(base64 -w0 mops.lock)"
+        run: mops install --locked
       # Compile errors, upgrade compatibility of the migration chain, and every warning (dot notation, unused
       # imports, redundant instantiation) as an error.
       - name: mops check
