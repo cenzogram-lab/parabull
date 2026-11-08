@@ -57,7 +57,14 @@ mixin (addresses : Map.Map<Principal, Blob>, settings : Types.Settings, limiter 
       case (?known) { known };
       case null {
         await* countRequest(caller);
-        await* publicKey(owner, settings.key_name, owner == caller);
+        let keyName = settings.key_name;
+        let derived = await* publicKey(owner, keyName, owner == caller);
+        // A controller may have switched the key while it was being derived (possible only while no address is
+        // cached); an address under the old key would never match what signing derives.
+        if (settings.key_name != keyName) {
+          throw Error.reject("the signer's configuration changed during this request; try again");
+        };
+        derived;
       };
     };
     Base58.encode(key.toArray());
