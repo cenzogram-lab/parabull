@@ -8,6 +8,7 @@
     "build:program": "cd .. && anchor build",
     "deploy:init": "tsx deploy_and_init.ts",
     "smoke": "tsx test_launch_and_trade.ts",
+    "e2e:devnet": "tsx test_devnet_e2e.ts",
     "crank": "tsx crank_worker.ts",
     "worker": "tsx launch_worker.ts",
     "test": "tsx --test src/*.test.ts",

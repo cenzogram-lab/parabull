@@ -5,7 +5,7 @@
 CLUSTER ?= devnet
 PROGRAM := programs/parabull/Cargo.toml
 
-.PHONY: help build build-sbf test scripts-install scripts-check deploy init smoke crank worker keys
+.PHONY: help build build-sbf test scripts-install scripts-check deploy init smoke e2e crank worker keys
 
 help:
 	@echo "make keys            # first time: sync program ID with target/deploy/parabull-keypair.json"
@@ -15,6 +15,7 @@ help:
 	@echo "make scripts-check   # npm ci + typecheck scripts against the IDL + TS unit tests"
 	@echo "make deploy          # anchor deploy to CLUSTER (default devnet)"
 	@echo "make init | smoke | crank | worker   # scripts against CLUSTER"
+	@echo "make e2e             # devnet lifecycle: ticket, launch worker, 0.230 SOL buy, partial sell"
 
 keys:
 	anchor keys sync
@@ -42,6 +43,9 @@ init:
 
 smoke:
 	cd scripts && CLUSTER=$(CLUSTER) npm run smoke
+
+e2e:
+	cd scripts && CLUSTER=$(CLUSTER) npm run e2e:devnet
 
 crank:
 	cd scripts && CLUSTER=$(CLUSTER) npm run crank -- --once

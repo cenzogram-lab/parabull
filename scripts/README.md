@@ -59,6 +59,11 @@ CLUSTER=devnet npm run crank -- --once
 CLUSTER=devnet SKIP_METADATA_FETCH=1 npm run worker
 ```
 
+```bash
+# 6. Pre-deployment check: the whole lifecycle, checked to the lamport (see "Devnet end-to-end test").
+CLUSTER=devnet npm run e2e:devnet
+```
+
 Path A (Internet Identity accounts) has its own devnet smoke test, which drives the deployed Chain Fusion signer
 canister: see "Devnet smoke test" in [`canisters/solana_signer/README.md`](../canisters/solana_signer/README.md).
 
@@ -116,9 +121,70 @@ CLUSTER=devnet GRADUATE=1 npm run smoke -- --no-create
   image. Without `--no-create`, the smoke test sends `create` itself and a
   running worker just finds the ticket closed.
 
+## Devnet end-to-end test
+
+`test_devnet_e2e.ts` (`npm run e2e:devnet`, or `make e2e`) is the final check
+before deploying. It runs one coin through its lifecycle on the deployed
+program and compares every on-chain result with the local quote, exactly:
+
+1. **Ticket.** A throwaway wallet, funded by the admin, sends
+   `request_launch`. Checks:
+   - the wallet paid exactly the deposit plus the network fee;
+   - the ticket holds the deposit, its payer, fee and TTL;
+   - the metadata and name commitments;
+   - the `LaunchRequested` event.
+2. **Launch worker.** `src/launchWorkerRunner.ts` handles the ticket. It's
+   the same code `npm run worker` runs: it recovers the request, validates it,
+   waits its CSPRNG 3–15 s and sends `create`. Checks:
+   - the worker's delay is in range, and the ticket is closed;
+   - the curve starts at `Global`'s reserves, with the slot delay;
+   - the whole supply is minted, and mint and freeze authority are both gone;
+   - the Token-2022 name, symbol and URI;
+   - the ticker registry;
+   - `TokenCreated`, with the deposit fully settled (rent back to the launch
+     authority, the rest to the treasury).
+3. **Buy, 0.230 SOL.** Once trading opens, it buys the most tokens whose
+   cost plus the 1% fee fits in 0.230 SOL. Checks:
+   - what the wallet and the curve account paid and received;
+   - token balances and all four reserves;
+   - the fee buckets grew by exactly the fee;
+   - the `TradeEvent` fields and fee split.
+4. **Partial sell.** It sells half the tokens back, with the same checks,
+   plus that some tokens are still held. It ends by checking that the curve
+   account holds exactly its rent, plus real SOL, plus every fee bucket.
+5. **Indexer (optional, with `E2E_INDEXER_URL`).** It checks that
+   `services/parabull-indexer` serves the coin, both trades (newest first)
+   and the wallet's remaining position.
+
+The first mismatch stops the run with exit code 1. At the end, the wallet's
+remaining SOL goes back to the admin. The admin needs about 0.5 SOL on hand,
+and a run spends about 0.35 SOL of it:
+- the 0.2 SOL launch fee goes to the treasury (back to the admin if the admin
+  is the treasury, the devnet default);
+- about 0.12 SOL stays in the curve, backing the unsold half and the fees;
+- plus the token account's rent and network fees.
+
+It runs the worker itself, so it needs the launch authority's key
+(`LAUNCH_AUTHORITY_KEYPAIR`, which defaults to the admin on devnet). Stop any
+`npm run worker` against the same program first, or the two race for the
+ticket. It's refused on mainnet-beta.
+
+Variables:
+- `E2E_BUY_SOL` (default `0.230`, fee included) and `E2E_SELL_BPS` (default
+  `5000`).
+- `E2E_SLIPPAGE_BPS` (default `200`).
+- `E2E_URI`: real metadata JSON. With it set, the worker also fetches the
+  metadata and its image; without it, the fetch is skipped.
+- `E2E_INDEXER_URL`.
+- `E2E_KEEP_FUNDS=1`: leave the wallet's SOL where it is instead of returning
+  it to the admin.
+
+The default 0.230 SOL buy needs a curve that it doesn't buy out. The mainnet
+curve is fine, and so is `CURVE_PRESET=small` with a target of 1 SOL or more.
+
 The same steps are available from the repository root with `make`: `make keys`,
 `make build`, `make build-sbf`, `make test`, `make scripts-check`,
-`make deploy`, `make init`, `make smoke`, `make crank`, `make worker` (`CLUSTER=devnet` by
+`make deploy`, `make init`, `make smoke`, `make e2e`, `make crank`, `make worker` (`CLUSTER=devnet` by
 default). `npm run build:program` (from `scripts/`) runs `anchor build`.
 
 The first SBF build is where stack-frame and compute-unit problems will show
@@ -130,7 +196,8 @@ the instruction it names.
 | --- | --- |
 | `deploy_and_init.ts` | Checks that the program is deployed with `ADMIN_KEYPAIR` as upgrade authority, that the Raydium programs are executable, and that the AmmConfig is owned by the configured CPMM program. Then initialises `Global`. It does nothing if `Global` already exists. On devnet it creates a test Token-2022 `$PARABULL` mint unless `PARABULL_MINT` is set. |
 | `test_launch_and_trade.ts` | Funds a throwaway user, then runs `request_launch` and `create` (signed by the launch authority and a new mint keypair). It shows a buy inside the slot delay being rejected, then buys and sells with slippage limits from `src/curve.ts`. `--no-create` leaves `create` to the launch worker; `GRADUATE=1` then buys out the curve and graduates it (see "Devnet test curve"). |
-| `launch_worker.ts` | Launch worker (`docs/BACKEND_SPEC.md` §1). Listens for `LaunchRequested` events (plus a `POLL_MS` poll of open tickets), recovers name/symbol/URI from the user's `request_launch` transaction and checks them against the ticket's commitment, pre-checks pause and the ticker/name/tweet locks, optionally fetches the metadata URI and checks the tweet with the X API, then waits a CSPRNG-uniform 3–15 s and sends `create` with a fresh in-memory mint keypair. Rejected tickets are refunded at once with `refund_ticket`. `--once` runs one poll and exits. |
+| `test_devnet_e2e.ts` | Devnet end-to-end lifecycle check: `request_launch`, then `create` by the launch worker's own code (`src/launchWorkerRunner.ts`), a 0.230 SOL buy and a partial sell. Every step is checked against the local quote to the lamport (see "Devnet end-to-end test"). |
+| `launch_worker.ts` | Launch worker (`docs/BACKEND_SPEC.md` §1; the ticket handling is `src/launchWorkerRunner.ts`). Listens for `LaunchRequested` events (plus a `POLL_MS` poll of open tickets), recovers name/symbol/URI from the user's `request_launch` transaction and checks them against the ticket's commitment, pre-checks pause and the ticker/name/tweet locks, optionally fetches the metadata URI and checks the tweet with the X API, then waits a CSPRNG-uniform 3–15 s and sends `create` with a fresh in-memory mint keypair. Rejected tickets are refunded at once with `refund_ticket`. `--once` runs one poll and exits. |
 | `crank_worker.ts` | Reference crank: graduation (3 transactions), escrow release, fee sweeps, LP-fee collection, buyback and burn with a quoted `min_amount_out`, reward-epoch expiry, optional DexScreener-target refresh (`--sol-usd`), and optional holder-reward publishing (`--publish-rewards`). |
 | `src/snapshot.ts` (`npm run snapshot [-- --publish]`) | Takes a $PARABULL holder snapshot and turns it into reward epochs. It writes `snapshots/epoch-<n>.draft.json` on a dry run, or publishes and writes `snapshots/epoch-<n>.json` (root, total, and every leaf with its amount, balance and proof) for the claim UI. |
 | `src/lpFees.ts` | Fetches the claimable Burn & Earn LP fee for one locked position from Raydium's lock-position API. |
