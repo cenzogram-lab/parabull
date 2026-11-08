@@ -25,10 +25,10 @@ use it; without it, Path A falls back as `app/src/lib/auth/iiConfig.ts` describe
   - The canister derives the caller's key and compares the two before requesting any signature.
   - A mismatch is refused (`expected signer mismatch`). So a client can never sign as someone else, and a stale address is caught.
 - **Messages are 1 to 1232 bytes.** A Solana transaction, signatures included, fits in one 1232-byte packet.
-- **Rate limits.** By default, 10 requests a minute per caller and 30 a minute for everyone together.
+- **Rate limits.** By default, 10 requests a minute per caller and 20 a minute for everyone together.
   - Only requests that reach the management canister count: uncached address derivations and signatures.
   - Each signature costs about 26B cycles with `key_1` (attached with the call; the unused part is refunded).
-  - New principals cost nothing to make, so the global limit is what bounds the spend. 30 a minute is about 0.8T cycles a minute at most.
+  - New principals cost nothing to make, so the global limit is what bounds the spend. 20 a minute is about 0.52T cycles a minute at most.
   - Tune both limits with `configure`. Watch the cycles balance and keep a backup controller.
 - **Refusals are rejects with a reason.** The interface is fixed by the app, so they aren't `Result` values. The app shows the reason.
 

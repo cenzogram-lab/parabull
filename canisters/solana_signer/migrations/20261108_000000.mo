@@ -23,8 +23,8 @@ module {
         var key_name = "key_1";
         var signing_paused = false;
         var per_caller_per_minute = 10;
-        // Each signature costs about 26B cycles; this caps the spend at about 0.8T cycles a minute.
-        var global_per_minute = 30;
+        // Each signature costs about 26B cycles; this caps the spend at about 0.52T cycles a minute.
+        var global_per_minute = 20;
         var signatures_issued = 0;
       };
     };

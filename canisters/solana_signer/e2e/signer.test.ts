@@ -86,7 +86,7 @@ describe("solana_signer canister (threshold Ed25519 on PocketIC)", () => {
     const s = await as(alice).status();
     assert.equal(s.key_name, "key_1");
     assert.equal(s.signing_paused, false);
-    assert.deepEqual(s.limits, { per_caller_per_minute: 10n, global_per_minute: 30n });
+    assert.deepEqual(s.limits, { per_caller_per_minute: 10n, global_per_minute: 20n });
     assert.equal(s.known_addresses, 0n);
   });
 
@@ -183,6 +183,6 @@ describe("solana_signer canister (threshold Ed25519 on PocketIC)", () => {
     await pic.advanceTime(61_000);
     await pic.tick();
     assert.equal(Uint8Array.from(await as(carol).sign_solana_transaction(bytes(15), carolKey)).length, 64);
-    await as(controller).configure({ ...NONE, limits: limits(10, 30) });
+    await as(controller).configure({ ...NONE, limits: limits(10, 20) });
   });
 });
