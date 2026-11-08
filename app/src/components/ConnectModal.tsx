@@ -17,7 +17,7 @@ import { useIsMobile } from "../hooks/useMediaQuery";
 import { parseSecretKey } from "../lib/wallet/importedKey";
 import { useApp } from "../state/AppState";
 import { II_WALLET_NAME, IMPORTED_WALLET_NAME, importedKeyAdapter, internetIdentityAdapter } from "../wallet/adapters";
-import { WALLET_BRANDS, type WalletBrand } from "../wallet/brands";
+import { brandConnectable, WALLET_BRANDS, type WalletBrand } from "../wallet/brands";
 import { BottomSheet } from "./mobile/MobileUi";
 import { Modal } from "./ui/overlay";
 import { cx } from "./ui/primitives";
@@ -150,7 +150,7 @@ function ConnectBody({ onDone }: { onDone: () => void }) {
           const entry = wallets.find((w) => w.adapter.name === b.name);
           return (
             <li key={b.name}>
-              <BrandButton brand={b} icon={b.icon ?? entry?.adapter.icon ?? ""} detected={installed(b.name) || b.injected()} onConnect={() => pick(b.name as WalletName)} />
+              <BrandButton brand={b} icon={b.icon ?? entry?.adapter.icon ?? ""} detected={brandConnectable(entry?.readyState, b.injected())} onConnect={() => pick(b.name as WalletName)} />
             </li>
           );
         })}

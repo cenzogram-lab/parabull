@@ -315,9 +315,13 @@ The connect dialog (`src/components/ConnectModal.tsx`) replaces the wallet adapt
 **Path B: native Solana.**
 Everything below sits on the dialog's first screen, under the Internet Identity button; nothing is behind a sub-menu.
 - **Phantom and Solflare.** A dedicated button each, in the wallet's own colours and icon (`src/wallet/brands.ts`).
-  - Detected extension (a registered `Installed` adapter, or `window.phantom.solana` / `window.solana` with `isPhantom`,
-    or `window.solflare.isSolflare`): the button connects in one click and reads "Detected · 1-click".
-  - Not installed: the button is a link to the wallet's download page, opened in a new tab.
+  - Detected: a wallet of that name is registered with the wallet adapter (Phantom's Wallet Standard registration,
+    the Solflare adapter) and it reports `Installed`, or its extension has injected itself (`window.phantom.solana` /
+    `window.solana` with `isPhantom`, `window.solflare.isSolflare`). The button connects in one click and reads
+    "Detected · 1-click".
+  - Otherwise the button links to the wallet's download page in a new tab. That includes an injected `isPhantom`
+    provider with no registered Phantom wallet (old Phantom builds, other wallets copying the flag): there is nothing
+    to select, so a click would close the dialog without connecting (`brandConnectable`, `src/wallet/brands.ts`).
 - **Other wallets.** Any other detected Wallet Standard wallet (Backpack, ...) and, without the Solflare extension,
   Solflare's web wallet are listed below.
 - **"Import Private Key (Ephemeral)".** Opens a Base58 paste box (focused) with an "Import & Start Trading" button and

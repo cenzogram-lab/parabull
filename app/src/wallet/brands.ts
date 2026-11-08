@@ -22,6 +22,18 @@ const PHANTOM_ICON =
 type Injected = { phantom?: { solana?: { isPhantom?: boolean } }; solana?: { isPhantom?: boolean }; solflare?: { isSolflare?: boolean } };
 const win = () => (typeof window === "undefined" ? {} : (window as unknown as Injected));
 
+/**
+ * Whether the dialog may offer a brand as a one-click connect: only when the wallet adapter context has a wallet of
+ * that name to select (`readyState`: its Wallet Standard registration or adapter), and that wallet is installed or
+ * its extension has injected itself (`injected`, which covers an adapter that hasn't noticed the extension yet).
+ * An injected provider with no registered wallet (an old Phantom, or another wallet copying `isPhantom` for
+ * compatibility) has nothing `select()` could connect, so it gets the install link instead.
+ */
+export function brandConnectable(readyState: string | undefined, injected: boolean): boolean {
+  if (readyState === undefined || readyState === "Unsupported") return false;
+  return readyState === "Installed" || injected;
+}
+
 export const WALLET_BRANDS: readonly WalletBrand[] = [
   { name: "Phantom", icon: PHANTOM_ICON, install: "https://phantom.com/download", injected: () => !!(win().phantom?.solana?.isPhantom || win().solana?.isPhantom) },
   { name: "Solflare", icon: null, install: "https://solflare.com/download", injected: () => !!win().solflare?.isSolflare },

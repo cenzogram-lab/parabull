@@ -156,3 +156,16 @@ test("connect dialog: Phantom and Solflare are detected from their injected prov
     else delete g.window;
   }
 });
+
+test("connect dialog: a brand is one-click only when a registered wallet can be selected", async () => {
+  const { brandConnectable } = await import("../src/wallet/brands");
+  // Wallet Standard registration / adapter reports the extension.
+  assert.equal(brandConnectable("Installed", false), true);
+  // Solflare's adapter is Loadable until it notices the injected extension: the injected flag decides.
+  assert.equal(brandConnectable("Loadable", true), true);
+  assert.equal(brandConnectable("Loadable", false), false);
+  // A provider claiming isPhantom with no registered "Phantom" wallet: select() would find nothing, so no 1-click.
+  assert.equal(brandConnectable(undefined, true), false);
+  assert.equal(brandConnectable("Unsupported", true), false);
+  assert.equal(brandConnectable("NotDetected", false), false);
+});
