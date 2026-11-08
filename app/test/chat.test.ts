@@ -114,5 +114,5 @@ test("chat client: the sign-in body carries exactly what was signed", async () =
   const b = body(signature);
   assert.deepEqual({ ...b, signature: "" }, { wallet, issuedAt: "2026-11-08T03:00:00.000Z", nonce: "ab".repeat(16), signature: "" });
   assert.deepEqual(Uint8Array.from(atob(b.signature), (c) => c.charCodeAt(0)), signature);
-  assert.deepEqual([0, 1, 2, 5, 9].map(reconnectDelay), [1000, 2000, 4000, 30000, 30000]);
+  assert.deepEqual([0, 1, 2, 5, 9].map((a) => reconnectDelay(a, () => 0.999999)), [1000, 2000, 4000, 30000, 30000]);
 });

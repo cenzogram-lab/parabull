@@ -3,6 +3,7 @@
  * /stream websocket, and the mapping from its JSON (SOL amounts, u64 as strings) into the app's Coin / Trade / Holder
  * shapes (USD at the current SOL/USD).
  */
+import { reconnectDelay } from "./chatClient";
 import { coinArt } from "./art";
 import { shortAddr } from "./format";
 import type { RewardsSummaryJson, WalletRewardsJson } from "./rewardsClaim";
@@ -166,17 +167,17 @@ export class IndexerClient {
     return `${this.base.replace(/^http/, "ws")}/stream`;
   }
 
-  /** The push stream, reconnecting with backoff; returns a stop function. `onOpen` runs on every (re)connect. */
+  /** The push stream, reconnecting with jittered backoff; returns a stop function. `onOpen` runs on every (re)connect. */
   stream(onMessage: (m: StreamMessage) => void, onOpen?: () => void): () => void {
     let ws: WebSocket | null = null;
     let stopped = false;
-    let delay = 1_000;
+    let attempt = 0;
     let timer: number | undefined;
     const connect = () => {
       if (stopped) return;
       ws = new WebSocket(this.streamUrl);
       ws.onopen = () => {
-        delay = 1_000;
+        attempt = 0;
         onOpen?.();
       };
       ws.onmessage = (e) => {
@@ -188,8 +189,7 @@ export class IndexerClient {
       };
       ws.onclose = () => {
         if (stopped) return;
-        timer = window.setTimeout(connect, delay);
-        delay = Math.min(delay * 2, 30_000);
+        timer = window.setTimeout(connect, reconnectDelay(attempt++));
       };
     };
     connect();
@@ -226,6 +226,7 @@ export function toCoin(j: CoinJson, solUsd: number, registryLockSeconds: number)
     createdAt: j.createdAt * 1000,
     stage: stageOf(j),
     reserves: { virtualToken: BigInt(j.reserves.virtualToken), virtualSol: BigInt(j.reserves.virtualSol), realToken: BigInt(j.reserves.realToken), realSol: BigInt(j.reserves.realSol) },
+    progress: j.progress,
     complete: j.complete,
     migrated: j.migrated,
     priceUsd,

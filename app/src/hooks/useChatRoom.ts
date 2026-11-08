@@ -5,7 +5,10 @@
  * - Reading needs nothing. Posting needs a wallet that can sign messages: the first post (or image) asks the wallet to
  *   sign the chat sign-in text once, POST /chat/session turns that into a session token, and the socket authenticates
  *   with it. Tokens are kept in memory per wallet for the tab (never in storage), so other coins' chats reuse them.
- * - The socket reconnects with backoff and re-authenticates; a keepalive "ping" goes out every 25s.
+ * - The socket reconnects with jittered backoff and re-authenticates; a keepalive "ping" goes out every 25s.
+ * - Each room is its own state: leaving a coin settles that room's pending send and sign-in waits, and a late close
+ *   event from the old room's socket never touches the new room's sign-in. The 2-second cooldown is kept per room,
+ *   as the server keeps it.
  * - Without VITE_CHAT_URL the room is "off" and the UI says chat isn't connected; there is no simulated feed.
  */
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -48,7 +51,9 @@ export function useChatRoom(mint: string): ChatRoom {
   const [online, setOnline] = useState<number | null>(null);
   const [signedInAs, setSignedInAs] = useState<string | null>(null);
   const [signingIn, setSigningIn] = useState(false);
-  const [cooldownUntil, setCooldownUntil] = useState(0);
+  /** Per room (mint): the server's cooldown is per wallet per room, so posting on one coin doesn't hold another. */
+  const cooldowns = useRef(new Map<string, number>());
+  const [cooldownUntil, setCooldownState] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const socket = useRef<WebSocket | null>(null);
   /** The token the socket last authenticated with: a replacement session must be sent even for the same wallet. */
@@ -58,6 +63,12 @@ export function useChatRoom(mint: string): ChatRoom {
   const pendingSend = useRef<{ cid: string; resolve: (ok: boolean) => void } | null>(null);
   const walletRef = useRef(wallet);
   walletRef.current = wallet;
+  const mintRef = useRef(mint);
+  mintRef.current = mint;
+  const setCooldown = useCallback((room: string, until: number) => {
+    cooldowns.current.set(room, until);
+    if (room === mintRef.current) setCooldownState(until);
+  }, []);
   const roomUrl = endpoints?.room(mint) ?? null;
 
   const authenticate = useCallback((ws: WebSocket, w: string | null) => {
@@ -77,15 +88,17 @@ export function useChatRoom(mint: string): ChatRoom {
     let closed = false;
     let attempt = 0;
     let retry: number | undefined;
-    let ping: number | undefined;
     setMessages([]);
     setOnline(null);
     setSignedInAs(null);
+    setError(null);
+    setCooldownState(cooldowns.current.get(mint) ?? 0);
 
     const connect = () => {
       setStatus(attempt === 0 ? "connecting" : "reconnecting");
       const ws = new WebSocket(roomUrl);
       socket.current = ws;
+      let ping: number | undefined;
       ws.onopen = () => {
         attempt = 0;
         setStatus("open");
@@ -118,13 +131,16 @@ export function useChatRoom(mint: string): ChatRoom {
           }
           // Only this send's own refusal settles it; an error about something else (a failed auth) doesn't.
           if (f.cid && pendingSend.current?.cid === f.cid) settleSend(false);
-          if (f.code === "rate_limited" && f.retryAfterMs) setCooldownUntil(Date.now() + f.retryAfterMs);
+          if (f.code === "rate_limited" && f.retryAfterMs) setCooldown(mint, Date.now() + f.retryAfterMs);
           setError(f.error);
         }
       };
       ws.onclose = () => {
         window.clearInterval(ping);
-        if (socket.current === ws) socket.current = null;
+        // A socket that was replaced or left (switching coins): its room's state was already settled on the way out,
+        // and the shared refs now belong to the new room's socket.
+        if (socket.current !== ws) return;
+        socket.current = null;
         socketToken.current = null;
         settleSend(false);
         setSignedInAs(null);
@@ -138,11 +154,15 @@ export function useChatRoom(mint: string): ChatRoom {
     return () => {
       closed = true;
       window.clearTimeout(retry);
-      window.clearInterval(ping);
-      socket.current?.close(1000, "left");
+      const ws = socket.current;
       socket.current = null;
+      ws?.close(1000, "left");
+      // Settle what this room was waiting on, now: its socket's close event will be ignored.
+      socketToken.current = null;
+      settleSend(false);
+      readyWaiters.current.splice(0).forEach((r) => r(null));
     };
-  }, [roomUrl, authenticate]);
+  }, [roomUrl, mint, authenticate, setCooldown]);
 
   // A wallet switch: authenticate as the new wallet if it has a session, otherwise read-only.
   useEffect(() => {
@@ -199,14 +219,15 @@ export function useChatRoom(mint: string): ChatRoom {
           window.setTimeout(() => pendingSend.current?.cid === cid && (settleSend(false), setError("The chat didn't answer: try again")), 8_000);
         });
         ws.send(JSON.stringify({ type: "send", text: t.value, attachments, cid }));
-        setCooldownUntil(Date.now() + CHAT_COOLDOWN_MS);
+        setCooldown(mint, Date.now() + CHAT_COOLDOWN_MS);
         return await answered;
       } catch (e) {
-        setError((e as Error).message);
+        // A send from a room that was left reports nothing into the new one.
+        if (mintRef.current === mint) setError((e as Error).message);
         return false;
       }
     },
-    [cooldownUntil, ensureSignedIn],
+    [mint, cooldownUntil, ensureSignedIn, setCooldown],
   );
 
   const upload = useCallback(

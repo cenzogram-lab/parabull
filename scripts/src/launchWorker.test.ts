@@ -179,3 +179,32 @@ test("tweet check (X API v2)", async () => {
   );
   assert.match((await verifyTweet(TWEET, SYMBOL, { ...ok, fetchImpl: respond(404, {}) }))!, /404/);
 });
+
+test("isTransientCheckFailure: retry timeouts, dropped connections, 408/425/429/5xx; refund everything else", async () => {
+  const { isTransientCheckFailure } = await import("./launchWorker");
+  for (const r of [
+    "metadata URI unreachable: timeout",
+    "image unreachable: read ECONNRESET",
+    "metadata URI unreachable: getaddrinfo EAI_AGAIN host",
+    "metadata URI returned 503",
+    "image returned 429",
+    "metadata URI returned 408",
+    "X API returned 500",
+    "X API returned 429",
+    "X API error: fetch failed",
+  ]) assert.equal(isTransientCheckFailure(r), true, r);
+  for (const r of [
+    "metadata URI returned 404",
+    "image returned 403",
+    "metadata JSON has no image",
+    "metadata URI unreachable: Unexpected token < in JSON at position 0",
+    "metadata URI unreachable: refusing non-public address 10.0.0.1 for x",
+    "metadata URI unreachable: too many redirects",
+    "image unreachable: response too large",
+    "image unreachable: refusing http: URL",
+    "image has unsupported content-type text/html",
+    "tweet does not mention $PEPE",
+    "X API returned 404",
+    "ticker locked",
+  ]) assert.equal(isTransientCheckFailure(r), false, r);
+});

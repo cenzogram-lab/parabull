@@ -47,5 +47,12 @@ export function chatSignIn(wallet: string, now: Date, nonceBytes: Uint8Array): {
   return { message, body: (signature) => ({ wallet, issuedAt, nonce, signature: bytesToBase64(signature) }) };
 }
 
-/** Reconnect delay after `attempt` failed connections: 1s, 2s, 4s ... up to 30s. */
-export const reconnectDelay = (attempt: number) => Math.min(30_000, 1_000 * 2 ** Math.max(0, attempt));
+/**
+ * Reconnect delay after `attempt` failed connections: exponential (1s, 2s, 4s ... capped at 30s) with jitter, a
+ * uniform draw from half to all of that step, so clients dropped together (a Worker deploy) don't return together.
+ * `random` is in [0, 1).
+ */
+export const reconnectDelay = (attempt: number, random: () => number = Math.random) => {
+  const step = Math.min(30_000, 1_000 * 2 ** Math.max(0, Math.min(attempt, 15)));
+  return Math.round(step / 2 + (step / 2) * Math.min(Math.max(random(), 0), 1));
+};

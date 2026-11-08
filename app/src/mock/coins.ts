@@ -4,8 +4,7 @@
  */
 import { PublicKey } from "@solana/web3.js";
 import { coinArt } from "../lib/art";
-import { tokensForSol } from "../lib/curve";
-import { GRADUATION_RAISE_LAMPORTS, initialReserves, mcapSol, priceSol, PROTOCOL, reservesAtSold } from "../lib/protocol";
+import { curveProgress, mcapSol, priceSol, PROTOCOL, reservesAtSold } from "../lib/protocol";
 import { Rng } from "../lib/rng";
 import type { Coin, Stage } from "../lib/types";
 import { COIN_SEEDS, HANDLES, type Kind } from "./catalog";
@@ -55,8 +54,8 @@ function makeCoin(i: number, [name, ticker, kind, blurb]: (typeof COIN_SEEDS)[nu
   const createdAt = now - ageMs;
   const progress = ticker === "BRONZE" ? 0.962 : rng.range(...PROGRESS[kind]);
   const graduated = kind === "graduated";
-  // `progress` is SOL raised toward graduation (what the migration gauge shows).
-  const sold = graduated ? PROTOCOL.initialRealToken : tokensForSol(initialReserves(), BigInt(Math.floor(Number(GRADUATION_RAISE_LAMPORTS) * progress)));
+  // `progress` is the share of the curve's tokens sold (what the migration gauge shows, as the indexer measures it).
+  const sold = graduated ? PROTOCOL.initialRealToken : BigInt(Math.floor(Number(PROTOCOL.initialRealToken) * progress));
   const reserves = reservesAtSold(sold);
 
   let mcapUsd = mcapSol(reserves) * SOL_USD;
@@ -140,5 +139,8 @@ export function generateCoins(now = Date.now()): Coin[] {
   return COIN_SEEDS.map((seed, i) => makeCoin(i, seed, now));
 }
 
-/** Curve progress toward graduation, 0..1 (graduated coins report 1). */
-export const progressOf = (c: Coin) => (c.migrated ? 1 : Math.min(1, Number(c.reserves.realSol) / Number(GRADUATION_RAISE_LAMPORTS)));
+/**
+ * Curve progress toward graduation, 0..1: the indexer's figure in chain mode (`progress`, tokens sold against the
+ * coin's own launch reserves), the same measure from the reserves in demo mode. Complete and graduated coins report 1.
+ */
+export const progressOf = (c: Pick<Coin, "migrated" | "complete" | "reserves" | "progress">) => (c.migrated || c.complete ? 1 : c.progress ?? curveProgress(c.reserves));

@@ -40,11 +40,27 @@ function Message({ m, mine }: { m: ChatMessage; mine: boolean }) {
   );
 }
 
+/** Unsent drafts (text and attached images) by coin, for this tab: what you typed on one coin stays with that coin. */
+const drafts = new Map<string, { text: string; pending: string[] }>();
+
 export function CoinChat({ mint, className, header = true }: { mint: string; className?: string; header?: boolean }) {
   const room = useChatRoom(mint);
   const { setVisible } = useWalletModal();
-  const [text, setText] = useState("");
-  const [pending, setPending] = useState<string[]>([]);
+  const [text, setText] = useState(() => drafts.get(mint)?.text ?? "");
+  const [pending, setPending] = useState<string[]>(() => drafts.get(mint)?.pending ?? []);
+  // Switching coins loads that coin's own draft (the previous one was saved by the effect below as it was typed).
+  const [draftOf, setDraftOf] = useState(mint);
+  if (draftOf !== mint) {
+    setDraftOf(mint);
+    setText(drafts.get(mint)?.text ?? "");
+    setPending(drafts.get(mint)?.pending ?? []);
+  }
+  useEffect(() => {
+    if (text || pending.length) drafts.set(mint, { text, pending });
+    else drafts.delete(mint);
+  }, [mint, text, pending]);
+  const mintRef = useRef(mint);
+  mintRef.current = mint;
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const list = useRef<HTMLUListElement>(null);
@@ -67,15 +83,18 @@ export function CoinChat({ mint, className, header = true }: { mint: string; cla
     const el = list.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
   }, [room.messages]);
-  useEffect(() => setPending([]), [mint]);
 
   const submit = async (e?: FormEvent) => {
     e?.preventDefault();
     if (sending || (!text.trim() && pending.length === 0)) return;
     setSending(true);
+    const from = mint;
     const ok = await room.send(text, pending);
     setSending(false);
     if (ok) {
+      // Posted: clear that coin's draft, even if the reader has moved to another coin meanwhile.
+      drafts.delete(from);
+      if (mintRef.current !== from) return;
       setText("");
       setPending([]);
       pinned.current = true;
@@ -88,9 +107,15 @@ export function CoinChat({ mint, className, header = true }: { mint: string; cla
     room.clearError();
     if (f.size > MAX_IMAGE_BYTES) return void alertError("Images are at most 5 MB");
     setUploading(true);
+    const from = mint;
     try {
       const url = await room.upload(f);
-      setPending((p) => (p.includes(url) ? p : [...p, url].slice(0, CHAT_MAX_ATTACHMENTS)));
+      const add = (p: string[]) => (p.includes(url) ? p : [...p, url].slice(0, CHAT_MAX_ATTACHMENTS));
+      // An upload that finishes after a switch goes with the coin it was picked on.
+      if (mintRef.current !== from) {
+        const d = drafts.get(from) ?? { text: "", pending: [] };
+        drafts.set(from, { ...d, pending: add(d.pending) });
+      } else setPending(add);
     } catch (err) {
       alertError((err as Error).message);
     } finally {

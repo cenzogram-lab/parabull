@@ -25,6 +25,8 @@ export function MobileTradeBar({ coin }: { coin: Coin }) {
   const [side, setSide] = useState<Side>("buy");
   // A fresh panel per opening, even if the last one is still sliding out.
   const [opening, setOpening] = useState(0);
+  // A complete curve awaiting migration: the program refuses both buys and sells (CurveComplete) until then.
+  const paused = coin.complete && !coin.migrated;
   const start = (s: Side) => {
     setSide(s);
     setOpening((n) => n + 1);
@@ -34,15 +36,17 @@ export function MobileTradeBar({ coin }: { coin: Coin }) {
     <>
       {/* It docks on short screens too (a phone in landscape): it's the page's only way to trade. */}
       <div className="pointer-events-none sticky bottom-[calc(5rem+env(safe-area-inset-bottom))] z-40 mx-4 mt-4 grid grid-cols-2 gap-3 before:absolute before:-inset-x-4 before:-bottom-3 before:-top-4 before:-z-10 before:bg-[linear-gradient(to_bottom,transparent,theme(colors.canvas.DEFAULT)_16px)]">
-        <button type="button" onClick={() => start("buy")} aria-haspopup="dialog" className="btn-gold pointer-events-auto h-12 rounded-2xl text-[15px] font-bold shadow-[0_10px_28px_-8px_rgba(0,0,0,0.9)]">
+        <button type="button" onClick={() => start("buy")} disabled={paused} title={paused ? "Curve complete: trading resumes on Raydium after migration" : undefined} aria-haspopup="dialog" className="btn-gold pointer-events-auto h-12 rounded-2xl text-[15px] font-bold shadow-[0_10px_28px_-8px_rgba(0,0,0,0.9)]">
           <ArrowUpRight className="h-[18px] w-[18px]" strokeWidth={2.5} aria-hidden />
           Buy
         </button>
         <button
           type="button"
           onClick={() => start("sell")}
+          disabled={paused}
+          title={paused ? "Curve complete: trading resumes on Raydium after migration" : undefined}
           aria-haspopup="dialog"
-          className="btn pointer-events-auto h-12 rounded-2xl bg-candle-down text-[15px] font-bold text-cream shadow-[inset_0_0_0_1px_theme(colors.candle.downEdge),0_10px_28px_-8px_rgba(0,0,0,0.9)] active:scale-[0.98]"
+          className="btn pointer-events-auto h-12 rounded-2xl bg-candle-down text-[15px] font-bold text-cream shadow-[inset_0_0_0_1px_theme(colors.candle.downEdge),0_10px_28px_-8px_rgba(0,0,0,0.9)] active:scale-[0.98] disabled:opacity-50"
         >
           <ArrowDownRight className="h-[18px] w-[18px]" strokeWidth={2.5} aria-hidden />
           Sell

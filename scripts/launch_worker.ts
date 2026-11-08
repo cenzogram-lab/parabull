@@ -5,6 +5,10 @@
  *     -> validate (pause, metadata commitment, ticker/name/tweet locks,
  *        optional metadata URI fetch and X API tweet check)
  *     -> reject: refund_ticket now (launch authority; funds go to the payer)
+ *     -> a metadata / X API failure that may pass (timeout, 429, 5xx):
+ *        retried until the ticket nears expiry, then refunded
+ *     -> a ticket that can't be created before expiry (paused, found late):
+ *        refunded, never left for the payer to recover by hand
  *     -> otherwise wait a CSPRNG-uniform 3-15 s
  *     -> re-validate, then send `create` co-signed by the launch authority and
  *        a fresh in-memory mint keypair.

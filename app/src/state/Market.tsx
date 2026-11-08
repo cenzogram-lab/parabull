@@ -104,7 +104,7 @@ function reprice(c: Coin, reserves: Coin["reserves"]): Coin {
   const priceUsd = priceSol(reserves) * SOL_USD;
   const mcapUsd = mcapSol(reserves) * SOL_USD;
   const spark = [...c.spark.slice(1), priceUsd];
-  const progress = progressOf({ ...c, reserves });
+  const progress = progressOf({ ...c, reserves, progress: undefined, complete: reserves.realToken === 0n });
   return {
     ...c,
     reserves,

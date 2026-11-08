@@ -67,6 +67,12 @@ time; funds always go to the payer).
    image (fetch rules in §3.1). `create` checks name/symbol/URI against the
    ticket's commitment hash, so the backend can't change them; it can only
    accept or refuse.
+   - A failure that may pass on a retry (a timeout, a dropped connection, or
+     HTTP 408, 425, 429 or 5xx from the metadata host, the image host or the X
+     API) is retried with back-off while the ticket has time, then refunded.
+     Anything else (a 404, bad JSON, a wrong content type, a private address)
+     is refunded at once (`isTransientCheckFailure` in
+     `scripts/src/launchWorker.ts`).
 4. **Tweet verification**, if the ticket has `tweet_id_hash`:
    - The user submits the tweet URL in the UI. Extract the numeric status ID
      (`scripts/src/launch.ts` `parseTweetId`) and check that
@@ -95,8 +101,14 @@ const runAt = Date.now() + delayMs;
 - Store the job durably (for example `jobs(ticket PRIMARY KEY, run_at,
   attempts, state)`) so a restart neither loses nor repeats it.
 - Before sending, re-read the ticket. If it's closed, the job is done. If
-  `now >= expires_at - 30`, give up and leave the ticket for the payer to
-  refund. The default TTL is 600 s, far longer than 15 s plus retries.
+  `now >= expires_at - 30`, stop and refund the ticket with the launch
+  authority, so no deposit is left for the payer to recover by hand. That
+  covers a ticket found late, one held while the program is paused, and one
+  whose checks kept failing. The default TTL is 600 s, far longer than 15 s
+  plus retries.
+- The payer can always refund an expired ticket themselves too: the app's
+  launch page lists the wallet's open tickets with a **Claim ticket refund**
+  button once they expire (by the cluster clock).
 - **What the delay does:** it makes the creation slot unpredictable. Note that
   the `LaunchRequested` event and the ticket account are public and include
   the ticker, so a sniper knows a launch is coming. They still don't know the

@@ -1,6 +1,7 @@
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { Check, ChevronDown, CircleAlert, Clock, Globe, ImagePlus, Loader2, Lock, Rocket, Send, ShieldCheck, Ticket, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { PublicKey } from "@solana/web3.js";
+import { Check, ChevronDown, CircleAlert, Clock, Globe, ImagePlus, Loader2, Lock, Rocket, RotateCcw, Send, ShieldCheck, Ticket, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { BullMark } from "../components/brand/BullMark";
 import { XLogo } from "../components/brand/Wordmark";
@@ -11,8 +12,9 @@ import { CONFIG, explorer, isDemo } from "../config";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { useNow } from "../hooks/useNow";
 import { OVERLAY_MS } from "../hooks/usePresence";
-import { useParabullProgram } from "../hooks/useParabullProgram";
+import { TicketExpiredError, useParabullProgram, type OpenTicket } from "../hooks/useParabullProgram";
 import { coinArt } from "../lib/art";
+import { checkLocks, lockBlocker, type LockStates } from "../lib/launchLocks";
 import { canonicalTicker, nameHash, normalizeName, parseTweetId, socialLink, tweetIdHash } from "../lib/launchRules";
 import { checkUri, MAX_IMAGE_BYTES, uploadMetadata } from "../lib/metadata";
 import { durationLabel } from "../lib/protocolParams";
@@ -26,7 +28,12 @@ import { useProtocol } from "../state/Protocol";
 /** "0.230 SOL": the ticket price as the launch flow shows it. */
 const solTicket = (lamports: bigint) => `${(Number(lamports) / 1e9).toFixed(3)} SOL`;
 
-type Phase = { step: "form" } | { step: "running"; at: number; delayMs: number; started: number; ticket?: string; signature?: string } | { step: "done"; mint: string; name: string } | { step: "failed"; error: string };
+type Phase =
+  | { step: "form" }
+  | { step: "running"; at: number; delayMs: number; started: number; ticket?: string; signature?: string }
+  | { step: "done"; mint: string; name: string }
+  /** `refundable`: an expired ticket the payer can close for its deposit. */
+  | { step: "failed"; error: string; refundable?: string };
 
 /** Uniform 3000-15000 ms from the browser CSPRNG (demo stand-in for the launch worker). */
 const randomDelay = () => 3000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 12001);
@@ -75,8 +82,9 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
   const tw = tweet.trim() ? parseTweetId(tweet) : null;
   const hash = n.ok ? nameHash(name) : null;
 
-  // Lock pre-check against registries (demo: the demo board; chain: the registry PDAs).
-  const [chainLocks, setChainLocks] = useState<{ ticker: boolean; name: boolean; tweet: boolean }>({ ticker: false, name: false, tweet: false });
+  // Lock pre-check against registries (demo: the demo board; chain: the registry PDAs at cluster time, failing closed).
+  const [chainLocks, setChainLocks] = useState<LockStates & { checking: boolean }>({ ticker: "free", name: "free", tweet: "free", checking: false });
+  const [submitting, setSubmitting] = useState(false);
   const demoLocks = useMemo(() => {
     const active = coins.filter((c) => c.locks.ticker > now);
     return {
@@ -85,28 +93,48 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
       tweet: !!tw?.ok && active.some((c) => c.tweetId === tw.value.toString() && c.locks.tweet! > now),
     };
   }, [coins, t, hash, tw, now]);
+  const tickerKey = t.ok ? t.value : null;
+  const nameKey = hash ? toHex(hash) : null;
+  const tweetKey = tw?.ok ? tw.value : null;
+  /** One read of the three registries and the Clock sysvar; a lock that can't be read is "unknown" (fail closed). */
+  // Stable pieces of the client (the client object itself is new on every render).
+  const { program, pdas, clusterTime } = client;
+  const readLocks = useCallback(
+    () =>
+      checkLocks(
+        {
+          now: clusterTime,
+          ticker: tickerKey ? () => program.account.tickerRegistry.fetchNullable(pdas.tickerRegistry(tickerKey)) : null,
+          name: nameKey ? () => program.account.nameRegistry.fetchNullable(pdas.nameRegistry(Uint8Array.from(nameKey.match(/../g)!, (h) => parseInt(h, 16)))) : null,
+          tweet: tweetKey !== null ? () => program.account.tweetRegistry.fetchNullable(pdas.tweetRegistry(tweetIdHash(tweetKey))) : null,
+        },
+        lockSeconds,
+      ),
+    [program, pdas, clusterTime, lockSeconds, tickerKey, nameKey, tweetKey],
+  );
   useEffect(() => {
     if (isDemo) return;
+    let live = true;
+    setChainLocks((l) => (l.checking ? l : { ...l, checking: true }));
     const id = window.setTimeout(async () => {
-      const locked = async (fetch: () => Promise<{ launchTimestamp: { toNumber: () => number } } | null>) => {
-        const r = await fetch().catch(() => null);
-        return !!r && Date.now() / 1000 < r.launchTimestamp.toNumber() + lockSeconds;
-      };
-      setChainLocks({
-        ticker: t.ok ? await locked(() => client.program.account.tickerRegistry.fetchNullable(client.pdas.tickerRegistry(t.value))) : false,
-        name: hash ? await locked(() => client.program.account.nameRegistry.fetchNullable(client.pdas.nameRegistry(hash))) : false,
-        tweet: tw?.ok ? await locked(() => client.program.account.tweetRegistry.fetchNullable(client.pdas.tweetRegistry(tweetIdHash(tw.value)))) : false,
-      });
+      const s = await readLocks();
+      if (live) setChainLocks({ ...s, checking: false });
     }, 400);
-    return () => window.clearTimeout(id);
-  }, [client, lockSeconds, t.ok, t.ok ? t.value : "", hash ? toHex(hash) : "", tw?.ok ? tw.value.toString() : ""]); // eslint-disable-line react-hooks/exhaustive-deps
-  const locks = isDemo ? demoLocks : chainLocks;
+    return () => {
+      live = false;
+      window.clearTimeout(id);
+    };
+  }, [readLocks]);
+  const locks = isDemo
+    ? demoLocks
+    : { ticker: chainLocks.ticker === "locked", name: chainLocks.name === "locked", tweet: chainLocks.tweet === "locked" };
+  const locksUnknown = !isDemo && (chainLocks.ticker === "unknown" || chainLocks.name === "unknown" || chainLocks.tweet === "unknown");
 
   const needsUri = !isDemo && !CONFIG.metadataUploadUrl;
   const uriError = needsUri && manualUri ? checkUri(manualUri) : null;
   const errors = {
     name: name && !n.ok ? n.error : locks.name ? `This name (ignoring case, spaces and symbols) is locked for ${lockFor}` : null,
-    ticker: ticker && !t.ok ? t.error : locks.ticker ? `This ticker is locked for ${lockFor}` : null,
+    ticker: ticker && !t.ok ? t.error : locks.ticker ? `This ticker is locked for ${lockFor}` : locksUnknown ? "Couldn't check the locks on-chain, so the launch is on hold. Retrying as you type." : null,
     tweet: tw && !tw.ok ? tw.error : locks.tweet ? `This tweet already backed a launch in the last ${lockFor}` : null,
   };
   // Social links are creator input shown as links on the coin page: only http(s) URLs are accepted.
@@ -114,7 +142,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
   const linkError = (k: keyof typeof links) => (links[k].ok ? null : (links[k] as { error: string }).error);
   const linksOk = links.website.ok && links.x.ok && links.telegram.ok;
   const link = (k: keyof typeof links) => (links[k].ok && (links[k] as { value: string }).value) || undefined;
-  const ready = n.ok && t.ok && !errors.name && !errors.ticker && !errors.tweet && linksOk && (isDemo || image) && (!needsUri || (manualUri && !uriError));
+  const ready = n.ok && t.ok && !errors.name && !errors.ticker && !errors.tweet && linksOk && (isDemo || image) && (!needsUri || (manualUri && !uriError)) && (isDemo || !chainLocks.checking) && !submitting;
 
   const draft: Coin = useMemo(() => {
     const r = initialReserves();
@@ -180,19 +208,28 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
       }, 900 + delayMs);
       return;
     }
+    // Check the locks again, at cluster time, right before paying: they may have been taken since the form last looked.
+    setSubmitting(true);
+    const fresh = await readLocks();
+    setSubmitting(false);
+    setChainLocks({ ...fresh, checking: false });
+    const blocked = lockBlocker(fresh, lockFor);
+    if (blocked) return toast({ tone: "bad", title: "Not launched", body: blocked });
+    let ticket: string | undefined;
     try {
       setPhase({ step: "running", at: 0, delayMs: 0, started });
       const uri = CONFIG.metadataUploadUrl
         ? await uploadMetadata(CONFIG.metadataUploadUrl, { name: name.trim(), symbol: t.value, description, image: image!.file, website: link("website"), x: link("x"), telegram: link("telegram") })
         : manualUri.trim();
       const req = await client.requestLaunch({ name: name.trim(), symbol: t.value, uri, tweetId: tw?.ok ? tw.value : null });
-      setPhase({ step: "running", at: 2, delayMs: 15000, started: Date.now(), ticket: req.ticket.toBase58(), signature: req.signature });
-      const mint = await client.waitForLaunch(req.ticket, t.value, req.requestedAt);
-      if (!mint) throw new Error(`The launch worker refunded your ticket (the metadata or tweet didn't pass its checks). The ${solTicket(fees.deposit)} is back in your wallet.`);
+      ticket = req.ticket.toBase58();
+      setPhase({ step: "running", at: 2, delayMs: 15000, started: Date.now(), ticket, signature: req.signature });
+      const mint = await client.waitForLaunch(req.ticket, t.value, req.requestedAt, req.payer);
+      if (!mint) throw new Error(`Your ticket was refunded: the launch worker didn't create the coin (its checks failed, or another launch took the ticker first). The ${solTicket(fees.deposit)} is back in your wallet.`);
       sfx("launch");
       setPhase({ step: "done", mint: mint.toBase58(), name: name.trim() });
     } catch (e) {
-      setPhase({ step: "failed", error: (e as Error).message });
+      setPhase({ step: "failed", error: (e as Error).message, refundable: e instanceof TicketExpiredError ? e.ticket.toBase58() : undefined });
     }
   }
 
@@ -210,6 +247,7 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
           </h2>
           <p className="mt-1 text-[13px] text-muted">Blind launch: you pay a flat ticket, the launch authority creates the coin after a random delay, and nobody (you included) can trade in the creation block.</p>
         </div>
+        {!isDemo && <OpenTickets />}
         <Field
           label="Name"
           error={errors.name}
@@ -333,7 +371,8 @@ function LaunchForm({ onClose }: { onClose?: () => void }) {
         </div>
 
         <button onClick={submit} disabled={!ready} className="btn-gold h-12 w-full text-[15px]">
-          {!isDemo && !client.connected ? "Connect wallet to launch" : `Launch for ${deposit.toFixed(3)} SOL`}
+          {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+          {!isDemo && !client.connected ? "Connect wallet to launch" : submitting ? "Checking locks on-chain" : `Launch for ${deposit.toFixed(3)} SOL`}
         </button>
         {isDemo && <p className="text-center text-xs text-muted">Demo mode: the launch is simulated, including the random 3-15 s delay. Nothing is sent on-chain.</p>}
       </div>
@@ -427,6 +466,11 @@ function LaunchProgress({ phase, onReset, onView }: { phase: Exclude<Phase, { st
         </div>
         <h2 className="mt-6 text-xl font-semibold">{phase.step === "done" ? `${phase.name} is live` : phase.step === "failed" ? "Launch didn't go through" : "Launching your coin"}</h2>
         {phase.step === "failed" && <p className="mt-2 text-sm text-ember">{phase.error}</p>}
+        {phase.step === "failed" && phase.refundable && (
+          <div className="mt-4 flex justify-center">
+            <RefundButton ticket={phase.refundable} />
+          </div>
+        )}
         <ol className="mx-auto mt-6 max-w-sm space-y-2.5 text-left">
           {steps.map(([title, body], i) => (
             <li key={title} className="flex gap-3">
@@ -459,6 +503,89 @@ function LaunchProgress({ phase, onReset, onView }: { phase: Exclude<Phase, { st
         </div>
       </div>
     </div>
+  );
+}
+
+/** The payer's refund of an expired ticket (refund_ticket), with its outcome. */
+function RefundButton({ ticket, onDone }: { ticket: string; onDone?: () => void }) {
+  const client = useParabullProgram();
+  const { toast } = useApp();
+  const [state, setState] = useState<{ busy: boolean; signature: string | null; error: string | null }>({ busy: false, signature: null, error: null });
+  const refund = async () => {
+    setState({ busy: true, signature: null, error: null });
+    try {
+      const signature = await client.refundTicket(new PublicKey(ticket));
+      setState({ busy: false, signature, error: null });
+      toast({ tone: "good", title: "Ticket refunded", body: explorer("tx", signature) });
+      onDone?.();
+    } catch (e) {
+      setState({ busy: false, signature: null, error: (e as Error).message });
+    }
+  };
+  if (state.signature)
+    return (
+      <a href={explorer("tx", state.signature)} target="_blank" rel="noreferrer" className="inline-flex h-11 items-center gap-1.5 text-sm text-gold hover:underline">
+        <Check className="h-4 w-4" aria-hidden /> Refunded: view transaction
+      </a>
+    );
+  return (
+    <div className="text-center">
+      <button onClick={refund} disabled={state.busy} className="btn-gold h-11 px-5">
+        {state.busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RotateCcw className="h-4 w-4" aria-hidden />}
+        Claim ticket refund
+      </button>
+      {state.error && <p role="alert" className="mt-2 text-xs text-ember">{state.error}</p>}
+    </div>
+  );
+}
+
+/**
+ * The connected wallet's open launch tickets: still waiting on the launch worker, or expired and refundable (the
+ * program lets the payer refund only after expiry, judged by the cluster clock).
+ */
+function OpenTickets() {
+  const client = useParabullProgram();
+  const [tickets, setTickets] = useState<OpenTicket[]>([]);
+  const [now, setNow] = useState<number | null>(null);
+  const [tick, setTick] = useState(0);
+  const payer = client.publicKey?.toBase58() ?? null;
+  useEffect(() => {
+    if (!payer) return setTickets([]);
+    let live = true;
+    const load = async () => {
+      const [list, t] = await Promise.all([client.openTickets(new PublicKey(payer)).catch(() => null), client.clusterTime().catch(() => null)]);
+      if (!live) return;
+      if (list) setTickets(list);
+      if (t !== null) setNow(t);
+    };
+    void load();
+    const id = window.setInterval(load, 15_000);
+    return () => {
+      live = false;
+      window.clearInterval(id);
+    };
+  }, [payer, tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (tickets.length === 0) return null;
+  return (
+    <section aria-label="Your open launch tickets" className="rounded-xl border border-line-accent/70 bg-canvas-2 p-3">
+      <div className="flex items-center gap-2 text-[13px] font-semibold">
+        <Ticket className="h-4 w-4 text-gold" aria-hidden /> Your open launch tickets
+      </div>
+      <ul className="mt-2 space-y-2">
+        {tickets.map((k) => {
+          const expired = now !== null && now >= k.expiresAt;
+          return (
+            <li key={k.address.toBase58()} className="flex items-center justify-between gap-3 text-[13px]">
+              <span className="min-w-0">
+                <span className="font-semibold">${k.ticker}</span> · <span className="num">{solTicket(k.depositLamports)}</span>
+                <span className="block text-xs text-muted">{expired ? "Expired without a launch: the full deposit is refundable" : now === null ? "Waiting for the launch worker" : `Waiting for the launch worker · expires in ${Math.max(0, k.expiresAt - now)}s`}</span>
+              </span>
+              {expired && <RefundButton ticket={k.address.toBase58()} onDone={() => setTick((n) => n + 1)} />}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

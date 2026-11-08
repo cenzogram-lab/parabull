@@ -3,9 +3,12 @@ import { PublicKey } from "@solana/web3.js";
 import { ArrowDownUp, CircleAlert, ExternalLink, Info, Loader2, Megaphone, Settings2, ShieldCheck, Zap } from "lucide-react";
 import { useMemo, useState } from "react";
 import { explorer, isDemo } from "../../config";
+import { liveCurveOf, useLiveCurve } from "../../hooks/useLiveCurve";
 import { useParabullProgram } from "../../hooks/useParabullProgram";
 import { compact, pct, shortAddr, sol, tokens as fmtTokens, usd, usdCompact } from "../../lib/format";
+import { requoteBuy, requoteSell } from "../../lib/quote";
 import { referralFor } from "../../lib/referral";
+import { TxUnconfirmedError } from "../../lib/txSend";
 import { raydiumSwapUrl } from "../../lib/links";
 import { bpsLabel } from "../../lib/protocolParams";
 import type { Coin } from "../../lib/types";
@@ -43,6 +46,11 @@ export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced 
   const [failed, setFailed] = useState<string | null>(null);
   const held = positions[coin.mint]?.tokens ?? 0n;
   const slippageBps = BigInt(Math.round(slippage * 100));
+  // Chain mode: the curve as the chain has it (subscribed), ahead of the indexer's copy, for quoting.
+  const [live, setLive] = useLiveCurve(coin.mint, !coin.migrated);
+  const reserves = live?.reserves ?? coin.reserves;
+  // The last token sold: the program refuses buys and sells (CurveComplete) until the crank migrates to Raydium.
+  const complete = !coin.migrated && (coin.complete || !!live?.complete);
 
   const lamports = useMemo(() => {
     const v = Number(amount);
@@ -51,12 +59,12 @@ export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced 
   }, [amount, unit, solUsd]);
   const sellTokens = (held * BigInt(sellPct)) / 100n;
 
-  const buyQ = useMemo(() => (side === "buy" && !coin.migrated ? client.quoteBuyWithSol(coin.reserves, lamports, feeBps, slippageBps) : null), [side, coin, lamports, feeBps, slippageBps, client]);
-  const sellQ = useMemo(() => (side === "sell" && !coin.migrated ? client.quoteSellTokens(coin.reserves, sellTokens, feeBps, slippageBps) : null), [side, coin, sellTokens, feeBps, slippageBps, client]);
+  const buyQ = useMemo(() => (side === "buy" && !coin.migrated && !complete ? client.quoteBuyWithSol(reserves, lamports, feeBps, slippageBps) : null), [side, coin.migrated, complete, reserves, lamports, feeBps, slippageBps, client]);
+  const sellQ = useMemo(() => (side === "sell" && !coin.migrated && !complete ? client.quoteSellTokens(reserves, sellTokens, feeBps, slippageBps) : null), [side, coin.migrated, complete, reserves, sellTokens, feeBps, slippageBps, client]);
   // Graduated coins trade on Raydium; the estimate uses the pool price, and a sale is quoted as it will book (raydiumSell).
   const poolEstimate = coin.migrated ? (side === "buy" ? (Number(lamports) / 1e9) * solUsd * 0.99 / coin.priceUsd : raydiumSell(coin, Number(sellTokens) / 1e6).usd) : 0;
 
-  const canTrade = side === "buy" ? lamports > 0n && (coin.migrated || buyQ !== null) : sellTokens > 0n && (coin.migrated || sellQ !== null);
+  const canTrade = !complete && (side === "buy" ? lamports > 0n && (coin.migrated || buyQ !== null) : sellTokens > 0n && (coin.migrated || sellQ !== null));
 
   const referral = !isDemo && side === "buy" && !coin.migrated ? referralFor(coin.mint, client.publicKey?.toBase58() ?? null) : null;
 
@@ -76,21 +84,40 @@ export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced 
         sfx(side);
         toast({ tone: "good", title: `${side === "buy" ? "Bought" : "Sold"} ${compact(t.tokens)} $${coin.ticker}`, body: `${t.sol.toFixed(3)} SOL · demo trade, nothing was sent on-chain` });
         placed = true;
-      } else if (side === "buy" && buyQ) {
-        // A followed callout link tags the buy (never the buyer's own callout): see src/lib/referral.ts.
-        const sig = await client.buy(new PublicKey(coin.mint), buyQ.tokens, buyQ.maxCost, referral?.calloutId ?? null);
-        sfx("buy");
-        toast({ tone: "good", title: `Bought ${fmtTokens(buyQ.tokens)} $${coin.ticker}`, body: explorer("tx", sig) });
-        placed = true;
-      } else if (side === "sell" && sellQ) {
-        const sig = await client.sell(new PublicKey(coin.mint), sellQ.tokens, sellQ.minOut);
-        sfx("sell");
-        toast({ tone: "good", title: `Sold ${fmtTokens(sellQ.tokens)} $${coin.ticker}`, body: explorer("tx", sig) });
+      } else if ((side === "buy" && buyQ) || (side === "sell" && sellQ)) {
+        // Quote again on the curve as the chain has it right now, not the indexer's copy.
+        const mint = new PublicKey(coin.mint);
+        const account = await client.fetchCurve(mint);
+        if (!account) throw new Error("This coin's bonding curve wasn't found on-chain");
+        const fresh = liveCurveOf(account as unknown as Parameters<typeof liveCurveOf>[0]);
+        setLive(fresh);
+        if (fresh.complete) throw new Error("The bonding curve just completed: trading resumes on Raydium once the coin migrates");
+        if (side === "buy" && buyQ) {
+          const r = requoteBuy(fresh.reserves, lamports, buyQ, feeBps, slippageBps);
+          if (!r.ok) throw new Error(r.reason);
+          // A followed callout link tags the buy (never the buyer's own callout): see src/lib/referral.ts.
+          const sig = await client.buy(mint, r.quote.tokens, r.quote.maxCost, referral?.calloutId ?? null);
+          sfx("buy");
+          toast({ tone: "good", title: `Bought ${fmtTokens(r.quote.tokens)} $${coin.ticker}`, body: explorer("tx", sig) });
+        } else if (sellQ) {
+          const r = requoteSell(fresh.reserves, sellTokens, sellQ, feeBps, slippageBps);
+          if (!r.ok) throw new Error(r.reason);
+          const sig = await client.sell(mint, r.quote.tokens, r.quote.minOut);
+          sfx("sell");
+          toast({ tone: "good", title: `Sold ${fmtTokens(r.quote.tokens)} $${coin.ticker}`, body: explorer("tx", sig) });
+        }
         placed = true;
       }
     } catch (e) {
-      toast({ tone: "bad", title: "Trade failed", body: (e as Error).message });
-      setFailed((e as Error).message);
+      if (e instanceof TxUnconfirmedError) {
+        // Sent, but no status in time: it may still land, so this isn't a failure to retry.
+        toast({ tone: "info", title: "Trade sent, not confirmed yet", body: `${e.message} ${explorer("tx", e.signature)}` });
+        setFailed(e.message);
+        if (!isDemo) refreshPositions();
+      } else {
+        toast({ tone: "bad", title: "Trade failed", body: (e as Error).message });
+        setFailed(`Trade failed: ${(e as Error).message}`);
+      }
     } finally {
       setBusy(false);
     }
@@ -221,12 +248,17 @@ export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced 
 
       {!framed && failed && (
         <p role="alert" className="mt-3 flex gap-2 rounded-lg border border-ember/40 bg-candle-down/20 p-2 text-xs text-ember">
-          <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden /> Trade failed: {failed}
+          <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden /> {failed}
+        </p>
+      )}
+      {complete && (
+        <p role="status" className="mt-3 flex gap-2 rounded-lg border border-gold/30 bg-gold/10 p-2 text-xs text-gold">
+          <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden /> The bonding curve is complete. Buying and selling pause until the coin migrates to Raydium, where trading resumes.
         </p>
       )}
       <button onClick={place} disabled={busy || !canTrade} className="btn-gold mt-4 h-12 w-full text-[15px]">
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-        {!isDemo && !client.connected ? "Connect wallet to trade" : !isDemo && coin.migrated ? "Trade on Raydium" : "Place Trade"}
+        {complete ? "Curve complete: migrating" : !isDemo && !client.connected ? "Connect wallet to trade" : !isDemo && coin.migrated ? "Trade on Raydium" : "Place Trade"}
         {!isDemo && coin.migrated && <ExternalLink className="h-4 w-4" />}
       </button>
       {isDemo && (

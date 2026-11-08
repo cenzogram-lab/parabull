@@ -8,11 +8,16 @@
  *   locks) -> optional metadata / tweet checks -> CSPRNG 3-15 s delay ->
  *   re-decide -> `create` (launch authority + fresh mint keypair), refunding a
  *   ticket whose create can never succeed.
+ *
+ * No ticket is left to strand its deposit: one the worker can no longer create
+ * in time (paused too long, a check still failing, found too late) is refunded
+ * by the launch authority as it nears expiry, and a metadata or X API failure
+ * that may pass on a retry (timeout, 429, 5xx) is retried until then.
  */
 import { BorshCoder, EventParser } from "@coral-xyz/anchor";
 import { Connection, Keypair, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
-import { DecisionInput, RegistryState, RequestArgs, checkMetadataUri, decide, findRequestArgs, randomDelayMs, verifyTweet } from "./launchWorker";
+import { DecisionInput, RegistryState, RequestArgs, checkMetadataUri, decide, findRequestArgs, isTransientCheckFailure, randomDelayMs, verifyTweet } from "./launchWorker";
 import { Pdas, ata2022 } from "./pdas";
 import { ParabullProgram, anchorErrorName, big, send as sendIxs } from "./program";
 
@@ -36,7 +41,7 @@ export type HandleOutcome =
   | { kind: "refunded"; ticket: PublicKey; reason: string; signature: string | null }
   /** The ticket was already closed (created or refunded elsewhere). */
   | { kind: "closed"; ticket: PublicKey }
-  /** Left open for now: paused, the request transaction not found yet, near expiry, or already being handled. */
+  /** Left open for now: paused, the request transaction not found yet, or already being handled. */
   | { kind: "skipped"; ticket: PublicKey; reason: string }
   | { kind: "error"; ticket: PublicKey; message: string };
 
@@ -51,6 +56,10 @@ export interface LaunchWorkerDeps {
   xBearerToken?: string;
   /** The pre-create delay; default CSPRNG-uniform 3-15 s. */
   delayMs?: () => number;
+  /** Wait before re-running an external check that failed transiently (`attempt` from 1); default 5 s, 10 s ... 30 s. */
+  checkRetryMs?: (attempt: number) => number;
+  /** The external checks; default `checkMetadataUri` (unless `skipMetadataFetch`) then `verifyTweet`. Tests swap it. */
+  offChainCheck?: (args: RequestArgs) => Promise<string | null>;
   sleep?: (ms: number) => Promise<void>;
   /** Sends instructions signed by `signers`; default `program.ts` `send` (explicit compute limit, confirmed). */
   send?: (ixs: TransactionInstruction[], signers: Keypair[], computeUnits: number) => Promise<string>;
@@ -73,6 +82,11 @@ export function createLaunchWorker(d: LaunchWorkerDeps) {
   const now = d.now ?? (() => BigInt(Math.floor(Date.now() / 1000)));
   const log = d.log ?? (() => undefined);
   const delayMs = d.delayMs ?? (() => randomDelayMs());
+  const checkRetryMs = d.checkRetryMs ?? ((attempt: number) => Math.min(5_000 * attempt, 30_000));
+  const offChainCheck =
+    d.offChainCheck ??
+    (async (args: RequestArgs) =>
+      (d.skipMetadataFetch ? null : await checkMetadataUri(args.uri)) ?? (args.tweetId === null ? null : await verifyTweet(args.tweetId, args.symbol, { bearer: d.xBearerToken })));
   const inFlight = new Set<string>();
   /** Signature of the request_launch transaction, when known (log subscription, or the caller), to skip a lookup. */
   const sigHint = new Map<string, string>();
@@ -159,15 +173,26 @@ export function createLaunchWorker(d: LaunchWorkerDeps) {
     const args = await recoverArgs(ticket);
     const first = decide(await evaluate(t, args));
     if (first.action === "reject") return refund(ticket, t, first.reason);
+    // Too late to create (found near expiry): refund now rather than leave the deposit for the payer to recover.
+    if (first.action === "abandon") return refund(ticket, t, first.reason);
     if (first.action !== "schedule") {
       log(`${first.action} ${key}: ${first.reason}`);
       return { kind: "skipped", ticket, reason: `${first.action}: ${first.reason}` };
     }
 
-    // Off-chain checks (BACKEND_SPEC §1.2 items 3-4), before the delay.
-    const offChain =
-      (d.skipMetadataFetch ? null : await checkMetadataUri(args!.uri)) ??
-      (args!.tweetId === null ? null : await verifyTweet(args!.tweetId, args!.symbol, { bearer: d.xBearerToken }));
+    // Off-chain checks (BACKEND_SPEC §1.2 items 3-4), before the delay. A failure that may pass on a retry (timeout,
+    // 429, 5xx) is retried while the ticket has time; a final one, or one still failing near expiry, is refunded.
+    let offChain = await offChainCheck(args!);
+    for (let attempt = 1; offChain && isTransientCheckFailure(offChain); attempt++) {
+      log(`check ${key} failed (${offChain}), retrying`);
+      await sleep(checkRetryMs(attempt));
+      t = await program.account.launchTicket.fetchNullable(ticket);
+      if (!t) return { kind: "closed", ticket };
+      const d2 = decide(await evaluate(t, args));
+      if (d2.action === "reject") return refund(ticket, t, d2.reason);
+      if (d2.action === "abandon") return refund(ticket, t, `${offChain} (still failing as the ticket nears expiry)`);
+      offChain = await offChainCheck(args!);
+    }
     if (offChain) return refund(ticket, t, offChain);
 
     const delay = delayMs();
@@ -188,10 +213,8 @@ export function createLaunchWorker(d: LaunchWorkerDeps) {
       }
       const again = decide(await evaluate(t, args));
       if (again.action === "reject") return refund(ticket, t, again.reason);
-      if (again.action === "abandon") {
-        log(`abandon ${key}: ${again.reason}`);
-        return { kind: "skipped", ticket, reason: `abandon: ${again.reason}` };
-      }
+      // Paused (or retrying) until the ticket nears expiry: refund it, as create can no longer be sent in time.
+      if (again.action === "abandon") return refund(ticket, t, again.reason);
       if (again.action === "wait") {
         await sleep(5_000);
         continue;

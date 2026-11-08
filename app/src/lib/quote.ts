@@ -85,3 +85,23 @@ export const applySell = (r: Reserves, tokens: bigint, solGross: bigint): Reserv
   realToken: r.realToken + tokens,
   realSol: r.realSol - solGross,
 });
+
+/**
+ * Re-quotes a buy on reserves just read from the chain, as it will be sent. Refused when the fresh quote gives fewer
+ * tokens than the shown one less the slippage: the price moved past what the user agreed to, so they should see the
+ * new quote first.
+ */
+export function requoteBuy(fresh: Reserves, budget: bigint, shown: BuyQuote, feeBps: bigint, slippageBps: bigint): { ok: true; quote: BuyQuote } | { ok: false; reason: string } {
+  const q = quoteBuyWithSol(fresh, budget, feeBps, slippageBps);
+  if (!q) return { ok: false, reason: "The curve has no tokens left to buy at this size" };
+  if (q.tokens * BPS < shown.tokens * (BPS - slippageBps)) return { ok: false, reason: "The price moved past your slippage since this quote. Check the new quote and place the trade again." };
+  return { ok: true, quote: q };
+}
+
+/** The sell counterpart: refused when the fresh net proceeds fall below the shown minimum. */
+export function requoteSell(fresh: Reserves, tokens: bigint, shown: SellQuote, feeBps: bigint, slippageBps: bigint): { ok: true; quote: SellQuote } | { ok: false; reason: string } {
+  const q = quoteSellTokens(fresh, tokens, feeBps, slippageBps);
+  if (!q) return { ok: false, reason: "The curve can't pay out this sale" };
+  if (q.solNet < shown.minOut) return { ok: false, reason: "The price moved past your slippage since this quote. Check the new quote and place the trade again." };
+  return { ok: true, quote: q };
+}
