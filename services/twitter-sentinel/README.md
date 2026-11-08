@@ -24,7 +24,8 @@ npm start         # dry run by default: posts are logged, not sent
   that mention the account and include `$TICKER`, once per author a day and at most 10 replies an hour. It never
   replies to posts that only use the cashtag: X's automation rules forbid automated replies found by keyword search.
 - **Personas.** Wall St. Bull, Satirical Wojak or Institutional Macro. The text comes from templates filled with
-  elizaOS's `composeContext` (`src/persona.ts`); the first line of the creator's project context is quoted as the
+  elizaOS-style `{{key}}` placeholders (`src/persona.ts`), filled by a small in-house helper that follows
+  elizaOS's `composeContext` rule; the first line of the creator's project context is quoted as the
   latest news. No language model is called, so running it costs nothing.
 - **Settings, any time after launch.** The coin's creator saves them from the app's X automation modal.
   - Every write is signed by the creator's wallet (`app/src/lib/sentinelMessage.ts`, shared by both sides): the
@@ -69,6 +70,10 @@ Things to know before running it live:
 - `@elizaos/client-twitter` itself isn't a dependency: its only export starts elizaOS's own model-driven posting and
   reply loops, which would need a paid model key and reply to every mention. The sentinel uses the same sign-in
   and scraper underneath, with its own milestone and cashtag rules.
+- `@elizaos/core` isn't a dependency either. The sentinel only needed its template fill, and the package pulled in
+  AI SDKs, langchain, embedding downloads and `sharp` (one critical and 30 high `npm audit` advisories, none of it
+  ever called). The templates keep elizaOS's placeholder syntax, so a persona can still move into an elizaOS
+  character unchanged.
 
 ## Configuration
 

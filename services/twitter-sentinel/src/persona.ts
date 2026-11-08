@@ -1,9 +1,8 @@
 /**
- * The three personas and the text they post. Templates are filled with elizaOS's composeContext, so a persona can
- * later move into a full elizaOS character without changing its wording. No model is called: every post and reply
- * comes from these templates, which keeps the sentinel free to run.
+ * The three personas and the text they post. Templates use elizaOS's `{{key}}` placeholder syntax (filled the way its
+ * composeContext fills them), so a persona can later move into a full elizaOS character without changing its wording.
+ * No model is called: every post and reply comes from these templates, which keeps the sentinel free to run.
  */
-import { composeContext, type State } from "@elizaos/core";
 import type { SentinelMilestone, SentinelTone } from "../../../app/src/lib/sentinelMessage";
 
 export const MAX_POST = 280;
@@ -56,9 +55,20 @@ export function newsLine(context: string): string {
   return first;
 }
 
+/**
+ * One pass over the template: each `{{key}}` becomes `values[key]`, or "" when there's none. Same rule as elizaOS's
+ * composeContext (its default engine). Values are inserted as-is: a `{{...}}` or `$&` inside the creator's news is
+ * never expanded.
+ */
+export function fillTemplate(template: string, values: Record<string, string>): string {
+  return template.replace(/{{\w+}}/g, (match) => {
+    const key = match.slice(2, -2);
+    return Object.hasOwn(values, key) ? values[key] : "";
+  });
+}
+
 function fill(template: string, values: Record<string, string>): string {
-  // composeContext replaces {{key}} with state[key]; the rest of State isn't used by these templates.
-  return composeContext({ state: values as unknown as State, template }).replace(/\s+/g, " ").trim();
+  return fillTemplate(template, values).replace(/\s+/g, " ").trim();
 }
 
 /** Code points X weighs 1 (twitter-text v3: Latin, punctuation and similar); every other character weighs 2. */
