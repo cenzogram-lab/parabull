@@ -7,9 +7,8 @@ chat rooms directly, cross-origin, and nothing is proxied through the canister.
 It implements:
 - the coin-metadata upload behind the app's `VITE_METADATA_UPLOAD_URL`;
 - the real-time coin chat behind `VITE_CHAT_URL`: one `ChatRoom` Durable Object per coin mint, with wallet sign-in
-  and image or GIF uploads.
-
-Livestreams (Cloudflare Stream) come later.
+  and image or GIF uploads;
+- the list of coins live on Cloudflare Stream (`GET /live`), which the app's Stream player reads.
 
 ## Routes
 
@@ -19,6 +18,7 @@ Livestreams (Cloudflare Stream) come later.
 | `POST /chat/session` | Wallet sign-in: `{ wallet, issuedAt, nonce, signature }` → `{ token, wallet, expiresAt }` (`src/session.ts`). |
 | `POST /chat/upload` | A chat image or GIF (`Authorization: Bearer <token>`), stored as `img/<sha256>.<ext>`; returns `{ url }`. |
 | `GET /chat/:mint` | WebSocket into that coin's `ChatRoom` (`src/chatRoom.ts`, `src/chatRoomDO.ts`). |
+| `GET /live` | Coins streaming now: `{ streams: [{ mint, input, title, creator, hls }] }` (`src/live.ts`). |
 | `OPTIONS /metadata`, `/chat/session`, `/chat/upload` | CORS preflight for the allowed origins. |
 | `GET /health` | `ok` |
 
@@ -89,6 +89,35 @@ Anything else gets `{type:"error", code}`: `sign_in_required`, `session_expired`
 - `CHAT_LIMITER` limits sign-ins and uploads per IP, and `CHAT_CONNECT_LIMITER` limits socket handshakes per IP. A
   client outside a browser can fake `Origin`, so the handshake limit is what caps how many rooms one client opens.
 
+## Live streams (Cloudflare Stream)
+
+**Each broadcaster has one Stream live input.** An input created for a coin carries `meta.mint`, and optionally
+`meta.title` and `meta.creator` (the wallet). Create one with the API, using a token with Stream Edit:
+
+```bash
+curl -X POST "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/stream/live_inputs" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"meta":{"mint":"<coin mint>","title":"Dev AMA","creator":"<wallet>"},"recording":{"mode":"automatic"}}'
+```
+
+The response holds the RTMPS URL and stream key, the SRT URL, and the WebRTC (WHIP) URL. Point OBS or any encoder at
+one of them. Creators going live from the app (a wallet-checked version of this call) is the next step.
+
+**How `GET /live` works:**
+1. It lists the account's live inputs. The list carries no live status.
+2. It keeps enabled inputs whose `meta.mint` is a Solana address.
+3. It asks each one's `lifecycle` endpoint (`https://<STREAM_HOST>/<input>/lifecycle`, which answers
+   `{ isInput, videoUID, live }`) whether it's live.
+4. It returns the live ones, each with `https://<STREAM_HOST>/<input>/manifest/video.m3u8`. A live input's id plays its
+   current broadcast (Cloudflare's "Watch a live stream" page).
+
+**Caching:** the answer is kept for 15 seconds per isolate, and responses carry `Cache-Control: public, max-age=15`.
+So the Stream API sees one list call and one lifecycle check per input every 15 seconds, however many people watch.
+
+**Fails closed:**
+- Without `CF_ACCOUNT_ID`, `CF_STREAM_TOKEN` (Stream Read) and `STREAM_HOST`, `/live` answers 503.
+- A Stream API failure answers 502, not "nobody is live".
+- An input whose lifecycle check fails counts as not live.
+- Only allowed origins can call it.
+
 ## Setup
 
 1. Create an R2 bucket named `parabull-media`.
@@ -128,6 +157,18 @@ Anything else gets `{type:"error", code}`: `sign_in_required`, `session_expired`
    get SQLite storage.
 3. Build the app with `VITE_CHAT_URL=wss://edge.parabull.xyz` (the Worker's origin). The CSP's `connect-src` picks up
    its `wss://` and `https://` origins.
+
+**Stream setup:**
+1. Set `CF_ACCOUNT_ID` and `STREAM_HOST` (`customer-<code>.cloudflarestream.com`, shown on the Stream dashboard) in
+   `wrangler.toml`.
+2. Set the Stream Read token, a secret rather than a variable:
+
+   ```bash
+   npx wrangler@4 secret put CF_STREAM_TOKEN
+   ```
+
+3. Build the app with `VITE_STREAM_HOST=customer-<code>.cloudflarestream.com` as well. The CSP's `connect-src` and
+   `media-src` pick up that host for the player.
 
 ## Develop
 

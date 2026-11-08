@@ -6,6 +6,7 @@
  *   POST    /chat/session  wallet-signed sign-in, returns a chat session token (src/session.ts)
  *   POST    /chat/upload   a chat image or GIF into R2 (Bearer session token), returns { url }
  *   GET     /chat/:mint    websocket into that coin's ChatRoom (src/chatRoom.ts)
+ *   GET     /live          coins streaming now on Cloudflare Stream, with their HLS URLs (src/live.ts)
  *   OPTIONS               CORS preflight for the POST routes
  *   GET     /health        "ok"
  *
@@ -15,6 +16,7 @@
 import { isAddress } from "../../../app/src/lib/chatMessage";
 import { allowedOrigins, cors, json, preflight, readJson } from "./http";
 import { MAX_IMAGE_BYTES, MAX_REQUEST_BYTES, publicBase, putOnce, sha256Hex, sniffImage, storeMetadata, type MediaBucket } from "./metadata";
+import { liveStreams, type LiveEnv } from "./live";
 import { createSession, verifyToken } from "./session";
 
 /** Cloudflare's rate limiting binding ([[ratelimits]] in wrangler.toml). */
@@ -28,7 +30,7 @@ export interface ChatNamespace {
   get(id: unknown): { fetch(request: Request): Promise<Response> };
 }
 
-export interface Env {
+export interface Env extends LiveEnv {
   /** R2 bucket, public through a custom domain (MEDIA_PUBLIC_URL). */
   MEDIA: MediaBucket;
   /** https base the bucket is served from, e.g. https://media.parabull.xyz. */
@@ -113,15 +115,24 @@ async function uploadRoute(request: Request, env: Env, allow: Record<string, str
   return json(200, { url: `${base}/${key}` }, allow);
 }
 
-export async function handle(request: Request, env: Env, now = Date.now()): Promise<Response> {
+/** `fetchImpl` reaches the Stream API and lifecycle endpoints (tests and the local harness pass a stand-in). */
+export async function handle(request: Request, env: Env, now = Date.now(), fetchImpl: typeof fetch = fetch): Promise<Response> {
   const { pathname } = new URL(request.url);
   if (pathname === "/health" && request.method === "GET") return new Response("ok", { headers: { "cache-control": "no-store" } });
-  const route = pathname === "/metadata" ? "metadata" : pathname === "/chat/session" ? "session" : pathname === "/chat/upload" ? "upload" : /^\/chat\/[^/]+$/.test(pathname) ? "room" : null;
+  const route = pathname === "/live" ? "live" : pathname === "/metadata" ? "metadata" : pathname === "/chat/session" ? "session" : pathname === "/chat/upload" ? "upload" : /^\/chat\/[^/]+$/.test(pathname) ? "room" : null;
   if (!route) return json(404, { error: "not found" });
 
   const origin = request.headers.get("origin") ?? "";
   if (!allowedOrigins(env.ALLOWED_ORIGINS).has(origin)) return json(403, { error: "origin not allowed" });
   const allow = cors(origin);
+
+  if (route === "live") {
+    if (request.method === "OPTIONS") return preflight(origin, "GET");
+    if (request.method !== "GET") return json(405, { error: "method not allowed" }, { ...allow, allow: "GET, OPTIONS" });
+    const result = await liveStreams(env, now, fetchImpl);
+    // Short shared caching: every viewer of /live polls this, and the Worker caches the upstream answer too.
+    return result.ok ? json(200, { streams: result.streams }, { ...allow, "cache-control": "public, max-age=15" }) : json(result.status, { error: result.error, streams: [] }, allow);
+  }
 
   if (route === "room") {
     // Browsers send Origin on websocket upgrades, so the check above also stops cross-site socket hijacking.
