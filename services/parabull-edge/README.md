@@ -120,10 +120,14 @@ real Stream account.
    Anyone else gets 403. A coin that isn't on chain (demo coins) gets 404, and nothing is asked of Stream.
 3. **One live input per coin:** the Worker finds the input by `meta.mint` and reuses it. The first time, it creates
    one with `meta {mint, creator, title}` and automatic recording. A new title updates `meta.title`.
-   - Two first-time requests at once (a double click, two devices) would both find no input and both create one.
-   - So the Worker forwards each request to the coin's `ChatRoom` Durable Object, the one instance for that mint, which
-     runs them one at a time (`ChatRoomCore.liveInput`).
-   - The second request then finds the first one's input and reuses it. This touches none of the room's chat storage.
+   - **Capacity:** `GET /live` checks at most 100 coin inputs (`MAX_INPUTS` in `src/live.ts`, one lifecycle call each
+     per refresh). So no new input is created past 100; that request gets 503, and coins that already have an input
+     keep it. Delete inputs you no longer need to free room. Going past 100 needs a live-status index (for example,
+     from Stream's webhooks) instead of polling.
+   - **Races:** two first-time requests at once (a double click, two devices) would both find no input and both create
+     one, and two coins at once could both pass the capacity check. So the Worker forwards every request to one
+     `ChatRoom` Durable Object, named `live-inputs` (never a mint, so never a chat room), which runs them one at a
+     time (`ChatRoomCore.liveInput`). A waiting request sees what the ones before it created.
 4. **The answer** carries the stream key, so it is `Cache-Control: no-store`. `CHAT_LIMITER` limits these requests per
    IP, and only allowed origins can call it.
 

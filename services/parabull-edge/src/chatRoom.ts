@@ -9,9 +9,10 @@
  * - Anyone can read: a new socket gets the last CHAT_HISTORY messages and the reader count. Posting needs
  *   `{type:"auth",token}` with a session token (src/session.ts), at most one message per CHAT_COOLDOWN_MS per wallet,
  *   CHAT_MAX_CHARS characters, and attachments only from MEDIA_PUBLIC_URL/img/.
- * - The room also serializes going live for its coin (POST /live/input, src/broadcast.ts): the Worker forwards each
- *   request here, and they run one at a time, so two first-time requests can't both create a Stream input. That path
- *   is internal: the Worker only ever forwards /chat/:mint from the outside.
+ * - One object of this class, named LIVE_INPUT_ROOM (never a mint, so never a chat room), serializes going live
+ *   (POST /live/input, src/broadcast.ts): the Worker forwards every such request to it, and they run one at a time,
+ *   so neither two requests for a coin nor two coins near the capacity limit can over-create Stream inputs. That
+ *   path is internal: the Worker only ever forwards /chat/:mint from the outside.
  */
 import {
   CHAT_COOLDOWN_MS,
@@ -29,8 +30,10 @@ import {
 import { broadcastInput, type BroadcastEnv, type BroadcastResult } from "./broadcast";
 import { verifyToken } from "./session";
 
-/** The Worker forwards POST /live/input to the coin's room on this path, with `{ wallet, body }`. */
+/** The Worker forwards POST /live/input on this path, with `{ wallet, body }`, to the LIVE_INPUT_ROOM object. */
 export const LIVE_INPUT_PATH = "/__live-input";
+/** Not a base58 mint (it has "-"), so it can't be a coin's chat room. */
+export const LIVE_INPUT_ROOM = "live-inputs";
 
 /** The parts of the Durable Object APIs the room uses (the runtime's objects satisfy them). */
 export interface SqlCursor<T> {
@@ -125,8 +128,9 @@ export class ChatRoomCore {
   }
 
   /**
-   * The coin's live input for `wallet` (src/broadcast.ts), one request at a time. This object is the only one for its
-   * mint, so a request that waited here sees the input the one before it created, and reuses it.
+   * The coin's live input for `wallet` (src/broadcast.ts), one request at a time. Every request goes to the one
+   * LIVE_INPUT_ROOM object, so a request that waited here sees the inputs the ones before it created: it reuses its
+   * coin's, and counts them all against the capacity limit.
    */
   liveInput(wallet: string, body: unknown): Promise<BroadcastResult> {
     const run = this.liveInputs.then(() => broadcastInput(this.env, wallet, body, this.deps.fetch ?? fetch));

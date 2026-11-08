@@ -8,14 +8,16 @@
  * - What: one live input per coin, found by `meta.mint` and reused; created the first time with
  *   `meta {mint, creator, title}` and automatic recording. A new title updates `meta.title`. The answer carries the
  *   stream key, so it is never cached.
+ * - Capacity: GET /live checks at most MAX_INPUTS coin inputs (src/live.ts), so no new input is created past that
+ *   many (503); coins that already have one keep it.
  * - Races: two first-time requests for a coin (a double click, two devices) would both find no input and both create
- *   one. So the Worker never calls this directly: it runs inside the coin's ChatRoom Durable Object (one instance per
- *   mint), one request at a time (ChatRoomCore.liveInput).
+ *   one, and two coins at once could both pass the capacity check. So the Worker never calls this directly: every
+ *   request runs in one Durable Object (LIVE_INPUT_ROOM), one at a time (ChatRoomCore.liveInput).
  * Needs CF_STREAM_TOKEN with Stream Write (create/update), plus CF_ACCOUNT_ID, STREAM_HOST and SOLANA_RPC_URL; without
  * them it answers 503. Fails closed on every upstream error.
  */
 import { isAddress } from "../../../app/src/lib/chatMessage";
-import { hlsUrl, resetLiveCache, streamHost, type LiveEnv } from "./live";
+import { coinInputs, hlsUrl, MAX_INPUTS, resetLiveCache, streamHost, type LiveEnv } from "./live";
 import { curveCreator, PARABULL_PROGRAM_ID } from "./solana";
 
 export interface BroadcastEnv extends LiveEnv {
@@ -95,6 +97,8 @@ export async function broadcastInput(env: BroadcastEnv, wallet: string, body: un
 
   let got: { ok: boolean; result: unknown };
   if (!existing) {
+    // Past this, /live wouldn't check the new input and viewers would never see it.
+    if (coinInputs(inputs).length >= MAX_INPUTS) return { ok: false, status: 503, error: `live streaming is full (${MAX_INPUTS} coins have a stream); try again later` };
     got = await call(api, { method: "POST", body: JSON.stringify({ meta: { mint, creator: wallet, ...(title ? { title } : {}) }, recording: { mode: "automatic" }, enabled: true }) });
   } else {
     const meta: Record<string, unknown> = { ...(existing.meta as Record<string, unknown>), mint, creator: wallet };

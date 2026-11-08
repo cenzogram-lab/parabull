@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 import { base58Decode, CHAT_SESSION_MS } from "../../../app/src/lib/chatMessage";
 import { broadcastInput, type BroadcastEnv } from "./broadcast";
-import { ChatRoomCore, type RoomState } from "./chatRoom";
-import { resetLiveCache } from "./live";
+import { ChatRoomCore, LIVE_INPUT_ROOM, type RoomState } from "./chatRoom";
+import { MAX_INPUTS, resetLiveCache } from "./live";
 import { handle, type ChatNamespace, type Env } from "./router";
 import { issueToken } from "./session";
 import { base58Encode, bondingCurveAddress, BONDING_CURVE_DISCRIMINATOR, curveCreator, isOnCurve, PARABULL_PROGRAM_ID } from "./solana";
@@ -36,7 +36,7 @@ function curveAccount(mint: string, creator: string, disc = BONDING_CURVE_DISCRI
 }
 
 /** RPC + Stream API stand-in. */
-function upstream(opts: { creator?: string; owner?: string; disc?: number[]; accountMint?: string; missing?: boolean; rpcDown?: boolean; inputs?: Record<string, unknown>[]; streamDown?: boolean } = {}) {
+function upstream(opts: { creator?: string; owner?: string; disc?: number[]; accountMint?: string; missing?: boolean; rpcDown?: boolean; inputs?: Record<string, unknown>[]; streamDown?: boolean; curveMints?: string[] } = {}) {
   const calls: { method: string; url: string; body: unknown; auth: string | null }[] = [];
   // Like the real API, the list shows the inputs created so far.
   const inputs = [...(opts.inputs ?? [])];
@@ -55,12 +55,19 @@ function upstream(opts: { creator?: string; owner?: string; disc?: number[]; acc
     if (url === RPC) {
       if (opts.rpcDown) return new Response("down", { status: 503 });
       if (opts.missing) return Response.json({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: null } });
-      return Response.json({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: { owner: opts.owner ?? PARABULL_PROGRAM_ID, data: [curveAccount(opts.accountMint ?? MINT, opts.creator ?? CREATOR, opts.disc), "base64"] } } });
+      // curveMints: serve each listed coin's own curve (found by the requested curve address), all created by CREATOR.
+      let accountMint = opts.accountMint ?? MINT;
+      if (opts.curveMints) {
+        const asked = (body as { params: [string] }).params[0];
+        for (const m of opts.curveMints) if ((await bondingCurveAddress(m)).address === asked) accountMint = m;
+      }
+      return Response.json({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: { owner: opts.owner ?? PARABULL_PROGRAM_ID, data: [curveAccount(accountMint, opts.creator ?? CREATOR, opts.disc), "base64"] } } });
     }
     const api = `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/stream/live_inputs`;
     if (opts.streamDown) return Response.json({ success: false }, { status: 500 });
-    if (url === api && method === "GET") return Response.json({ success: true, result: { liveInputs: inputs.map((i) => ({ uid: i.uid, meta: i.meta, enabled: true })) } });
+    if (url === api && method === "GET") return Response.json({ success: true, result: { liveInputs: inputs.map((i) => ({ uid: i.uid, meta: i.meta, enabled: i.enabled ?? true })) } });
     if (url === api && method === "POST") {
+      await new Promise((r) => setTimeout(r, 30)); // a create takes a while to land: others list meanwhile
       const uid = "cdef"[(inputs.length - (opts.inputs?.length ?? 0)) % 4].repeat(32);
       inputs.push({ uid, meta: body.meta });
       return Response.json({ success: true, result: creds(uid, body.meta) });
@@ -144,7 +151,7 @@ test("broadcast: the on-chain creator gets a new live input on first use", async
   assert.ok(u.calls.filter((c) => c.url.startsWith("https://api.cloudflare.com")).every((c) => c.auth === "Bearer write-token"));
 });
 
-test("broadcast: racing first-time requests for a coin make one input (serialized in the coin's room)", async () => {
+test("broadcast: racing first-time requests for a coin make one input (serialized in the live-input object)", async () => {
   const creates = (u: ReturnType<typeof upstream>) => u.calls.filter((c) => c.method === "POST" && c.url.startsWith("https://api.cloudflare.com")).length;
   // Unserialized, both requests list no input and both create one: two inputs, two stream keys.
   const raw = upstream();
@@ -164,6 +171,30 @@ test("broadcast: racing first-time requests for a coin make one input (serialize
   const r2 = liveRoom(flaky.fetchImpl);
   assert.equal((await r2.liveInput(CREATOR, { mint: MINT })).ok, false);
   assert.equal((await r2.liveInput(STRANGER, { mint: MINT })).ok, false);
+});
+
+test("broadcast: no new input past what /live checks (MAX_INPUTS); racing coins can't pass the cap", async () => {
+  const OTHER = "CWh5S2rBmLoHGSvGfSHQDkUhZzCxAGVDYbspyu2MN7R2";
+  const filler = (n: number) => Array.from({ length: n }, (_, i) => ({ uid: (i + 1).toString(16).padStart(32, "0"), meta: { mint: STRANGER, title: `coin ${i}` } }));
+  const posts = (u: ReturnType<typeof upstream>) => u.calls.filter((c) => c.method === "POST" && c.url.startsWith("https://api.cloudflare.com")).length;
+  // Full: refused before anything is created.
+  const full = upstream({ inputs: filler(MAX_INPUTS) });
+  const refused = await broadcastInput(env, CREATOR, { mint: MINT }, full.fetchImpl);
+  assert.ok(!refused.ok && refused.status === 503 && /full/.test(refused.error), JSON.stringify(refused));
+  assert.equal(posts(full), 0);
+  // Inputs that aren't a coin's (no meta.mint, or disabled) don't count.
+  const notCoins = [...filler(MAX_INPUTS - 1), { uid: "a".repeat(32), meta: {} }, { uid: "b".repeat(32), meta: { mint: STRANGER }, enabled: false }];
+  assert.ok((await broadcastInput(env, CREATOR, { mint: MINT }, upstream({ inputs: notCoins }).fetchImpl)).ok);
+  // A coin that already has its input keeps it at the cap.
+  const mine = { uid: "e".repeat(32), meta: { mint: MINT, creator: CREATOR } };
+  const kept = await broadcastInput(env, CREATOR, { mint: MINT }, upstream({ inputs: [...filler(MAX_INPUTS - 1), mine] }).fetchImpl);
+  assert.ok(kept.ok && kept.value.input === "e".repeat(32));
+  // One slot left, two new coins at once: through the one object, exactly one gets it.
+  const u = upstream({ inputs: filler(MAX_INPUTS - 1), curveMints: [MINT, OTHER] });
+  const room = liveRoom(u.fetchImpl);
+  const [a, b] = await Promise.all([room.liveInput(CREATOR, { mint: MINT }), room.liveInput(CREATOR, { mint: OTHER })]);
+  assert.deepEqual([a.ok, b.ok].sort(), [false, true], JSON.stringify([a, b]));
+  assert.equal(posts(u), 1);
 });
 
 test("broadcast: the coin's existing input is reused; a new title updates it", async () => {
@@ -213,7 +244,7 @@ test("broadcast: POST /live/input needs a wallet session; the answer is never ca
   assert.equal(res.headers.get("cache-control"), "no-store");
   assert.equal(res.headers.get("access-control-allow-origin"), APP);
   assert.ok(((await res.json()) as { rtmps: { streamKey: string } }).rtmps.streamKey);
-  assert.deepEqual([...r.made.keys()], [MINT], "handled in the coin's own room");
+  assert.deepEqual([...r.made.keys()], [LIVE_INPUT_ROOM], "handled in the one live-input object, not a chat room");
   // Racing requests through the Worker: one input.
   const racing = await Promise.all([1, 2, 3].map(() => handle(post(`Bearer ${token}`), e, 0, u.fetchImpl)));
   assert.equal(new Set(await Promise.all(racing.map(async (x) => ((await x.json()) as { input: string }).input))).size, 1);
@@ -221,7 +252,7 @@ test("broadcast: POST /live/input needs a wallet session; the answer is never ca
   // A bad mint never reaches a room; no CHAT_ROOMS binding fails closed.
   const bad = await handle(new Request("https://edge.test/live/input", { method: "POST", headers: { origin: APP, authorization: `Bearer ${token}` }, body: JSON.stringify({ mint: "../x" }) }), e, 0, u.fetchImpl);
   assert.equal(bad.status, 400);
-  assert.deepEqual([...r.made.keys()], [MINT]);
+  assert.deepEqual([...r.made.keys()], [LIVE_INPUT_ROOM]);
   assert.equal((await handle(post(`Bearer ${token}`), { ...e, CHAT_ROOMS: undefined }, 0, u.fetchImpl)).status, 503);
   assert.equal((await handle(post(`Bearer ${token}`, "https://evil.test"), e, 0, u.fetchImpl)).status, 403);
   const pre = await handle(new Request("https://edge.test/live/input", { method: "OPTIONS", headers: { origin: APP } }), e, 0, u.fetchImpl);
