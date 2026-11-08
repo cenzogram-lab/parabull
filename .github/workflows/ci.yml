@@ -128,6 +128,28 @@ jobs:
       - name: Tests (milestones, replies, signed settings, sealing, rate limits)
         run: npm test
 
+  edge:
+    name: edge worker (typecheck + tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/parabull-edge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: services/parabull-edge/package-lock.json
+      - name: npm ci
+        run: npm ci
+      # Also checks the app module it shares the upload contract with (app/src/lib/metadata.ts).
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tests (image sniffing, field rules, R2 keys, the app's upload client, CORS, refusals)
+        run: npm test
+
   canister:
     name: canister (Motoko build + tests, PocketIC)
     runs-on: ubuntu-latest

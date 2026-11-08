@@ -19,3 +19,6 @@ app/screenshots/
 
 # Motoko (mops): build output and package cache; mops.lock is committed
 .mops/
+
+# Cloudflare Worker local state (wrangler dev)
+.wrangler/

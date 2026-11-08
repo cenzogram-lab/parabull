@@ -1,0 +1,21 @@
+# Cloudflare Worker for Parabull media (README.md). Deploy: npx wrangler@4 deploy
+name = "parabull-edge"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[vars]
+# The bucket's public custom domain (R2 > parabull-media > Settings > Custom Domains). https, no trailing slash.
+MEDIA_PUBLIC_URL = "https://media.example.com"
+# Origins allowed to upload: the frontend canister's URL and any custom domain, comma-separated. Anything else is
+# refused, so until this is set every upload fails closed.
+ALLOWED_ORIGINS = "https://frontend-canister-id.icp0.io"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "parabull-media"
+
+# Per-IP upload limit (src/index.ts UPLOAD_LIMITER). namespace_id is any integer unique to this account's limits.
+[[ratelimits]]
+name = "UPLOAD_LIMITER"
+namespace_id = "1001"
+simple = { limit = 10, period = 60 }
