@@ -12,6 +12,8 @@ import { buyCost, sellProceeds, type Reserves } from "../../../scripts/src/curve
 import { base58Encode, bondingCurveAddress, findProgramAddress } from "../../parabull-edge/src/solana";
 import { decodeAccount, encodeAccount, encodeEvent, PROGRAM_ID, zeroValue, type Decoded } from "./borsh";
 import { encodeMint, encodeTokenAccount, TOKEN_2022_PROGRAM_ID } from "./token2022";
+import { memoLogLines } from "./memo";
+import { buildLevels, leafHash, proofFor, rootOf } from "../../../app/src/lib/merkle";
 
 export const DEVNET_CPMM = "DRaycpLY18LhpbydsBWbVJtxpNv9oXPgjRSfpF2bWpYb";
 const SPL_TOKEN = "TokenkegQfeZyiNwAJbNbGKPFXCWxBwFLMaHvTNw4ZkN5";
@@ -58,7 +60,7 @@ export class MockChain {
   }
 
   /** Records a transaction whose top-level program is this program, emitting `events` (and any extra raw lines). */
-  tx(events: { name: string; data: Decoded }[], opts: { err?: unknown; extraLines?: string[] } = {}): string {
+  tx(events: { name: string; data: Decoded }[], opts: { err?: unknown; extraLines?: string[]; after?: string[] } = {}): string {
     this.slot += 1;
     this.time += 2;
     const logs = [
@@ -66,6 +68,7 @@ export class MockChain {
       ...events.map((e) => `Program data: ${Buffer.from(encodeEvent(e.name, e.data)).toString("base64")}`),
       ...(opts.extraLines ?? []),
       `Program ${this.programId} ${opts.err ? "failed: custom program error: 0x1771" : "success"}`,
+      ...(opts.after ?? []),
     ];
     const t: Tx = { signature: this.nextSignature(), slot: this.slot, blockTime: this.time, err: opts.err ?? null, logs };
     this.txs.push(t);
@@ -186,7 +189,7 @@ export class MockChain {
   }
 
   /** buy (exact tokens, capped at what's left) or sell, through the curve math; 1% fee to the escrow counter. */
-  async trade(mint: string, user: string, isBuy: boolean, tokens: bigint, opts: { err?: unknown } = {}): Promise<string> {
+  async trade(mint: string, user: string, isBuy: boolean, tokens: bigint, opts: { err?: unknown; memo?: string; extraLines?: string[] } = {}): Promise<string> {
     let ev: Decoded = {};
     let sol = 0n;
     const { address, data } = await this.writeCurve(mint, (c) => {
@@ -211,7 +214,85 @@ export class MockChain {
     }
     const events = [{ name: "TradeEvent", data: ev }];
     if (!opts.err && data.complete && isBuy) events.push({ name: "GraduationReady", data: { ...zeroValue("GraduationReady"), mint, bonding_curve: address, real_sol_reserves: data.real_sol_reserves } });
-    return this.tx(events, opts);
+    // A memo instruction after the trade, at the top level (the app's referral tag).
+    return this.tx(events, { err: opts.err, extraLines: opts.extraLines, after: opts.memo === undefined ? [] : memoLogLines(opts.memo) });
+  }
+
+  // ---- reward epochs (publish_reward_epoch, claim_holder_reward, expire_reward_epoch) ---------------------------
+
+  private nextEpoch = 1;
+  private vault = { deposited: 0n, committed: 0n, claimed: 0n, expired: 0n };
+
+  private async epochAddress(epoch: number) {
+    const n = new Uint8Array(8);
+    new DataView(n.buffer).setBigUint64(0, BigInt(epoch), true);
+    return (await findProgramAddress([enc("reward-epoch"), n], this.programId)).address;
+  }
+
+  private async writeVault() {
+    const { address } = await findProgramAddress([enc("holder-vault")], this.programId);
+    const v = { ...zeroValue("HolderRewardVault"), total_deposited_lamports: this.vault.deposited, total_committed_lamports: this.vault.committed, total_claimed_lamports: this.vault.claimed, total_expired_lamports: this.vault.expired, next_epoch: BigInt(this.nextEpoch) };
+    this.accounts.set(address, { data: encodeAccount("HolderRewardVault", v), owner: this.programId, lamports: Number(this.vault.deposited) });
+  }
+
+  /**
+   * Publishes an epoch over `leaves` (index = position) and returns it with the artifact the snapshot scripts would
+   * write (proofs included), for the test to serve or tamper with.
+   */
+  async publishEpoch(leaves: { claimant: string; amount: bigint }[], kind: "holder" | "caller" = "holder") {
+    const epoch = this.nextEpoch++;
+    const levels = buildLevels(leaves.map((l, i) => leafHash(i, base58Decode(l.claimant)!, l.amount)));
+    const root = rootOf(levels);
+    const total = leaves.reduce((s, l) => s + l.amount, 0n);
+    const address = await this.epochAddress(epoch);
+    const e = { ...zeroValue("RewardEpoch"), bump: 255, epoch: BigInt(epoch), merkle_root: root, snapshot_slot: BigInt(this.slot), total_lamports: total, num_leaves: leaves.length, published_at: BigInt(this.time), expires_at: BigInt(this.time + 30 * 86_400), claimed_bitmap: new Uint8Array(Math.ceil(leaves.length / 8)) };
+    this.accounts.set(address, { data: encodeAccount("RewardEpoch", e), owner: this.programId, lamports: 1_000_000 });
+    this.vault.deposited += total;
+    this.vault.committed += total;
+    await this.writeVault();
+    const signature = this.tx([{ name: "RewardEpochPublished", data: { epoch: BigInt(epoch), merkle_root: root, total_lamports: total, num_leaves: leaves.length, snapshot_slot: BigInt(this.slot), expires_at: e.expires_at } }]);
+    const artifact = {
+      epoch,
+      kind,
+      root: Buffer.from(root).toString("hex"),
+      totalLamports: total.toString(),
+      numLeaves: leaves.length,
+      snapshotSlot: this.slot,
+      createdAt: new Date(this.time * 1000).toISOString(),
+      leaves: leaves.map((l, i) => ({ index: i, claimant: l.claimant, amount: l.amount.toString(), proof: proofFor(levels, i).map((p) => Buffer.from(p).toString("hex")) })),
+    };
+    return { epoch, address, root, total, artifact, signature };
+  }
+
+  private async writeEpoch(epoch: number, f: (e: Decoded) => void) {
+    const address = await this.epochAddress(epoch);
+    const e = decodeAccount<Decoded>("RewardEpoch", this.accounts.get(address)!.data)!;
+    f(e);
+    this.accounts.get(address)!.data = encodeAccount("RewardEpoch", e);
+    return e;
+  }
+
+  async claimReward(epoch: number, index: number, claimant: string, amount: bigint): Promise<string> {
+    await this.writeEpoch(epoch, (e) => {
+      const bm = e.claimed_bitmap as Uint8Array;
+      bm[index >> 3] |= 1 << (index & 7);
+      e.claimed_lamports = (e.claimed_lamports as bigint) + amount;
+      e.claimed_count = (e.claimed_count as number) + 1;
+    });
+    this.vault.claimed += amount;
+    await this.writeVault();
+    return this.tx([{ name: "HolderRewardClaimed", data: { epoch: BigInt(epoch), index, claimant, amount } }]);
+  }
+
+  async expireEpoch(epoch: number): Promise<string> {
+    let reclaimed = 0n;
+    await this.writeEpoch(epoch, (e) => {
+      e.expired = true;
+      reclaimed = (e.total_lamports as bigint) - (e.claimed_lamports as bigint);
+    });
+    this.vault.expired += reclaimed;
+    await this.writeVault();
+    return this.tx([{ name: "EpochExpired", data: { epoch_index: BigInt(epoch), reclaimed_lamports: reclaimed, expired_by: addressOf("crank") } }]);
   }
 
   /** prepare_migration + migrate_raydium: tokens and SOL to a Raydium pool (with its own Program data in a CPI). */
@@ -297,8 +378,17 @@ export class MockChain {
         return t ? { slot: t.slot, blockTime: t.blockTime, meta: { err: t.err, logMessages: t.logs }, transaction: {} } : null;
       }
       case "getTokenAccountsByOwner": {
-        const [owner, { programId }, cfg] = params as [string, { programId: string }, { dataSlice?: { offset: number; length: number } }];
-        const value = [...this.accounts].filter(([, a]) => a.owner === programId && a.data.length >= 72 && base58Encode(a.data.subarray(32, 64)) === owner).map(([pubkey, a]) => ({ pubkey, account: this.acct(a, cfg?.dataSlice) }));
+        // By token program ({ programId }) or by mint ({ mint }, either program); jsonParsed as the RPC parses token accounts.
+        const [owner, filter, cfg] = params as [string, { programId?: string; mint?: string }, { dataSlice?: { offset: number; length: number }; encoding?: string }];
+        const tokenPrograms = [TOKEN_2022_PROGRAM_ID, SPL_TOKEN];
+        const value = [...this.accounts]
+          .filter(([, a]) => (filter.programId ? a.owner === filter.programId : tokenPrograms.includes(a.owner)) && a.data.length >= 72 && base58Encode(a.data.subarray(32, 64)) === owner)
+          .filter(([, a]) => !filter.mint || base58Encode(a.data.subarray(0, 32)) === filter.mint)
+          .map(([pubkey, a]) => {
+            if (cfg?.encoding !== "jsonParsed") return { pubkey, account: this.acct(a, cfg?.dataSlice) };
+            const amount = new DataView(a.data.buffer, a.data.byteOffset).getBigUint64(64, true).toString();
+            return { pubkey, account: { ...this.acct(a), data: { program: "spl-token-2022", parsed: { type: "account", info: { mint: base58Encode(a.data.subarray(0, 32)), owner, tokenAmount: { amount, decimals: 6 } } }, space: a.data.length } } };
+          });
         return { context: ctx, value };
       }
       case "getBalance":

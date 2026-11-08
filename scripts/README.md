@@ -200,12 +200,59 @@ the instruction it names.
 | `launch_worker.ts` | Launch worker (`docs/BACKEND_SPEC.md` §1; the ticket handling is `src/launchWorkerRunner.ts`). Listens for `LaunchRequested` events (plus a `POLL_MS` poll of open tickets), recovers name/symbol/URI from the user's `request_launch` transaction and checks them against the ticket's commitment, pre-checks pause and the ticker/name/tweet locks, optionally fetches the metadata URI and checks the tweet with the X API, then waits a CSPRNG-uniform 3–15 s and sends `create` with a fresh in-memory mint keypair. Rejected tickets are refunded at once with `refund_ticket`. `--once` runs one poll and exits. |
 | `crank_worker.ts` | Reference crank: graduation (3 transactions), escrow release, fee sweeps, LP-fee collection, buyback and burn with a quoted `min_amount_out`, reward-epoch expiry, optional DexScreener-target refresh (`--sol-usd`), and optional holder-reward publishing (`--publish-rewards`). |
 | `src/snapshot.ts` (`npm run snapshot [-- --publish]`) | Takes a $PARABULL holder snapshot and turns it into reward epochs. It writes `snapshots/epoch-<n>.draft.json` on a dry run, or publishes and writes `snapshots/epoch-<n>.json` (root, total, and every leaf with its amount, balance and proof) for the claim UI. |
+| `src/callerEpoch.ts` (`npm run caller-epoch`) | Caller-reward epoch from the indexer's referred buys and the Worker's callouts: rules, split, Merkle tree, and the atomic treasury top-up + `publish_reward_epoch` (see "Caller epochs"). |
 | `src/lpFees.ts` | Fetches the claimable Burn & Earn LP fee for one locked position from Raydium's lock-position API. |
 
 Backend services that aren't built as scripts here (the 20-slot bundle-risk
 indexer and image/lookalike flags, plus the durable job table and X account
 linking the launch worker would need in production) are specified in
 [`docs/BACKEND_SPEC.md`](../docs/BACKEND_SPEC.md).
+
+## Caller epochs
+
+`src/callerEpoch.ts` (`npm run caller-epoch`) pays callout authors for the buys their callout links brought in. The
+treasury funds it, and the program's existing reward epochs pay it out, with no program change
+(`docs/BACKEND_SPEC.md` §6).
+
+```bash
+# Dry run: writes snapshots/epoch-<n>.draft.json and prints the plan.
+CLUSTER=devnet INDEXER_URL=https://indexer.example.com EDGE_URL=https://edge.example.com \
+  CALLOUTS_ORIGIN=https://app.example.com CALLER_EPOCH_LAMPORTS=2000000000 \
+  npm run caller-epoch -- --since 2026-11-01 --until 2026-11-08
+```
+
+```bash
+# Publish: one transaction (treasury top-up, then publish_reward_epoch), then snapshots/epoch-<n>.json.
+CLUSTER=devnet ... npm run caller-epoch -- --since 2026-11-01 --until 2026-11-08 --publish
+```
+
+**Which buys count.** A referred buy (from the indexer's `/referrals`) counts only if:
+- its callout exists (from the edge Worker), and the buy is of the callout's coin;
+- it came after the callout;
+- the buyer isn't the callout's author;
+- it cost at least `MIN_REFERRED_BUY_LAMPORTS` (default 0.05 SOL).
+
+Each trader counts for at most `PER_TRADER_CAP_LAMPORTS` (10 SOL) per caller.
+
+**The split.** The budget is split by counted volume:
+- capped at `MAX_CALLER_SHARE_BPS` per caller (25%);
+- payouts under `MIN_PAYOUT_LAMPORTS` dropped;
+- only system-owned wallets paid.
+
+What isn't paid out stays with the treasury.
+
+**Safety.**
+- **Fails closed** when:
+  - the indexer's referral record doesn't reach back to `--since`;
+  - the funding key (`TREASURY_KEYPAIR`, default the admin) isn't `Global.treasury`;
+  - `CRANK_KEYPAIR` isn't `Global.crank_authority`;
+  - the treasury can't cover the total.
+- **Atomic publish.** The top-up and `publish_reward_epoch` go in one transaction, so the holder snapshot never sees
+  the top-up as its own.
+- **Upload.** Afterwards, upload `epoch-<n>.json` to the indexer's `REWARDS_BASE_URL`. Claimants use the same
+  claim page as holder rewards, where the epoch shows as a caller reward.
+
+`CALLOUTS_ORIGIN` is the app's origin. The Worker only answers its `ALLOWED_ORIGINS`.
 
 ## LP-fee collection
 

@@ -1,10 +1,11 @@
 /**
- * parabull-edge Worker entry: the request router (src/router.ts) and the ChatRoom Durable Object class, which the
- * runtime looks up by this export name (wrangler.toml [[durable_objects.bindings]]).
+ * parabull-edge Worker entry: the request router (src/router.ts) and the ChatRoom and CalloutStore Durable Object
+ * classes, which the runtime looks up by these export names (wrangler.toml [[durable_objects.bindings]]).
  */
 import { handle, type Env } from "./router";
 
 export { ChatRoom } from "./chatRoomDO";
+export { CalloutStore } from "./calloutStoreDO";
 
 export default {
   fetch(request: Request, env: Env): Promise<Response> {

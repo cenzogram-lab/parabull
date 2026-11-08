@@ -18,6 +18,7 @@ import { cx } from "./components/ui/primitives";
 import { CONFIG } from "./config";
 import { useIsMobile } from "./hooks/useMediaQuery";
 import { Board } from "./pages/Board";
+import { CalloutLink } from "./pages/CalloutLink";
 import { CoinPage } from "./pages/CoinPage";
 import { CreateModal, CreatePage } from "./pages/Create";
 import { Explore } from "./pages/Explore";
@@ -121,6 +122,7 @@ function AppRoutes() {
           <Route path="explore" element={<Explore />} />
           <Route path="create" element={<CreatePage />} />
           <Route path="coin/:mint" element={<CoinPage />} />
+          <Route path="c/:id" element={<CalloutLink />} />
           <Route path="leaderboard" element={<Leaderboard />} />
           <Route path="portfolio" element={<Portfolio />} />
           <Route path="search" element={<SearchPage />} />

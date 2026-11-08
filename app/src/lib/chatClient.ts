@@ -13,6 +13,8 @@ export interface ChatEndpoints {
   live: string;
   /** POST: the coin creator's Stream live input (RTMPS / SRT stream keys). */
   liveInput: string;
+  /** GET / POST: callouts (src/lib/calloutsClient.ts). */
+  callouts: string;
 }
 
 /**
@@ -32,7 +34,7 @@ export function chatEndpoints(raw: string | undefined): ChatEndpoints | null {
   const path = u.pathname.replace(/\/+$/, "").replace(/\/chat$/, "");
   const ws = `${secure ? "wss" : "ws"}://${u.host}${path}`;
   const http = `${secure ? "https" : "http"}://${u.host}${path}`;
-  return { room: (mint) => `${ws}/chat/${encodeURIComponent(mint)}`, session: `${http}/chat/session`, upload: `${http}/chat/upload`, live: `${http}/live`, liveInput: `${http}/live/input` };
+  return { room: (mint) => `${ws}/chat/${encodeURIComponent(mint)}`, session: `${http}/chat/session`, upload: `${http}/chat/upload`, live: `${http}/live`, liveInput: `${http}/live/input`, callouts: `${http}/callouts` };
 }
 
 export const bytesToBase64 = (b: Uint8Array) => btoa(Array.from(b, (x) => String.fromCharCode(x)).join(""));

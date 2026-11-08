@@ -7,6 +7,7 @@ import type { Callout, Coin, Trader } from "../../lib/types";
 import { progressOf } from "../../mock/coins";
 import { useApp } from "../../state/AppState";
 import { useMarket } from "../../state/Market";
+import { calloutMove } from "../../lib/calloutsClient";
 import { XLogo } from "../brand/Wordmark";
 import { FollowButton } from "../mobile/MobileUi";
 import { AgeTag, ChangePill, cx, HotBadge, LockBadge, Popover, StageBadge } from "../ui/primitives";
@@ -94,10 +95,13 @@ export function CoinCard({ coin }: { coin: Coin }) {
   );
 }
 
-/** The callout's "More" menu: open the coin, copy its link, or share the callout. */
+/**
+ * The callout's "More" menu: open the coin, copy the callout's link, or share it. The link is /c/<id>: opening it
+ * credits the caller with the buys it brings in (src/lib/referral.ts).
+ */
 function CalloutMenu({ callout, coin }: { callout: Callout; coin: Coin }) {
   const { toast } = useApp();
-  const url = `${window.location.origin}/coin/${coin.mint}`;
+  const url = `${window.location.origin}/c/${encodeURIComponent(callout.id)}`;
   const copy = async (text: string, title: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -132,7 +136,7 @@ function CalloutMenu({ callout, coin }: { callout: Callout; coin: Coin }) {
             <ArrowUpRight className="h-4 w-4 text-copper" /> View ${coin.ticker}
           </Link>
           <button role="menuitem" type="button" onClick={() => (close(), void copy(url, "Link copied"))} className={item}>
-            <Link2 className="h-4 w-4 text-copper" /> Copy coin link
+            <Link2 className="h-4 w-4 text-copper" /> Copy callout link
           </button>
           <button role="menuitem" type="button" onClick={() => (close(), void share())} className={item}>
             <Share2 className="h-4 w-4 text-copper" /> Share callout
@@ -149,6 +153,7 @@ export function CalloutCard({ callout, trader, coin, dense = false }: { callout:
   const isMobile = useIsMobile();
   const { following, toggleFollow } = useMarket();
   if (!coin) return null;
+  const move = calloutMove(callout, coin);
   return (
     <article className={cx("border-b border-line-soft", dense ? "px-3 py-3" : "px-1 py-5")}>
       <div className="flex gap-3">
@@ -188,36 +193,51 @@ export function CalloutCard({ callout, trader, coin, dense = false }: { callout:
               <div className="truncate text-[13.5px] font-semibold">{coin.ticker}</div>
               <div className="truncate text-xs text-muted">{coin.name}</div>
             </div>
-            <div className="text-right">
-              <div className="text-[11.5px] text-muted">Position</div>
-              <div className="num text-[13px] font-semibold">{callout.closed ? "Closed" : usd(callout.positionUsd)}</div>
-            </div>
-            <div className="min-w-[88px] text-right max-md:min-w-0">
-              <div className="text-[11.5px] text-muted">Net PnL</div>
-              <div className={cx("num text-[13px] font-semibold", callout.pnlUsd >= 0 ? "text-gold" : "text-ember")}>{usdSigned(callout.pnlUsd)}</div>
-            </div>
+            {callout.position ? (
+              <>
+                <div className="text-right">
+                  <div className="text-[11.5px] text-muted">Position</div>
+                  <div className="num text-[13px] font-semibold">{callout.position.closed ? "Closed" : usd(callout.position.usd)}</div>
+                </div>
+                <div className="min-w-[88px] text-right max-md:min-w-0">
+                  <div className="text-[11.5px] text-muted">Net PnL</div>
+                  <div className={cx("num text-[13px] font-semibold", callout.position.pnlUsd >= 0 ? "text-gold" : "text-ember")}>{usdSigned(callout.position.pnlUsd)}</div>
+                </div>
+              </>
+            ) : (
+              // A real callout records the market cap at the call, not the caller's position: show the move since.
+              <div className="min-w-[88px] text-right max-md:min-w-0">
+                <div className="text-[11.5px] text-muted">Since call</div>
+                <div className={cx("num text-[13px] font-semibold", move >= 0 ? "text-gold" : "text-ember")}>{pct(move, 0)}</div>
+              </div>
+            )}
           </Link>
           <div className="mt-2.5 flex items-center gap-4 text-[12.5px] text-muted">
-            <span className="flex items-center gap-1">
-              <Eye className="h-3.5 w-3.5" /> {callout.views.toLocaleString("en-US")}
-            </span>
-            {!dense && (
-              <span className="flex items-center gap-1">
-                <MessageCircle className="h-3.5 w-3.5" /> {callout.comments}
-              </span>
-            )}
-            <span className="flex items-center gap-1">
-              <Heart className="h-3.5 w-3.5" /> {callout.likes}
-            </span>
-            {!dense && (
-              <span className="flex items-center gap-1">
-                <Share2 className="h-3.5 w-3.5" /> {callout.shares}
-              </span>
+            {/* Demo callouts carry made-up views and reactions; real ones have none yet, so nothing is shown. */}
+            {callout.engagement && (
+              <>
+                <span className="flex items-center gap-1">
+                  <Eye className="h-3.5 w-3.5" /> {callout.engagement.views.toLocaleString("en-US")}
+                </span>
+                {!dense && (
+                  <span className="flex items-center gap-1">
+                    <MessageCircle className="h-3.5 w-3.5" /> {callout.engagement.comments}
+                  </span>
+                )}
+                <span className="flex items-center gap-1">
+                  <Heart className="h-3.5 w-3.5" /> {callout.engagement.likes}
+                </span>
+                {!dense && (
+                  <span className="flex items-center gap-1">
+                    <Share2 className="h-3.5 w-3.5" /> {callout.engagement.shares}
+                  </span>
+                )}
+              </>
             )}
             <span className="ml-auto truncate font-medium">
               {dense ? "Called" : "Called at"} {usdCompact(callout.calledAtMcap)}
               {dense ? "" : " MC"} → <span className="text-gold">{usdCompact(coin.mcapUsd)}</span>
-              {!dense && <span className={callout.pnlPct >= 0 ? "text-gold" : "text-ember"}> ({pct(callout.pnlPct, 0)})</span>}
+              {!dense && <span className={move >= 0 ? "text-gold" : "text-ember"}> ({pct(move, 0)})</span>}
             </span>
           </div>
         </div>

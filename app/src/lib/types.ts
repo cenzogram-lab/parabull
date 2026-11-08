@@ -93,21 +93,21 @@ export interface Squad {
   emblem: string;
 }
 
+/** A public call on a coin the caller holds. Chain mode: from the edge Worker (src/lib/calloutsClient.ts). */
 export interface Callout {
   id: string;
   handle: string;
+  /** The caller's wallet; null for demo callouts. */
+  wallet: string | null;
   text: string;
   mint: string;
-  positionUsd: number;
-  pnlUsd: number;
-  pnlPct: number;
-  closed: boolean;
+  /** Market cap when it was called, in USD (chain mode: at today's SOL price; the move since is the same in SOL). */
   calledAtMcap: number;
   ts: number;
-  views: number;
-  comments: number;
-  likes: number;
-  shares: number;
+  /** Demo only: the caller's position. Not tracked for real callouts (null). */
+  position: { usd: number; pnlUsd: number; closed: boolean } | null;
+  /** Demo only: views and reactions. Real callouts have none of these yet (null). */
+  engagement: { views: number; comments: number; likes: number; shares: number } | null;
 }
 
 export interface Stream {

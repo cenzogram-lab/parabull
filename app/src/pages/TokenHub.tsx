@@ -1,20 +1,21 @@
-import { PublicKey } from "@solana/web3.js";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { ArrowRight, Calculator, CheckCircle2, Clock, Flame, Gift, Loader2, PieChart, Share2, ShieldCheck, TrendingUp, TriangleAlert } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { BullMark } from "../components/brand/BullMark";
 import { ParabullCoin } from "../components/brand/Wordmark";
 import { cx } from "../components/ui/primitives";
 import { StatTile } from "../components/ui/visuals";
-import { CONFIG, explorer, isDemo } from "../config";
+import { explorer, isDemo } from "../config";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { useParabullProgram } from "../hooks/useParabullProgram";
+import { useWalletRewards } from "../hooks/useRewards";
 import { compact, countdown, sol, usd, usdCompact } from "../lib/format";
 import { leafHash, verifyProof } from "../lib/merkle";
 import { BPS, bpsLabel } from "../lib/protocolParams";
+import { checkBeforeClaim, hexToBytes, proofMatches, type RewardKind } from "../lib/rewardsClaim";
 import { fromHex } from "../lib/sha256";
-import { buybackLedger, DEMO_WALLET, PARABULL_PRICE, PARABULL_SUPPLY, walletEpochs, type DemoEpoch } from "../mock/protocol";
+import { buybackLedger, DEMO_WALLET, PARABULL_PRICE, PARABULL_SUPPLY, walletEpochs } from "../mock/protocol";
 import { useApp } from "../state/AppState";
 import { useProtocol } from "../state/Protocol";
 
@@ -24,49 +25,159 @@ const LEDGER_CAPTION: Record<LedgerSource, string> = { demo: "Simulated burn his
 /** "Half" for the default 50% buyback share, else the percentage. */
 const shareOfFee = (bps: number) => (bps === BPS / 2 ? "Half" : bpsLabel(bps));
 
+/** One claimable allocation as both layouts show it. */
+interface ClaimRow {
+  epoch: number;
+  kind: RewardKind | null;
+  root: string;
+  totalLamports: bigint;
+  amount: bigint | null;
+  /** The proof checked in the browser (against the root shown); null: not in this epoch. */
+  proof: { ok: boolean; hashes: number } | null;
+  expired: boolean;
+  expiresAt: number;
+  claimed: boolean;
+}
+
 function ClaimPanel() {
+  return isDemo ? <DemoClaimPanel /> : <ChainClaimPanel />;
+}
+
+/** Demo mode: the simulated epochs (real Merkle trees over simulated holders); a claim sends nothing. */
+function DemoClaimPanel() {
   const client = useParabullProgram();
-  const { setVisible } = useWalletModal();
   const { toast, sfx, claimedFor, markClaimed } = useApp();
-  const isMobile = useIsMobile();
   const me = client.publicKey ?? DEMO_WALLET;
   const claimed = claimedFor(me.toBase58());
   const epochs = useMemo(() => [...walletEpochs(me)].reverse(), [me.toBase58()]); // eslint-disable-line react-hooks/exhaustive-deps
   const [busy, setBusy] = useState<number | null>(null);
-  const now = Date.now();
+  const rows: ClaimRow[] = epochs.slice(0, 8).map((e) => ({
+    epoch: e.epoch,
+    kind: null,
+    root: e.root,
+    totalLamports: BigInt(e.totalLamports),
+    amount: e.you ? BigInt(e.you.amount) : null,
+    proof: e.you ? { ok: verifyProof(e.you.proof.map(fromHex), fromHex(e.root), leafHash(e.you.index, me.toBytes(), BigInt(e.you.amount))), hashes: e.you.proof.length } : null,
+    expired: e.expired,
+    expiresAt: e.expiresAt,
+    claimed: claimed.has(e.epoch),
+  }));
+  const pending = rows.filter((r) => r.amount !== null && r.proof?.ok && !r.expired && !r.claimed).reduce((n, r) => n + Number(r.amount) / 1e9, 0);
+  async function claim(r: ClaimRow) {
+    setBusy(r.epoch);
+    await new Promise((res) => setTimeout(res, 700));
+    markClaimed(me.toBase58(), r.epoch);
+    sfx("buy");
+    toast({ tone: "good", title: `Claimed ${sol(r.amount!, 4)}`, body: `Epoch ${r.epoch} · demo claim, nothing sent on-chain` });
+    setBusy(null);
+  }
+  const note = `${client.publicKey ? "Your wallet's demo allocations" : "Demo wallet allocations (connect to see your own)"} · each proof is verified in your browser against the epoch's root`;
+  return <ClaimView title="Claim holder rewards" note={note} pending={pending} rows={rows} busy={busy} onClaim={claim} demo />;
+}
 
-  const verified = (e: DemoEpoch) => !!e.you && verifyProof(e.you.proof.map(fromHex), fromHex(e.root), leafHash(e.you.index, me.toBytes(), BigInt(e.you.amount)));
-  const claimable = epochs.filter((e) => e.you && !e.expired && !claimed.has(e.epoch));
-  const pending = claimable.reduce((n, e) => n + Number(e.you!.amount) / 1e9, 0);
+/**
+ * Chain mode: the connected wallet's allocations from the indexer (holder and caller epochs). Before a claim is sent,
+ * the epoch's account is read from the chain and the proof checked against its root and bitmap (src/lib/rewardsClaim.ts).
+ */
+function ChainClaimPanel() {
+  const client = useParabullProgram();
+  const { setVisible } = useWalletModal();
+  const { toast, sfx } = useApp();
+  const wallet = client.publicKey;
+  const rewards = useWalletRewards(wallet?.toBase58() ?? null);
+  const [busy, setBusy] = useState<number | null>(null);
+  const allocations = rewards.data?.allocations ?? [];
+  const bytes = wallet?.toBytes();
+  const rows: ClaimRow[] = allocations.slice(0, 12).map((a) => ({
+    epoch: a.epoch,
+    kind: a.kind,
+    root: a.root,
+    totalLamports: BigInt(a.totalLamports),
+    amount: BigInt(a.amount),
+    proof: a.proof && bytes ? { ok: proofMatches(a, bytes), hashes: a.proof.length } : null,
+    expired: a.expired,
+    expiresAt: a.expiresAt * 1000,
+    claimed: a.claimed,
+  }));
+  const pending = Number(BigInt(rewards.data?.unclaimedLamports ?? "0")) / 1e9;
 
-  async function claim(e: DemoEpoch) {
-    if (!e.you) return;
-    if (!isDemo && !client.connected) return setVisible(true);
-    setBusy(e.epoch);
+  async function claim(r: ClaimRow) {
+    const a = allocations.find((x) => x.epoch === r.epoch);
+    if (!a || !wallet) return setVisible(true);
+    setBusy(r.epoch);
     try {
-      if (isDemo) {
-        await new Promise((r) => setTimeout(r, 700));
-      } else {
-        if (!CONFIG.rewardsBaseUrl) throw new Error("No snapshot host configured (VITE_REWARDS_BASE_URL)");
-        const art = (await (await fetch(`${CONFIG.rewardsBaseUrl}/epoch-${e.epoch}.json`)).json()) as { root: string; leaves: { index: number; claimant: string; amount: string; proof: string[] }[] };
-        const leaf = art.leaves.find((l) => l.claimant === me.toBase58());
-        if (!leaf) throw new Error("No allocation for this wallet in the published snapshot");
-        const proof = leaf.proof.map(fromHex);
-        if (!verifyProof(proof, fromHex(art.root), leafHash(leaf.index, new PublicKey(leaf.claimant).toBytes(), BigInt(leaf.amount)))) throw new Error("Proof does not match the published root");
-        const sig = await client.claimHolderReward(e.epoch, leaf.index, BigInt(leaf.amount), proof);
-        toast({ tone: "info", title: "Claim sent", body: explorer("tx", sig) });
-      }
-      markClaimed(me.toBase58(), e.epoch);
+      const onChain = await client.program.account.rewardEpoch.fetchNullable(client.pdas.rewardEpoch(BigInt(a.epoch)));
+      const problem = checkBeforeClaim(onChain, wallet.toBytes(), a);
+      if (problem) throw new Error(problem);
+      const sig = await client.claimHolderReward(a.epoch, a.index, BigInt(a.amount), a.proof!.map(hexToBytes));
       sfx("buy");
-      toast({ tone: "good", title: `Claimed ${sol(BigInt(e.you.amount), 4)}`, body: `Epoch ${e.epoch}${isDemo ? " · demo claim, nothing sent on-chain" : ""}` });
+      toast({ tone: "good", title: `Claimed ${sol(BigInt(a.amount), 4)}`, body: `Epoch ${a.epoch} ${a.kind === "caller" ? "caller" : "holder"} reward · ${explorer("tx", sig)}` });
     } catch (err) {
       toast({ tone: "bad", title: "Claim failed", body: (err as Error).message });
     } finally {
       setBusy(null);
+      rewards.refresh();
     }
   }
 
-  const note = `${client.publicKey ? "Your wallet's allocations" : isDemo ? "Demo wallet allocations (connect to see your own)" : "Connect a wallet to see your allocations"} · each proof is verified in your browser against the on-chain root before you claim`;
+  const unverified = rewards.data?.unverifiedEpochs.length ?? 0;
+  const note = !rewards.available
+    ? "Rewards are read from the indexer, which isn't configured here (VITE_INDEXER_URL)"
+    : !wallet
+      ? "Connect a wallet to see your allocations"
+      : rewards.error
+        ? `The indexer didn't answer: ${rewards.error}`
+        : `Your wallet's allocations · each proof is checked in your browser against the epoch's on-chain root before you claim${unverified ? ` · ${unverified} ${unverified === 1 ? "epoch is" : "epochs are"} still being verified` : ""}`;
+  return (
+    <ClaimView
+      title="Claim rewards"
+      note={note}
+      pending={pending}
+      rows={rows}
+      busy={busy}
+      onClaim={claim}
+      empty={!wallet ? (
+        <button type="button" onClick={() => setVisible(true)} className="btn-gold h-10 px-5">
+          Connect wallet
+        </button>
+      ) : rewards.loading ? (
+        <Loader2 className="h-5 w-5 animate-spin text-copper" aria-label="Loading allocations" />
+      ) : (
+        "No reward allocations for this wallet yet."
+      )}
+    />
+  );
+}
+
+function KindTag({ kind }: { kind: RewardKind | null }) {
+  if (kind !== "caller") return null;
+  return <span className="rounded border border-line px-1 text-[10px] font-semibold uppercase leading-4 tracking-wide text-copper">Caller</span>;
+}
+
+function ClaimView({ title, note, pending, rows, busy, onClaim, empty, demo = false }: { title: string; note: string; pending: number; rows: ClaimRow[]; busy: number | null; onClaim: (r: ClaimRow) => void; empty?: ReactNode; demo?: boolean }) {
+  const isMobile = useIsMobile();
+  const now = Date.now();
+  const canClaim = (r: ClaimRow) => r.amount !== null && !r.expired && !r.claimed && !!r.proof?.ok;
+  const button = (r: ClaimRow, mobile: boolean) =>
+    r.amount !== null &&
+    !r.expired && (
+      <button disabled={r.claimed || busy !== null || !canClaim(r)} onClick={() => onClaim(r)} className={cx(mobile ? "h-11 shrink-0 rounded-xl px-4 text-[13.5px]" : "h-8 px-3 text-xs", r.claimed ? "btn-ghost" : "btn-gold")}>
+        {busy === r.epoch ? <Loader2 className={mobile ? "h-4 w-4 animate-spin" : "h-3.5 w-3.5 animate-spin"} /> : r.claimed ? <CheckCircle2 className={cx(mobile ? "h-4 w-4" : "h-3.5 w-3.5", "text-gold")} /> : null}
+        {r.claimed ? "Claimed" : "Claim"}
+      </button>
+    );
+  const proofBadge = (r: ClaimRow, small: boolean) =>
+    r.proof === null ? null : r.proof.ok ? (
+      <span className={cx("inline-flex items-center gap-1 font-semibold text-gold", small ? "shrink-0" : "text-xs")}>
+        <ShieldCheck className="h-3.5 w-3.5" aria-hidden /> Verified ({r.proof.hashes} hashes)
+      </span>
+    ) : (
+      <span className={cx("inline-flex items-center gap-1 font-semibold text-ember", small ? "shrink-0" : "text-xs")}>
+        <TriangleAlert className="h-3.5 w-3.5" aria-hidden /> Invalid
+      </span>
+    );
+  const pendingTag = demo && <span className="ml-1.5 rounded border border-line px-1 align-middle text-[9px] font-bold uppercase leading-[13px] tracking-wide text-rosebronze">Demo</span>;
+  const emptyState = !rows.length && empty && <div className="flex justify-center px-4 py-8 text-center text-[13px] text-muted">{empty}</div>;
 
   if (isMobile)
     return (
@@ -74,68 +185,52 @@ function ClaimPanel() {
         <div className="brushed-dark border-b border-line px-4 py-3.5">
           <div className="flex items-center gap-3">
             <Gift className="h-5 w-5 shrink-0 text-gold" aria-hidden />
-            <h2 className="min-w-0 flex-1 text-[16px] font-semibold leading-6">Claim holder rewards</h2>
+            <h2 className="min-w-0 flex-1 text-[16px] font-semibold leading-6">{title}</h2>
             <div className="shrink-0 text-right">
-              <div className="text-[11px] leading-4 text-muted">Unclaimed</div>
+              <div className="text-[11px] leading-4 text-muted">Unclaimed{pendingTag}</div>
               <div className="num text-[17px] font-semibold leading-6 text-gold">{sol(pending, 3)}</div>
             </div>
           </div>
           <p className="mt-2 text-xs leading-[18px] text-muted">{note}</p>
         </div>
+        {emptyState}
         {/* One row per epoch instead of the seven-column table: allocation and proof on the left, Claim on the right. */}
         <ul>
-          {epochs.slice(0, 8).map((e) => {
-            const ok = verified(e);
-            const done = claimed.has(e.epoch);
-            return (
-              <li key={e.epoch} className="flex items-center gap-3 border-b border-line-soft px-4 py-3 last:border-b-0">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="num text-[14px] font-semibold text-cream">Epoch #{e.epoch}</span>
-                    <span className="num inline-flex min-w-0 items-center gap-1 truncate text-[11.5px] text-muted">
-                      {e.expired ? (
-                        "Expired"
-                      ) : (
-                        <>
-                          <Clock className="h-3 w-3 shrink-0" aria-hidden /> {countdown(e.expiresAt - now)} left
-                        </>
-                      )}
-                    </span>
-                  </div>
-                  <div className="num mt-0.5 truncate text-[13px] text-muted">
-                    {e.you ? (
-                      <>
-                        <span className="font-semibold text-cream">{sol(BigInt(e.you.amount), 4)}</span> of {sol(BigInt(e.totalLamports), 1)}
-                      </>
+          {rows.map((r) => (
+            <li key={r.epoch} className="flex items-center gap-3 border-b border-line-soft px-4 py-3 last:border-b-0">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="num text-[14px] font-semibold text-cream">Epoch #{r.epoch}</span>
+                  <KindTag kind={r.kind} />
+                  <span className="num inline-flex min-w-0 items-center gap-1 truncate text-[11.5px] text-muted">
+                    {r.expired ? (
+                      "Expired"
                     ) : (
-                      `Not in snapshot · ${sol(BigInt(e.totalLamports), 1)} epoch`
+                      <>
+                        <Clock className="h-3 w-3 shrink-0" aria-hidden /> {countdown(r.expiresAt - now)} left
+                      </>
                     )}
-                  </div>
-                  <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11.5px]">
-                    {e.you &&
-                      (ok ? (
-                        <span className="inline-flex shrink-0 items-center gap-1 font-semibold text-gold">
-                          <ShieldCheck className="h-3.5 w-3.5" aria-hidden /> Verified ({e.you.proof.length} hashes)
-                        </span>
-                      ) : (
-                        <span className="inline-flex shrink-0 items-center gap-1 font-semibold text-ember">
-                          <TriangleAlert className="h-3.5 w-3.5" aria-hidden /> Invalid
-                        </span>
-                      ))}
-                    <span className="min-w-0 truncate font-mono text-muted">
-                      {e.you ? "· " : ""}root {e.root.slice(0, 6)}…
-                    </span>
-                  </div>
+                  </span>
                 </div>
-                {e.you && !e.expired && (
-                  <button disabled={done || busy !== null || !ok} onClick={() => claim(e)} className={cx("h-11 shrink-0 rounded-xl px-4 text-[13.5px]", done ? "btn-ghost" : "btn-gold")}>
-                    {busy === e.epoch ? <Loader2 className="h-4 w-4 animate-spin" /> : done ? <CheckCircle2 className="h-4 w-4 text-gold" /> : null}
-                    {done ? "Claimed" : "Claim"}
-                  </button>
-                )}
-              </li>
-            );
-          })}
+                <div className="num mt-0.5 truncate text-[13px] text-muted">
+                  {r.amount !== null ? (
+                    <>
+                      <span className="font-semibold text-cream">{sol(r.amount, 4)}</span> of {sol(r.totalLamports, 1)}
+                    </>
+                  ) : (
+                    `Not in snapshot · ${sol(r.totalLamports, 1)} epoch`
+                  )}
+                </div>
+                <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11.5px]">
+                  {proofBadge(r, true)}
+                  <span className="min-w-0 truncate font-mono text-muted">
+                    {r.proof ? "· " : ""}root {r.root.slice(0, 6)}…
+                  </span>
+                </div>
+              </div>
+              {button(r, true)}
+            </li>
+          ))}
         </ul>
       </section>
     );
@@ -145,76 +240,55 @@ function ClaimPanel() {
       <div className="brushed-dark flex flex-wrap items-center gap-4 border-b border-line px-5 py-4">
         <Gift className="h-5 w-5 text-gold" />
         <div>
-          <h2 className="text-[16px] font-semibold">Claim holder rewards</h2>
-          {/* Two text nodes, as this line has always rendered: the phone's joined `note` shapes a hair differently. */}
-          <p className="text-xs text-muted">
-            {client.publicKey ? "Your wallet's allocations" : isDemo ? "Demo wallet allocations (connect to see your own)" : "Connect a wallet to see your allocations"} · each proof is verified in your browser against the on-chain root before you claim
-          </p>
+          <h2 className="text-[16px] font-semibold">{title}</h2>
+          <p className="text-xs text-muted">{note}</p>
         </div>
         <div className="ml-auto text-right">
-          <div className="text-xs text-muted">Unclaimed</div>
+          <div className="text-xs text-muted">Unclaimed{pendingTag}</div>
           <div className="text-xl font-semibold text-gold">{sol(pending, 3)}</div>
         </div>
       </div>
-      <table className="w-full text-[13px]">
-        <thead>
-          <tr className="border-b border-line text-left text-[11.5px] uppercase tracking-wider text-muted">
-            <th className="px-5 py-2.5 font-semibold">Epoch</th>
-            <th className="py-2.5 font-semibold">Root</th>
-            <th className="py-2.5 text-right font-semibold">Epoch total</th>
-            <th className="py-2.5 text-right font-semibold">Your allocation</th>
-            <th className="py-2.5 pl-8 font-semibold">Proof</th>
-            <th className="py-2.5 font-semibold">Window</th>
-            <th className="px-5 py-2.5 text-right font-semibold" />
-          </tr>
-        </thead>
-        <tbody>
-          {epochs.slice(0, 8).map((e) => {
-            const ok = verified(e);
-            const done = claimed.has(e.epoch);
-            return (
-              <tr key={e.epoch} className="border-b border-line-soft">
-                <td className="num px-5 py-3 font-semibold">#{e.epoch}</td>
-                <td className="py-3 font-mono text-[12px] text-muted">{e.root.slice(0, 10)}…</td>
-                <td className="num py-3 text-right">{sol(BigInt(e.totalLamports), 1)}</td>
-                <td className="num py-3 text-right font-semibold">{e.you ? sol(BigInt(e.you.amount), 4) : <span className="text-muted">-</span>}</td>
-                <td className="py-3 pl-8">
-                  {e.you ? (
-                    ok ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-gold">
-                        <ShieldCheck className="h-3.5 w-3.5" /> Verified ({e.you.proof.length} hashes)
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-ember">
-                        <TriangleAlert className="h-3.5 w-3.5" /> Invalid
-                      </span>
-                    )
-                  ) : (
-                    <span className="text-xs text-muted">Not in snapshot</span>
-                  )}
+      {emptyState}
+      {rows.length > 0 && (
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="border-b border-line text-left text-[11.5px] uppercase tracking-wider text-muted">
+              <th className="px-5 py-2.5 font-semibold">Epoch</th>
+              <th className="py-2.5 font-semibold">Root</th>
+              <th className="py-2.5 text-right font-semibold">Epoch total</th>
+              <th className="py-2.5 text-right font-semibold">Your allocation</th>
+              <th className="py-2.5 pl-8 font-semibold">Proof</th>
+              <th className="py-2.5 font-semibold">Window</th>
+              <th className="px-5 py-2.5 text-right font-semibold" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.epoch} className="border-b border-line-soft">
+                <td className="num px-5 py-3 font-semibold">
+                  <span className="inline-flex items-center gap-1.5">
+                    #{r.epoch} <KindTag kind={r.kind} />
+                  </span>
                 </td>
+                <td className="py-3 font-mono text-[12px] text-muted">{r.root.slice(0, 10)}…</td>
+                <td className="num py-3 text-right">{sol(r.totalLamports, 1)}</td>
+                <td className="num py-3 text-right font-semibold">{r.amount !== null ? sol(r.amount, 4) : <span className="text-muted">-</span>}</td>
+                <td className="py-3 pl-8">{proofBadge(r, false) ?? <span className="text-xs text-muted">Not in snapshot</span>}</td>
                 <td className="py-3 text-xs text-muted">
-                  {e.expired ? (
+                  {r.expired ? (
                     "Expired"
                   ) : (
                     <span className="inline-flex items-center gap-1">
-                      <Clock className="h-3 w-3" /> {countdown(e.expiresAt - now)}
+                      <Clock className="h-3 w-3" /> {countdown(r.expiresAt - now)}
                     </span>
                   )}
                 </td>
-                <td className="px-5 py-3 text-right">
-                  {e.you && !e.expired && (
-                    <button disabled={done || busy !== null || !ok} onClick={() => claim(e)} className={cx("h-8 px-3 text-xs", done ? "btn-ghost" : "btn-gold")}>
-                      {busy === e.epoch ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : done ? <CheckCircle2 className="h-3.5 w-3.5 text-gold" /> : null}
-                      {done ? "Claimed" : "Claim"}
-                    </button>
-                  )}
-                </td>
+                <td className="px-5 py-3 text-right">{button(r, false)}</td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            ))}
+          </tbody>
+        </table>
+      )}
     </section>
   );
 }

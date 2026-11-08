@@ -11,6 +11,7 @@ import { useNow } from "../../hooks/useNow";
 import { age, pct, usdCompact } from "../../lib/format";
 import type { Callout, Coin, Period, Squad, Trader } from "../../lib/types";
 import { useMarket } from "../../state/Market";
+import { byCalloutResult, calloutMove } from "../../lib/calloutsClient";
 import { XLogo } from "../brand/Wordmark";
 import { ChangePill, cx } from "../ui/primitives";
 import { TraderAvatar } from "../ui/visuals";
@@ -205,19 +206,21 @@ export function CalloutsSheet({ open, onClose }: { open: boolean; onClose: () =>
   );
 }
 
-/** Best callouts of the last 24 hours by net PnL (the desktop rail's 1D list). */
+/** Best callouts of the last 24 hours (the desktop rail's 1D list): by net PnL in demo, by the move since the call otherwise. */
 function CalloutList() {
   const { callouts, traders, byMint } = useMarket();
   const now = useNow();
   // The window is fixed when the sheet opens, so a ticking clock never reshuffles the list.
   const [since] = useState(() => Date.now() - DAY);
-  const best = useMemo(() => callouts.filter((c) => c.ts >= since).sort((a, b) => b.pnlUsd - a.pnlUsd).slice(0, 8), [callouts, since]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const best = useMemo(() => callouts.filter((c) => c.ts >= since).sort(byCalloutResult(byMint)).slice(0, 8), [callouts, since]);
+  const byPnl = best.some((c) => c.position);
   return (
     <div>
       <p className="text-[13px] leading-5 text-muted">
         <span className="font-semibold text-cream">A callout is a public call on a coin you hold.</span> Make at least one to be ranked on the leaderboard.
       </p>
-      <h3 className="label mt-4">Last 24 hours, by net PnL</h3>
+      <h3 className="label mt-4">Last 24 hours, {byPnl ? "by net PnL" : "by move since the call"}</h3>
       {!best.length && <p className="py-6 text-center text-[13px] text-muted">No callouts in the last 24 hours.</p>}
       <ul className="mt-1">
         {best.map((c) => {
@@ -240,10 +243,12 @@ function CalloutItem({ c, coin, trader, now }: { c: Callout; coin: Coin; trader?
             @{c.handle} · {age(now - c.ts)}
           </div>
         </div>
-        <div className="shrink-0 text-right">
-          <div className="text-[10px] font-semibold uppercase leading-4 tracking-[0.08em] text-muted">Net PnL</div>
-          <div className={cx("num text-[14px] font-semibold leading-5", valueTone({ money: true, value: c.pnlUsd }))}>{fmtUsd(c.pnlUsd, true)}</div>
-        </div>
+        {c.position && (
+          <div className="shrink-0 text-right">
+            <div className="text-[10px] font-semibold uppercase leading-4 tracking-[0.08em] text-muted">Net PnL</div>
+            <div className={cx("num text-[14px] font-semibold leading-5", valueTone({ money: true, value: c.position.pnlUsd }))}>{fmtUsd(c.position.pnlUsd, true)}</div>
+          </div>
+        )}
       </div>
       <p className="mt-2 text-[13.5px] leading-5 text-cream/95">{c.text}</p>
       <Link to={`/coin/${coin.mint}`} className="mt-2.5 flex min-h-[52px] items-center gap-3 rounded-xl border border-line bg-canvas-2 px-3 py-2 transition-colors duration-100 ease-out active:bg-surface-2">
@@ -254,7 +259,7 @@ function CalloutItem({ c, coin, trader, now }: { c: Callout; coin: Coin; trader?
         </span>
         <span className="shrink-0 text-right">
           <span className="num block text-[13px] font-semibold leading-5 text-cream">{usdCompact(coin.mcapUsd)}</span>
-          <span className={cx("num block text-[11.5px] font-semibold leading-4", c.pnlPct >= 0 ? "text-gold" : "text-ember")}>{pct(c.pnlPct, 0)}</span>
+          <span className={cx("num block text-[11.5px] font-semibold leading-4", calloutMove(c, coin) >= 0 ? "text-gold" : "text-ember")}>{pct(calloutMove(c, coin), 0)}</span>
         </span>
         <ChevronRight className="h-4 w-4 shrink-0 text-muted" aria-hidden />
       </Link>

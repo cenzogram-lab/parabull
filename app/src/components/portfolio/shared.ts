@@ -7,12 +7,14 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { PublicKey } from "@solana/web3.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CONFIG } from "../../config";
+import { CONFIG, isDemo } from "../../config";
 import { leafHash, verifyProof } from "../../lib/merkle";
 import { Rng } from "../../lib/rng";
 import { fromHex } from "../../lib/sha256";
 import type { PortfolioPeriod } from "../../mock/portfolio";
 import { walletEpochs, type DemoEpoch } from "../../mock/protocol";
+import { useWalletRewards } from "../../hooks/useRewards";
+import { proofMatches, type RewardKind, type WalletRewardsJson } from "../../lib/rewardsClaim";
 import { useApp } from "../../state/AppState";
 
 export const PERIODS = ["1D", "1W", "1M", "ALL"] as const satisfies readonly PortfolioPeriod[];
@@ -99,8 +101,8 @@ export function useWalletActions(address: string) {
 }
 
 type Allocated = DemoEpoch & { you: NonNullable<DemoEpoch["you"]> };
-type Checked = Allocated & { verified: boolean };
-/** `claimed`: the wallet claimed it on the $PARABULL page (this visit, or before it for #4 and #5). */
+type Checked = Allocated & { verified: boolean; kind?: RewardKind };
+/** `claimed`: demo, claimed on the $PARABULL page this visit; chain mode, the leaf's bit in the on-chain bitmap. */
 export type RewardEpoch = Checked & { claimed: boolean };
 
 export interface RewardSummary {
@@ -148,12 +150,48 @@ const built = new Map<string, Checked[]>();
  * on the next tick once `urgent` (the Rewards tab is open). Undefined until
  * then. The wallet's claims on the $PARABULL page this visit count at once.
  */
-export function useRewardSummary(address: string, urgent: boolean): RewardSummary | undefined {
+export function useRewardSummary(address: string | null, urgent: boolean): RewardSummary | undefined {
+  // Chain mode: the indexer's allocations (holder and caller epochs) with on-chain claimed state.
+  const chain = useWalletRewards(isDemo ? null : address);
+  const chainSummary = useMemo(() => (chain.data && address ? fromIndexer(chain.data, address) : undefined), [chain.data, address]);
+  const demo = useDemoRewardSummary(isDemo ? address : null, urgent);
+  return isDemo ? demo : chainSummary;
+}
+
+/** The indexer's allocations as the views' epochs (unix seconds to ms; the proof checked against the reported root). */
+function fromIndexer(r: WalletRewardsJson, address: string): RewardSummary {
+  const wallet = new PublicKey(address).toBytes();
+  const checked: (Checked & { claimed: boolean })[] = r.allocations.map((a) => ({
+    epoch: a.epoch,
+    kind: a.kind,
+    root: a.root,
+    totalLamports: a.totalLamports,
+    numLeaves: a.numLeaves,
+    claimedLamports: "0",
+    publishedAt: a.publishedAt * 1000,
+    expiresAt: a.expiresAt * 1000,
+    expired: a.expired,
+    solPriceAtPublish: 0,
+    you: { index: a.index, amount: a.amount, proof: a.proof ?? [] },
+    // An expired epoch has no proof left to check; it can't be claimed either way.
+    verified: a.expired || proofMatches(a, wallet),
+    claimed: a.claimed,
+  }));
+  const open = checked.filter((e) => !e.expired && e.verified && !e.claimed);
+  return {
+    epochs: checked,
+    unclaimedLamports: open.reduce((n, e) => n + BigInt(e.you.amount), 0n),
+    openEpochs: open.length,
+    closesFirst: open.reduce<RewardEpoch | null>((first, e) => (!first || e.expiresAt < first.expiresAt ? e : first), null),
+  };
+}
+
+function useDemoRewardSummary(address: string | null, urgent: boolean): RewardSummary | undefined {
   const { claimedFor } = useApp();
-  const claimed = claimedFor(address);
+  const claimed = claimedFor(address ?? "");
   const [, rerender] = useState(0);
   useEffect(() => {
-    if (built.has(address)) return;
+    if (!address || built.has(address)) return;
     const run = () => {
       if (!built.has(address)) built.set(address, allocations(address));
       rerender((n) => n + 1);
@@ -170,6 +208,6 @@ export function useRewardSummary(address: string, urgent: boolean): RewardSummar
     const t = window.setTimeout(run, 900);
     return () => window.clearTimeout(t);
   }, [address, urgent]);
-  const checked = built.get(address);
+  const checked = address ? built.get(address) : undefined;
   return useMemo(() => checked && summarize(checked, claimed), [checked, claimed]);
 }

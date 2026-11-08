@@ -296,6 +296,8 @@ restarted or replaced at any time.
 | Graduated price | The Raydium pool's two vaults (`["pool_vault", pool, mint]` under `Global.cpmm_program`) |
 | Holders | `getProgramAccounts(Token-2022, memcmp mint at 0)`, cached 20 s; counts for active coins every 2 min |
 | Portfolio | `getTokenAccountsByOwner(wallet, Token-2022)` and `getBalance`, cached 10 s |
+| Referred buys | A buy whose transaction has a top-level `parabull:ref:<calloutId>` SPL Memo (§6), from the same logs as its `TradeEvent` |
+| Reward epochs | `getProgramAccounts(RewardEpoch)` and the holder vault every 60 s (`REWARDS_MS`), plus `RewardEpochPublished` / `HolderRewardClaimed` / `EpochExpired`; each epoch's snapshot file from `REWARDS_BASE_URL` (§6.4) |
 
 Transactions arrive two ways, deduplicated by signature:
 
@@ -335,6 +337,10 @@ All `GET`.
 | `/tickets/:ticket` | `{ ticket, payer, ticker, depositLamports, createdAt, expiresAt, state: pending\|created\|refunded\|closed, mint }` |
 | `/tickets?payer=` | `{ tickets }`, newest first, at most 50 |
 | `/stream[?mint=]` (WebSocket) | `{ type: "coin", coin }`, `{ type: "trade", trade }`, `{ type: "ticket", ticket }`; `?mint=` limits it to one coin |
+| `/referrals/:calloutId` | `{ calloutId, buys, volumeLamports, feeLamports, traders, byTrader: [{ wallet, buys, volumeLamports, feeLamports }], byMint, firstAt, lastAt }`: every referred buy recorded for the callout, by trader (largest first, at most 50) |
+| `/referrals?since=&until=&cursor=&limit=1..5000` | `{ events: [{ calloutId, signature, index, mint, trader, solLamports, feeLamports, tokenAmount, slot, timestamp }], next, coveredFrom }`, oldest first; `coveredFrom` is when the record is complete from (null: since the program's first transaction) |
+| `/rewards` | `{ epochs: [{ epoch, kind, artifact, root, totalLamports, claimedLamports, numLeaves, claimedCount, publishedAt, expiresAt, expired }], totals: { holder, caller }, vault }`; `artifact` is `verified`, `loading`, `missing` or `mismatch` |
+| `/rewards/:wallet` | `{ wallet, allocations: [{ epoch, kind, index, amount, proof, root, claimed, expired, claimable, publishedAt, expiresAt, totalLamports, numLeaves }], unclaimedLamports, unverifiedEpochs }`, newest first; `proof` is cut from the indexer's own rebuilt tree (null once the epoch is expired) |
 | `/health` | `{ ok, coins, tickets, newestSignature }` |
 
 `Coin` has these fields:
@@ -387,3 +393,93 @@ All `GET`.
   priced from the pool.
 - **Abuse limits:** RPC-backed requests are limited per IP. The stream drops a
   client that falls 1 MB behind.
+- **Referrals:** at most 200,000 referred buys (the oldest go first, and
+  `coveredFrom` moves) and 100,000 callouts' totals.
+
+## 6. Callouts and caller rewards
+
+A callout is a wallet's public call on a coin it holds. Its share link credits
+the caller with the buys it brings in, and the treasury pays callers through the
+program's existing reward epochs. No program or IDL change is involved.
+
+### 6.1 Storage (`services/parabull-edge`, `src/callouts.ts`)
+
+- `POST /callouts { mint, text }` with the wallet's edge session token (the
+  same wallet-signed sign-in as chat). Before storing, the Worker checks:
+  - the text: 1–280 characters after removing control, zero-width and
+    bidi-override characters and collapsing whitespace;
+  - the holding: at least 1 token (`CALLOUT_MIN_HOLDING`) across the
+    wallet's token accounts, by `getTokenAccountsByOwner`;
+  - the coin: the indexer's `GET /coins/:mint`. A non-Parabull mint is 404;
+    its `mcapSol` and `priceSol` become the callout's "called at" figures.
+- One `CalloutStore` Durable Object (SQLite) stores every callout and applies
+  the per-wallet limits in one place: one every 30 s, one per coin an hour, 20
+  a day. Ids are 12 random base58 characters.
+- `GET /callouts?mint=&author=&ids=&before=&limit=`, `GET /callouts/:id`.
+- Fails closed: without `SOLANA_RPC_URL`, `INDEXER_URL` or the binding,
+  posting answers 503.
+
+### 6.2 Attribution
+
+- The share link is `/c/<calloutId>`. Opening it remembers the callout for its
+  coin, in the browser, for 24 hours (`app/src/lib/referral.ts`).
+- A buy of that coin then carries a top-level SPL Memo instruction
+  `parabull:ref:<calloutId>` after `buy`. It never does for the callout's own
+  author.
+- The indexer records each tagged buy as it is (§5.1). It doesn't know who
+  wrote a callout, so the rules are applied by whoever pays (§6.3). A memo
+  made inside another program's CPI doesn't count; sells don't count.
+- Trust model: the memo is the trader's own choice, like an on-chain
+  referrer account would be. Self-referral and wash buying are what the
+  rules below are for.
+
+### 6.3 Caller epochs (`scripts/src/callerEpoch.ts`)
+
+1. **Referred buys** in `[since, until)` from `GET /referrals`. The run fails
+   closed unless the indexer's record is complete from `since`.
+2. **Which buys count.** Each buy's callout comes from the Worker. A buy
+   counts only if:
+   - the callout exists, and the buy is of the callout's coin;
+   - it came after the callout;
+   - the trader isn't the callout's author;
+   - it cost at least `MIN_REFERRED_BUY_LAMPORTS` (0.05 SOL).
+
+   A trader counts for at most `PER_TRADER_CAP_LAMPORTS` (10 SOL) per caller.
+3. **The split.** `CALLER_EPOCH_LAMPORTS` is split by counted volume, rounding
+   down:
+   - no caller gets more than `MAX_CALLER_SHARE_BPS` (25%);
+   - payouts under `MIN_PAYOUT_LAMPORTS` are dropped;
+   - only system-owned wallets get a leaf (what `claim_holder_reward` can
+     pay);
+   - whatever isn't paid out stays with the treasury.
+4. **One Merkle tree,** in the holder epochs' leaf format. Every proof is
+   checked. The artifact has `kind: "caller"`, plus the window, the rules,
+   the dropped counts and the funder.
+5. **Publishing** (`--publish`) is one transaction:
+   - the treasury's `SystemProgram.transfer` of exactly the epoch's total into
+     the holder vault;
+   - then `publish_reward_epoch`, signed by the crank.
+
+   Being atomic, the holder snapshot never sees the top-up as distributable,
+   and publish's own funding check passes on exactly that money. Once a
+   caller epoch is expired, its unclaimed rewards return to the vault's free
+   balance, and the next holder snapshot distributes them.
+
+### 6.4 Claims
+
+- **Indexer.** Holder and caller epochs share the program's counter, vault and
+  claim instruction; the artifact's `kind` tells them apart. The indexer
+  serves an epoch's allocations only after checking its file
+  (`REWARDS_BASE_URL/epoch-<n>.json`):
+  - the whole tree is rebuilt from the leaves;
+  - its root, total and leaf count must equal the on-chain account;
+  - proofs are cut from that tree, never copied from the file;
+  - a file that doesn't match is `mismatch`, and none of its allocations are
+    served.
+- **App.** Chain mode lists exactly the indexer's allocations. Before sending
+  `claim_holder_reward`, it reads the `RewardEpoch` account itself and checks:
+  - the root and the proof;
+  - the leaf's bit in the claimed bitmap;
+  - expiry.
+
+  The program checks the same again on-chain.

@@ -4,7 +4,9 @@ import { Link } from "react-router-dom";
 import { ParabullCoin } from "../components/brand/Wordmark";
 import { cx } from "../components/ui/primitives";
 import { CoinAvatar, StatTile } from "../components/ui/visuals";
+import { CONFIG, isDemo } from "../config";
 import { useIsMobile } from "../hooks/useMediaQuery";
+import { useRewardsSummary } from "../hooks/useRewards";
 import { BPS, bpsLabel, durationLabel, splitLabel } from "../lib/protocolParams";
 import { compact, pct, usdCompact } from "../lib/format";
 import { DEMO_WALLET, walletEpochs } from "../mock/protocol";
@@ -12,6 +14,11 @@ import { useMarket } from "../state/Market";
 import { useProtocol } from "../state/Protocol";
 
 const DAY = 86_400_000;
+
+/** Marks a figure as simulated (demo mode). */
+function DemoTag() {
+  return <span className="mr-1.5 rounded border border-line px-1 text-[9px] font-bold uppercase leading-[13px] tracking-wide text-rosebronze">Demo</span>;
+}
 
 export function HolderRewards() {
   const { coins } = useMarket();
@@ -21,10 +28,16 @@ export function HolderRewards() {
   const solUsd = feed.price;
   const target = Math.round(dexTargetUsd);
   const INTRO = `${bpsLabel(params.holderBps)} of every platform fee, once a coin's DexScreener listing fund is full, goes to $PARABULL holders. It's paid in SOL through weekly snapshot epochs you claim with a Merkle proof.`;
-  const epochs = walletEpochs(DEMO_WALLET);
-  const totalSol = epochs.reduce((n, e) => n + Number(e.totalLamports) / 1e9, 0);
-  const usdThen = epochs.reduce((n, e) => n + (Number(e.totalLamports) / 1e9) * e.solPriceAtPublish, 0);
-  const wallets = epochs.reduce((n, e) => n + e.numLeaves, 0);
+  // Totals: demo mode, the simulated epochs (tagged Demo); chain mode, the indexer's verified holder epochs.
+  const summary = useRewardsSummary();
+  const demoEpochs = isDemo ? walletEpochs(DEMO_WALLET) : [];
+  const chain = !isDemo && summary && summary !== "error" ? summary.totals.holder : null;
+  const known = isDemo || chain !== null;
+  const totalSol = isDemo ? demoEpochs.reduce((n, e) => n + Number(e.totalLamports) / 1e9, 0) : chain ? Number(chain.lamports) / 1e9 : 0;
+  const usdThen = demoEpochs.reduce((n, e) => n + (Number(e.totalLamports) / 1e9) * e.solPriceAtPublish, 0);
+  const wallets = isDemo ? demoEpochs.reduce((n, e) => n + e.numLeaves, 0) : (chain?.allocations ?? 0);
+  const epochCount = isDemo ? demoEpochs.length : (chain?.epochs ?? 0);
+  const unknown = !isDemo && summary === "error" ? "indexer unavailable" : !isDemo && !CONFIG.indexerUrl ? "no indexer configured" : "loading";
   const share = params.holderBps / BPS;
   const feeRate = params.platformFeeBps / BPS;
 
@@ -70,9 +83,19 @@ export function HolderRewards() {
       )}
 
       <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3 max-md:mt-5 max-md:gap-3">
-        <StatTile icon={HandCoins} label="Total holder rewards distributed" value={`${compact(totalSol)} SOL`} foot={<span>{usdCompact(usdThen)} when paid · {epochs.length} epochs</span>} />
-        <StatTile icon={CircleDollarSign} label="Value at today's prices" value={usdCompact(totalSol * solUsd)} delta={<span className={cx("num font-semibold", totalSol * solUsd >= usdThen ? "text-gold" : "text-ember")}>{pct(totalSol * solUsd / usdThen - 1)}</span>} foot={<span>vs. value when paid, at SOL ${solUsd.toFixed(2)}</span>} />
-        <StatTile icon={Users} label="Total wallets rewarded" value={wallets.toLocaleString("en-US")} foot={<span>allocations across all epochs</span>} />
+        {isDemo ? (
+          <>
+            <StatTile icon={HandCoins} label="Total holder rewards distributed" value={`${compact(totalSol)} SOL`} foot={<span><DemoTag />{usdCompact(usdThen)} when paid · {epochCount} epochs</span>} />
+            <StatTile icon={CircleDollarSign} label="Value at today's prices" value={usdCompact(totalSol * solUsd)} delta={<span className={cx("num font-semibold", totalSol * solUsd >= usdThen ? "text-gold" : "text-ember")}>{pct(totalSol * solUsd / usdThen - 1)}</span>} foot={<span><DemoTag />vs. value when paid, at SOL ${solUsd.toFixed(2)}</span>} />
+            <StatTile icon={Users} label="Total wallets rewarded" value={wallets.toLocaleString("en-US")} foot={<span><DemoTag />allocations across all epochs</span>} />
+          </>
+        ) : (
+          <>
+            <StatTile icon={HandCoins} label="Total holder rewards distributed" value={known ? `${compact(totalSol)} SOL` : "—"} foot={<span>{known ? `${epochCount} published ${epochCount === 1 ? "epoch" : "epochs"}` : unknown}</span>} />
+            <StatTile icon={CircleDollarSign} label="Value at today's prices" value={known ? usdCompact(totalSol * solUsd) : "—"} foot={<span>at SOL ${solUsd.toFixed(2)}</span>} />
+            <StatTile icon={Users} label="Total wallets rewarded" value={known ? wallets.toLocaleString("en-US") : "—"} foot={<span>allocations across all epochs</span>} />
+          </>
+        )}
       </div>
 
       <div className="mt-8 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_340px] max-md:mt-6 max-md:gap-4">
@@ -80,7 +103,7 @@ export function HolderRewards() {
           <div className="flex items-center gap-2 border-b border-line px-4 py-3 max-md:flex-wrap max-md:gap-y-1">
             <Coins className="h-4 w-4 text-copper" />
             <h2 className="text-[15px] font-semibold">Top paying coins</h2>
-            <span className="ml-2 text-xs text-muted max-md:ml-0 max-md:w-full max-md:leading-[18px]">Coins whose trading fees funded the most holder rewards, last 30 days</span>
+            <span className="ml-2 text-xs text-muted max-md:ml-0 max-md:w-full max-md:leading-[18px]">Coins whose trading fees funded the most holder rewards, last 30 days · estimated from recent volume</span>
           </div>
           {isMobile ? (
             // One link per coin: its share of all holder rewards under the name, what it paid (USD, then SOL) on the right.

@@ -12,6 +12,10 @@
  *     getSignaturesForAddress(program) + getTransaction, polled, which also backfills on start and fills any gap
  *     the websocket left (it is the source of truth for ordering and completeness).
  *   A trade's own reserves update the curve only if newer than what was last seen (by slot).
+ * - Referrals: a buy whose transaction has a top-level `parabull:ref:<calloutId>` memo is recorded for that callout
+ *   (src/referrals.ts), from the same logs as its TradeEvent.
+ * - Reward epochs: every RewardEpoch account and its snapshot artifact (src/rewards.ts), synced every REWARDS_MS and
+ *   refreshed when a RewardEpochPublished, HolderRewardClaimed or EpochExpired event shows up.
  * - On demand: a mint nobody has seen yet (just created, between polls) is looked up directly: its curve PDA and mint.
  *   Holders (getProgramAccounts on Token-2022 by mint) and portfolios (getTokenAccountsByOwner) are read when asked,
  *   cached briefly, and coalesced so a burst of requests is one RPC call.
@@ -21,6 +25,10 @@ import { base58Encode, bondingCurveAddress, findProgramAddress } from "../../par
 import { base58Decode } from "../../../app/src/lib/chatMessage";
 import { accountDiscriminator, decodeAccount, PROGRAM_ID, type Decoded } from "./borsh";
 import { eventsFromLogs } from "./logs";
+import { topLevelMemos } from "./memo";
+import { Referrals } from "./referrals";
+import { RewardsIndex, type EpochRecord } from "./rewards";
+import { parseRefMemo } from "../../../app/src/lib/callouts";
 import { priceSol, mcapOf, type CoinRecord, type HolderJson, type HolderLabel, type Socials, type TicketRecord, type TradeRecord } from "./model";
 import type { Rpc, SignatureInfo } from "./rpc";
 import { Store } from "./store";
@@ -54,6 +62,10 @@ export interface IndexerOptions {
   log?: (msg: string) => void;
   holdersTtlMs?: number;
   portfolioTtlMs?: number;
+  /** Where epoch-<n>.json snapshot artifacts are served (REWARDS_BASE_URL); unset, no allocations are served. */
+  rewardsBaseUrl?: string;
+  /** Largest artifact read, in bytes (default 256 MiB: 80,000 leaves with proofs). */
+  rewardsMaxBytes?: number;
 }
 
 interface Cached<T> {
@@ -115,6 +127,8 @@ export function metadataFields(json: unknown): { image: string | null; descripti
 
 export class Indexer extends EventEmitter {
   readonly store = new Store();
+  readonly referrals = new Referrals();
+  readonly rewards = new RewardsIndex();
   readonly programId: string;
   global: GlobalParams | null = null;
   /** The newest program signature processed in order: the poller's `until`. */
@@ -456,11 +470,19 @@ export class Indexer extends EventEmitter {
   ingest(signature: string, logs: readonly string[]): void {
     if (!this.store.markSeen(signature)) return;
     const events = eventsFromLogs(logs, this.programId);
+    // A referral tags the transaction's buys: the first top-level memo that is a referral.
+    const ref = topLevelMemos(logs).map(parseRefMemo).find((id): id is string => id !== null) ?? null;
     events.forEach((ev, index) => {
       const d = ev.data;
       switch (ev.name) {
         case "TradeEvent":
-          return this.applyTrade(signature, index, d);
+          return this.applyTrade(signature, index, d, ref);
+        case "RewardEpochPublished":
+          return this.background(this.refreshEpoch(Number(d.epoch)));
+        case "HolderRewardClaimed":
+          return this.rewards.markClaimed(Number(d.epoch), Number(d.index), d.amount as bigint);
+        case "EpochExpired":
+          return this.background(this.refreshEpoch(Number(d.epoch_index)));
         case "TokenCreated":
           return this.applyCreated(d);
         case "LaunchRequested": {
@@ -538,7 +560,7 @@ export class Indexer extends EventEmitter {
     this.background(this.loadMetadataJson());
   }
 
-  private applyTrade(signature: string, index: number, d: Decoded) {
+  private applyTrade(signature: string, index: number, d: Decoded, ref: string | null = null) {
     const mint = d.mint as string;
     const t: TradeRecord = {
       signature,
@@ -557,6 +579,7 @@ export class Indexer extends EventEmitter {
       realSol: d.real_sol_reserves as bigint,
     };
     if (!this.store.addTrade(t)) return;
+    if (ref && t.isBuy) this.referrals.add({ calloutId: ref, signature, index, mint, trader: t.user, solLamports: t.solAmount, feeLamports: t.fee, tokenAmount: t.tokenAmount, slot: t.slot, timestamp: t.timestamp });
     const c = this.store.coins.get(mint);
     if (c && t.slot >= c.reservesSlot) {
       c.virtualToken = t.virtualToken;
@@ -713,6 +736,105 @@ export class Indexer extends EventEmitter {
     });
   }
 
+  // ---- Reward epochs ------------------------------------------------------------------------------------------
+
+  private epochRecord(address: string, d: Decoded): EpochRecord {
+    return {
+      epoch: Number(d.epoch),
+      address,
+      root: d.merkle_root as Uint8Array,
+      totalLamports: d.total_lamports as bigint,
+      claimedLamports: d.claimed_lamports as bigint,
+      numLeaves: Number(d.num_leaves),
+      claimedCount: Number(d.claimed_count),
+      publishedAt: Number(d.published_at),
+      expiresAt: Number(d.expires_at),
+      expired: d.expired as boolean,
+      snapshotSlot: Number(d.snapshot_slot),
+      bitmap: d.claimed_bitmap as Uint8Array,
+    };
+  }
+
+  /** Every RewardEpoch account and the holder vault, then any artifacts due. */
+  async syncRewards(): Promise<void> {
+    await this.exclusive("rewards", async () => {
+      const disc = base58Encode(accountDiscriminator("RewardEpoch"));
+      const { accounts } = await this.rpc.getProgramAccounts(this.programId, [{ memcmp: { offset: 0, bytes: disc } }]);
+      for (const a of accounts) {
+        const d = decodeAccount<Decoded>("RewardEpoch", a.data);
+        if (d) this.rewards.upsert(this.epochRecord(a.pubkey, d));
+      }
+      const vault = await this.pda([enc("holder-vault")], this.programId, "holder-vault");
+      const [v] = (await this.rpc.getMultipleAccounts([vault])).accounts;
+      const dv = v && v.owner === this.programId ? decodeAccount<Decoded>("HolderRewardVault", v.data) : null;
+      if (dv) {
+        this.rewards.vault = {
+          totalDeposited: dv.total_deposited_lamports as bigint,
+          totalCommitted: dv.total_committed_lamports as bigint,
+          totalClaimed: dv.total_claimed_lamports as bigint,
+          totalExpired: dv.total_expired_lamports as bigint,
+          nextEpoch: Number(dv.next_epoch),
+        };
+      }
+    });
+    await this.loadArtifacts();
+  }
+
+  /** One epoch's account again (published, claimed from or expired just now). */
+  async refreshEpoch(epoch: number): Promise<void> {
+    const n = new Uint8Array(8);
+    new DataView(n.buffer).setBigUint64(0, BigInt(epoch), true);
+    const address = await this.pda([enc("reward-epoch"), n], this.programId, `reward-epoch:${epoch}`);
+    const [a] = (await this.rpc.getMultipleAccounts([address])).accounts;
+    const d = a && a.owner === this.programId ? decodeAccount<Decoded>("RewardEpoch", a.data) : null;
+    if (d) this.rewards.upsert(this.epochRecord(address, d));
+    await this.loadArtifacts();
+  }
+
+  /** Loads and verifies the artifacts of epochs that don't have a verified one yet (backing off on misses). */
+  async loadArtifacts(): Promise<void> {
+    const base = this.opts.rewardsBaseUrl?.replace(/\/+$/, "");
+    if (!base) return;
+    await this.exclusive("artifacts", async () => {
+      for (const n of this.rewards.due(this.now())) {
+        const raw = await this.fetchCapped(`${base}/epoch-${n}.json`, this.opts.rewardsMaxBytes ?? 256 * 1024 * 1024, 60_000);
+        this.rewards.loaded(n, raw, this.now());
+        const st = this.rewards.artifactState(n);
+        if (st && st.state !== "verified") this.log(`epoch ${n} artifact: ${st.state}${st.error ? ` (${st.error})` : ""}`);
+      }
+    });
+  }
+
+  /** GET a JSON document, no redirects, at most `max` bytes; null on any failure. */
+  private async fetchCapped(url: string, max: number, timeoutMs: number): Promise<unknown | null> {
+    try {
+      const res = await this.fetchImpl(url, { redirect: "error", signal: AbortSignal.timeout(timeoutMs), headers: { accept: "application/json" } });
+      if (!res.ok || !res.body) return null;
+      const reader = res.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.length;
+        if (size > max) {
+          await reader.cancel();
+          return null;
+        }
+        chunks.push(value);
+      }
+      return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    } catch {
+      return null;
+    }
+  }
+
+  /** Referral events are complete from this time (unix seconds); null: since the program's first transaction. */
+  referralsCoveredFrom(): number | null {
+    const from = Math.max(this.indexedSince ?? -Infinity, this.referrals.evictedThrough ?? -Infinity);
+    return Number.isFinite(from) ? from : null;
+  }
+
   // ---- Running ------------------------------------------------------------------------------------------------
 
   /** First load: Global, every curve and ticket, then the backfill. */
@@ -722,6 +844,8 @@ export class Indexer extends EventEmitter {
     await this.syncTickets();
     const n = await this.pollTransactions(this.opts.backfillLimit ?? 1000);
     await this.syncHolderCounts();
+    // Rewards don't hold the market back: a failure here is retried by the REWARDS_MS timer.
+    await this.syncRewards().catch((e: Error) => this.log(`rewards: ${e.message}`));
     this.log(`indexed ${this.store.coins.size} coins, ${this.store.tickets.size} tickets, ${n} transactions`);
   }
 

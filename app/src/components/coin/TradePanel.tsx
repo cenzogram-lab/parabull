@@ -1,10 +1,11 @@
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { PublicKey } from "@solana/web3.js";
-import { ArrowDownUp, CircleAlert, ExternalLink, Info, Loader2, Settings2, ShieldCheck, Zap } from "lucide-react";
+import { ArrowDownUp, CircleAlert, ExternalLink, Info, Loader2, Megaphone, Settings2, ShieldCheck, Zap } from "lucide-react";
 import { useMemo, useState } from "react";
 import { explorer, isDemo } from "../../config";
 import { useParabullProgram } from "../../hooks/useParabullProgram";
-import { compact, pct, sol, tokens as fmtTokens, usd, usdCompact } from "../../lib/format";
+import { compact, pct, shortAddr, sol, tokens as fmtTokens, usd, usdCompact } from "../../lib/format";
+import { referralFor } from "../../lib/referral";
 import { raydiumSwapUrl } from "../../lib/links";
 import { bpsLabel } from "../../lib/protocolParams";
 import type { Coin } from "../../lib/types";
@@ -57,6 +58,8 @@ export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced 
 
   const canTrade = side === "buy" ? lamports > 0n && (coin.migrated || buyQ !== null) : sellTokens > 0n && (coin.migrated || sellQ !== null);
 
+  const referral = !isDemo && side === "buy" && !coin.migrated ? referralFor(coin.mint, client.publicKey?.toBase58() ?? null) : null;
+
   async function place() {
     if (!isDemo && !client.connected) return setVisible(true);
     if (!isDemo && coin.migrated) {
@@ -74,7 +77,8 @@ export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced 
         toast({ tone: "good", title: `${side === "buy" ? "Bought" : "Sold"} ${compact(t.tokens)} $${coin.ticker}`, body: `${t.sol.toFixed(3)} SOL · demo trade, nothing was sent on-chain` });
         placed = true;
       } else if (side === "buy" && buyQ) {
-        const sig = await client.buy(new PublicKey(coin.mint), buyQ.tokens, buyQ.maxCost);
+        // A followed callout link tags the buy (never the buyer's own callout): see src/lib/referral.ts.
+        const sig = await client.buy(new PublicKey(coin.mint), buyQ.tokens, buyQ.maxCost, referral?.calloutId ?? null);
         sfx("buy");
         toast({ tone: "good", title: `Bought ${fmtTokens(buyQ.tokens)} $${coin.ticker}`, body: explorer("tx", sig) });
         placed = true;
@@ -228,6 +232,11 @@ export function TradePanel({ coin, initialSide = "buy", framed = true, onPlaced 
       {isDemo && (
         <p className="mt-2 flex items-center justify-center gap-1 text-[11.5px] text-muted">
           <Info className="h-3 w-3" /> Demo mode: trades are simulated locally
+        </p>
+      )}
+      {referral && (
+        <p className="mt-2 flex items-center justify-center gap-1 text-[11.5px] text-muted">
+          <Megaphone className="h-3 w-3 text-copper" aria-hidden /> Tagged with {shortAddr(referral.author, 4)}'s callout: it credits them, at no cost to you
         </p>
       )}
     </div>

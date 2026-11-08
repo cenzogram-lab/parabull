@@ -4,7 +4,8 @@
  * notes, stats and icons inside it are plain text.
  */
 import { ArrowDownUp, ChevronRight, Eye, Heart, Megaphone, MessageCircle, Repeat2, type LucideIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { isDemo } from "../../config";
 import { Link } from "react-router-dom";
 import { age, compact, pct, tokens, usd, usdCompact, usdSigned } from "../../lib/format";
 import type { Callout, Coin } from "../../lib/types";
@@ -195,15 +196,18 @@ export function ClosedPanel({ closed }: { closed: ClosedPosition[] }) {
 /* Replies ---------------------------------------------------------------- */
 
 /**
- * Four of the demo callouts, shown as yours (newest first): coins you hold
- * are picked first, one per coin. Their position figures belong to the
- * original caller, so the card shows only the call itself (market cap then
- * and now).
+ * Your callouts, newest first. Chain mode: the ones this wallet posted (from the edge Worker). Demo mode: four of the
+ * demo callouts, shown as yours: coins you hold are picked first, one per coin. Their position figures belong to the
+ * original caller, so the card shows only the call itself (market cap then and now).
  */
 function useYourCallouts(p: Portfolio) {
-  const { callouts, byMint } = useMarket();
+  const { callouts, byMint, loadCalloutsBy } = useMarket();
   const held = useMemo(() => new Set(p.holdings.map((h) => h.coin.mint)), [p.holdings]);
+  useEffect(() => {
+    if (!isDemo) loadCalloutsBy(p.address);
+  }, [p.address, loadCalloutsBy]);
   return useMemo(() => {
+    if (!isDemo) return callouts.filter((c) => c.wallet === p.address && byMint.has(c.mint)).map((c) => ({ c, coin: byMint.get(c.mint)! }));
     const seen = new Set<string>();
     const out: { c: Callout; coin: Coin }[] = [];
     const ordered = [...callouts].sort((a, b) => Number(held.has(b.mint)) - Number(held.has(a.mint)) || b.ts - a.ts);
@@ -215,7 +219,7 @@ function useYourCallouts(p: Portfolio) {
       if (out.length === 4) break;
     }
     return out.sort((a, b) => b.c.ts - a.c.ts);
-  }, [callouts, byMint, held]);
+  }, [callouts, byMint, held, p.address]);
 }
 
 function CalloutCard({ c, coin, p, now }: { c: Callout; coin: Coin; p: Portfolio; now: number }) {
@@ -249,12 +253,14 @@ function CalloutCard({ c, coin, p, now }: { c: Callout; coin: Coin; p: Portfolio
           <ChangePill value={move} size="xs" soft />
           <ChevronRight className="h-4 w-4 shrink-0 text-muted" aria-hidden />
         </Link>
-        <div className="mt-2.5 flex items-center gap-4 text-[12px] leading-4 text-muted">
-          <Count icon={Eye} n={c.views} noun="views" />
-          <Count icon={Heart} n={c.likes} noun="likes" />
-          <Count icon={MessageCircle} n={c.comments} noun="replies" />
-          <Count icon={Repeat2} n={c.shares} noun="reposts" />
-        </div>
+        {c.engagement && (
+          <div className="mt-2.5 flex items-center gap-4 text-[12px] leading-4 text-muted">
+            <Count icon={Eye} n={c.engagement.views} noun="views" />
+            <Count icon={Heart} n={c.engagement.likes} noun="likes" />
+            <Count icon={MessageCircle} n={c.engagement.comments} noun="replies" />
+            <Count icon={Repeat2} n={c.engagement.shares} noun="reposts" />
+          </div>
+        )}
       </article>
     </li>
   );
@@ -263,7 +269,7 @@ function CalloutCard({ c, coin, p, now }: { c: Callout; coin: Coin; p: Portfolio
 export function RepliesPanel({ p }: { p: Portfolio }) {
   const mine = useYourCallouts(p);
   const [now] = useState(() => Date.now());
-  if (!mine.length) return <EmptyNote>No callouts yet. Post a public call on a coin you hold and it shows up here.</EmptyNote>;
+  if (!mine.length) return <EmptyNote>No callouts yet. Post a public call from the Callouts tab of a coin you hold and it shows up here.</EmptyNote>;
   return (
     <div>
       <p className="flex min-h-11 items-center text-[13px] text-muted">Your public calls on coins, newest first.</p>

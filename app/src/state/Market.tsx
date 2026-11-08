@@ -4,8 +4,8 @@
  *   reserves through the real curve math); `?live=0` freezes it. Demo trades and launches update this store only.
  * - Chain mode: the Parabull indexer (VITE_INDEXER_URL, services/parabull-indexer): real curves, trades, holders and
  *   the connected wallet's positions, kept live by its /stream websocket. Chain mode never shows demo coins: without
- *   an indexer the market is empty and says so (source "unconfigured"). The social layer (traders, squads, callouts)
- *   has no on-chain source yet and is empty in chain mode.
+ *   an indexer the market is empty and says so (source "unconfigured"). Callouts come from the edge Worker
+ *   (src/state/callouts.ts); traders, squads and streams have no on-chain source yet and are empty in chain mode.
  */
 import { useWallet } from "@solana/wallet-adapter-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -22,6 +22,7 @@ import { fakeSignature, tradeHistory } from "../mock/market";
 import type { ClosedPosition } from "../mock/portfolio";
 import { useProtocol } from "./Protocol";
 import { generateCallouts, generateSquads, generateStreams, generateTraders } from "../mock/social";
+import { useChainCallouts, useDemoCallouts, type CalloutFeed } from "./callouts";
 
 const SUPPLY_TOKENS = Number(PROTOCOL.totalSupply) / 1e6;
 const FEE_BPS = PROTOCOL.platformFeeBps;
@@ -47,7 +48,7 @@ export interface LaunchDraft {
 /** Where a coin page stands: shown, being fetched, not a Parabull coin, the indexer failed, or no indexer configured. */
 export type CoinState = "ready" | "loading" | "missing" | "error" | "unconfigured";
 
-interface MarketState {
+interface MarketState extends CalloutFeed {
   /** Where the data comes from. */
   source: "demo" | "indexer" | "unconfigured";
   /** A coin page's state; call watchCoin(mint) to start loading it. */
@@ -164,6 +165,7 @@ function DemoMarketProvider({ children }: { children: ReactNode }) {
   );
 
   const byMint = useMemo(() => new Map(coins.map((c) => [c.mint, c])), [coins]);
+  const calloutFeed = useDemoCallouts(social.callouts, byMint);
 
   const tradesFor = useCallback(
     (mint: string) => {
@@ -347,8 +349,8 @@ function DemoMarketProvider({ children }: { children: ReactNode }) {
 
   const coinState = useCallback((mint: string): CoinState => (byMint.has(mint) ? "ready" : "missing"), [byMint]);
   const value = useMemo<MarketState>(
-    () => ({ source: "demo", coinState, watchCoin: noop, holdersFor: none, refreshPositions: noop, fetchCandles: noCandles, coins, byMint, liveTrades, tradesFor, ...social, solUsd, positions, startPositions, demoSolDelta, demoClosed, demoTradeCount, following, toggleFollow, demoTrade, demoLaunch }),
-    [coinState, coins, byMint, liveTrades, tradesFor, social, solUsd, positions, startPositions, demoSolDelta, demoClosed, demoTradeCount, following, toggleFollow, demoTrade, demoLaunch],
+    () => ({ source: "demo", coinState, watchCoin: noop, holdersFor: none, refreshPositions: noop, fetchCandles: noCandles, coins, byMint, liveTrades, tradesFor, ...social, ...calloutFeed, solUsd, positions, startPositions, demoSolDelta, demoClosed, demoTradeCount, following, toggleFollow, demoTrade, demoLaunch }),
+    [coinState, coins, byMint, liveTrades, tradesFor, social, calloutFeed, solUsd, positions, startPositions, demoSolDelta, demoClosed, demoTradeCount, following, toggleFollow, demoTrade, demoLaunch],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -356,7 +358,7 @@ function DemoMarketProvider({ children }: { children: ReactNode }) {
 const noop = () => undefined;
 const none = () => null;
 const noCandles = () => Promise.resolve(null);
-const EMPTY = { traders: [] as Trader[], squads: [] as Squad[], callouts: [] as Callout[], streams: [] as Stream[] };
+const EMPTY = { traders: [] as Trader[], squads: [] as Squad[], streams: [] as Stream[] };
 const tradeKey = (t: TradeJson) => `${t.signature}:${t.index}`;
 /** Newest first, one copy of each event. */
 function mergeTrades(a: TradeJson[], b: TradeJson[] = []): TradeJson[] {
@@ -534,6 +536,7 @@ function IndexerMarketProvider({ children }: { children: ReactNode }) {
     [raw, rawHolders, solUsd, lockSeconds],
   );
   const byMint = useMemo(() => new Map(coins.map((c) => [c.mint, c])), [coins]);
+  const calloutFeed = useChainCallouts(solUsd);
   const liveTrades = useMemo(() => live.map((t) => toTrade(t, solUsd)), [live, solUsd]);
   const tradesFor = useCallback((mint: string) => (rawTrades.get(mint) ?? []).map((t) => toTrade(t, solUsd)), [rawTrades, solUsd]);
   const holdersFor = useCallback(
@@ -571,6 +574,7 @@ function IndexerMarketProvider({ children }: { children: ReactNode }) {
       liveTrades,
       tradesFor,
       ...EMPTY,
+      ...calloutFeed,
       solUsd,
       positions,
       startPositions: positions,
@@ -584,7 +588,7 @@ function IndexerMarketProvider({ children }: { children: ReactNode }) {
         throw new Error("demo launches are demo-mode only");
       },
     }),
-    [client, coinState, watchCoin, holdersFor, refreshPositions, fetchCandles, coins, byMint, liveTrades, tradesFor, solUsd, positions, following, toggleFollow],
+    [client, coinState, watchCoin, holdersFor, refreshPositions, fetchCandles, coins, byMint, liveTrades, tradesFor, calloutFeed, solUsd, positions, following, toggleFollow],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

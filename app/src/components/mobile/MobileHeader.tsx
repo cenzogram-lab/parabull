@@ -8,7 +8,8 @@ import { useIsMobile } from "../../hooks/useMediaQuery";
 import { age, pct, sol, usd, usdCompact, usdSigned } from "../../lib/format";
 import { GRADUATION_RAISE_LAMPORTS } from "../../lib/protocol";
 import { progressOf } from "../../mock/coins";
-import { DEMO_WALLET, walletEpochs, type DemoEpoch } from "../../mock/protocol";
+import { DEMO_WALLET } from "../../mock/protocol";
+import { useRewardSummary, type RewardEpoch } from "../portfolio/shared";
 import { useApp } from "../../state/AppState";
 import { kingOf, useMarket } from "../../state/Market";
 import { usePortfolio } from "../../state/usePortfolio";
@@ -38,7 +39,6 @@ function PnlBadge({ usdChange, pctChange }: { usdChange: number; pctChange: numb
 }
 
 /** The newest holder-reward epoch the wallet can still claim (null if none). */
-const claimableEpoch = (epochs: readonly DemoEpoch[], claimed: ReadonlySet<number>) => epochs.filter((e) => e.you && !e.expired && !claimed.has(e.epoch)).pop() ?? null;
 
 /** Sticky mobile header (below md): portfolio capsule on the left, the Live chip, Deposit and notifications on the right. */
 export function MobileHeader() {
@@ -46,30 +46,18 @@ export function MobileHeader() {
   const isMobile = useIsMobile();
   const { publicKey } = useWallet();
   const { setVisible } = useWalletModal();
-  const { toast, claimedFor } = useApp();
+  const { toast } = useApp();
   const { key } = useLocation();
   const [sheet, setSheet] = useState(false);
   const [seen, setSeen] = useState(false);
   // The sheet belongs to the page it opened over: a navigation (Back, ⌘K, a link) or a switch to the desktop layout closes it.
   useEffect(() => setSheet(false), [key, isMobile]);
-  // Building the demo reward epochs (real Merkle trees) takes ~150ms, so do it
-  // when the browser is idle rather than as the sheet opens; undefined = not yet.
-  const [epochs, setEpochs] = useState<readonly DemoEpoch[]>();
-  const wallet = publicKey ?? DEMO_WALLET;
-  useEffect(() => {
-    if (!isMobile) return;
-    setEpochs(undefined);
-    const run = () => setEpochs(walletEpochs(wallet));
-    // Safari has no requestIdleCallback.
-    if (typeof window.requestIdleCallback === "function") {
-      const id = window.requestIdleCallback(run, { timeout: 4000 });
-      return () => window.cancelIdleCallback(id);
-    }
-    const t = window.setTimeout(run, 1200);
-    return () => window.clearTimeout(t);
-  }, [isMobile, wallet]);
-  // The wallet's claims on the $PARABULL page count at once.
-  const epoch = epochs && claimableEpoch(epochs, claimedFor(wallet.toBase58()));
+  // The newest reward the wallet can claim. Demo mode: the demo wallet's simulated epochs (built when the browser is
+  // idle) and this visit's claims. Chain mode: the connected wallet's allocations from the indexer, claims from the
+  // chain; nothing without a wallet.
+  const rewardWallet = publicKey?.toBase58() ?? (isDemo ? DEMO_WALLET.toBase58() : null);
+  const summary = useRewardSummary(isMobile ? rewardWallet : null, false);
+  const epoch = summary ? (summary.epochs.find((e) => !e.expired && e.verified && !e.claimed) ?? null) : undefined;
 
   const deposit = async () => {
     if (!publicKey) return setVisible(true);
@@ -132,7 +120,7 @@ type Note = { id: string; icon: LucideIcon; tone: keyof typeof TONE; title: stri
 const TONE = { gold: "text-gold", ember: "text-ember", copper: "text-copper", rose: "text-rosebronze" } as const;
 
 /** Demo notifications drawn from the live demo data; mounted only while the sheet is open. */
-function NotificationList({ epoch, onPick }: { epoch: DemoEpoch | null | undefined; onPick: () => void }) {
+function NotificationList({ epoch, onPick }: { epoch: RewardEpoch | null | undefined; onPick: () => void }) {
   const { coins, callouts, following } = useMarket();
   const { holdings } = usePortfolio();
   const [now] = useState(() => Date.now());
@@ -150,7 +138,12 @@ function NotificationList({ epoch, onPick }: { epoch: DemoEpoch | null | undefin
   if (call && callCoin) notes.push({ id: "callout", icon: Megaphone, tone: "copper", title: `@${call.handle} posted a callout on $${callCoin.ticker}`, body: `“${call.text}”`, to: `/coin/${call.mint}`, at: Math.min(call.ts, now - MIN) });
   const king = kingOf(coins);
   if (king) notes.push({ id: "king", icon: Crown, tone: "gold", title: `${king.name} is ${(progressOf(king) * 100).toFixed(1)}% of the way to Raydium`, body: `King of the Bull: ${(Number(king.reserves.realSol) / 1e9).toFixed(2)} of ${GRADUATION_SOL} SOL raised`, to: `/coin/${king.mint}`, at: now - 26 * MIN });
-  if (epoch?.you) notes.push({ id: "epoch", icon: Gift, tone: "gold", title: `Epoch ${epoch.epoch} holder reward is ready to claim`, body: `${sol(BigInt(epoch.you.amount), 4)} from $PARABULL fees · claim within ${Math.max(1, Math.ceil((epoch.expiresAt - now) / DAY))} days`, to: "/parabull-token#claim", at: Math.min(epoch.publishedAt, now - HOUR) });
+  if (epoch?.you) {
+    // Demo epochs are simulated: the notification says so, so it never reads as money waiting for you.
+    const what = epoch.kind === "caller" ? "caller reward" : "holder reward";
+    const from = epoch.kind === "caller" ? "from buys your callouts brought in" : "from $PARABULL fees";
+    notes.push({ id: "epoch", icon: Gift, tone: "gold", title: `${isDemo ? "Demo: e" : "E"}poch ${epoch.epoch} ${what} is ready to claim`, body: `${sol(BigInt(epoch.you.amount), 4)} ${from}${isDemo ? " (simulated)" : ""} · claim within ${Math.max(1, Math.ceil((epoch.expiresAt - now) / DAY))} days`, to: "/parabull-token#claim", at: Math.min(epoch.publishedAt, now - HOUR) });
+  }
   const lock = coins.filter((c) => c.locks.ticker > now).sort((a, b) => a.locks.ticker - b.locks.ticker)[0];
   if (lock) notes.push({ id: "lock", icon: Lock, tone: "rose", title: `$${lock.ticker} ticker lock ends in ${age(lock.locks.ticker - now)}`, body: "Launch locks last 3 days; then the ticker and name are free to register again", to: `/coin/${lock.mint}`, at: now - 12 * MIN });
   const fresh = [...coins].sort((a, b) => b.createdAt - a.createdAt)[0];

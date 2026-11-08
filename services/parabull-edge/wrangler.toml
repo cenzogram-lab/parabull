@@ -17,6 +17,9 @@ STREAM_HOST = "customer-CODE.cloudflarestream.com"
 # Solana JSON-RPC for the cluster Parabull is on: POST /live/input reads the coin's bonding curve to check its creator.
 # PARABULL_PROGRAM_ID overrides the program id when it differs from the committed IDL's.
 SOLANA_RPC_URL = "https://api.devnet.solana.com"
+# The Parabull indexer (services/parabull-indexer): POST /callouts records the coin's market cap from it. Without it,
+# posting a callout answers 503 (reading still works).
+INDEXER_URL = "https://indexer.example.com"
 
 [[r2_buckets]]
 binding = "MEDIA"
@@ -45,9 +48,18 @@ simple = { limit = 60, period = 60 }
 name = "CHAT_ROOMS"
 class_name = "ChatRoom"
 
+# Every callout, in one object's SQLite (src/calloutStoreDO.ts), so per-wallet posting limits apply in one place.
+[[durable_objects.bindings]]
+name = "CALLOUTS"
+class_name = "CalloutStore"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ChatRoom"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["CalloutStore"]
 
 # CHAT_SECRET (HMAC key for chat session tokens, 32+ characters) is a secret, not a var:
 #   openssl rand -base64 48 | npx wrangler@4 secret put CHAT_SECRET
