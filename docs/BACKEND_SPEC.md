@@ -356,7 +356,9 @@ All `GET`.
   - `change1h`, `change6h`, `change24h`: fractions, null when the indexed
     history doesn't reach back that far;
   - `spark`: 24 hourly prices;
-  - `lastTradeAt`.
+  - `lastTradeAt`;
+  - `partial`: true when trades from the last 24 h had to be dropped (the
+    hard limit below), so the 24h totals are a floor.
 
 `Trade` has `signature`, `index` (the event's position in its transaction),
 `mint`, `user`, `side`, `tokenAmount`, `solAmount`, `fee`, `slot`,
@@ -365,8 +367,15 @@ All `GET`.
 
 ### 5.3 Limits and what's not indexed
 
-- **In memory:** state is held in memory, capped at 5,000 trades per coin and
-  1,000 per wallet. A restart re-reads the last `BACKFILL_LIMIT` program
+- **In memory:** state is held in memory, with these limits:
+  - per coin, 5,000 trades plus every trade from the last 25 h, up to a hard
+    limit of 50,000;
+  - per wallet, 1,000 trades.
+- **What an eviction means:** a dropped trade is forgotten entirely, and the
+  coin stops counting as having full history. Its price changes then read
+  null rather than wrong. Dropping trades from the last day sets
+  `stats.partial`.
+- **Restarts:** a restart re-reads the last `BACKFILL_LIMIT` program
   transactions. Coins older than that have no full history, so their price
   changes can be null. Durable storage means implementing the same `Store`
   methods over SQLite or Postgres.

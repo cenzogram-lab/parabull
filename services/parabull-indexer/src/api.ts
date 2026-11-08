@@ -75,7 +75,8 @@ export class Api {
   }
 
   private coin(c: CoinRecord): CoinJson {
-    return coinJson(c, this.ix.store.trades(c.mint), this.ix.nowSec(), this.ix.store.fullHistory.has(c.mint));
+    const s = this.ix.store;
+    return coinJson(c, s.trades(c.mint), this.ix.nowSec(), s.fullHistory.has(c.mint), s.evictedThrough.get(c.mint));
   }
 
   private push(mint: string | null, build: () => object | null) {

@@ -48,6 +48,8 @@ export interface CoinJson {
     change24h: number | null;
     spark: number[];
     lastTradeAt: number | null;
+    /** The coin traded past the indexer's per-coin limit in a day: the 24h totals are a floor. */
+    partial?: boolean;
   };
 }
 

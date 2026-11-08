@@ -3,9 +3,16 @@ import { test } from "node:test";
 import { findProgramAddress } from "../../parabull-edge/src/solana";
 import { Indexer, metadataFields } from "./indexer";
 import { DEVNET_CPMM, INITIAL, MockChain, addressOf } from "./mockChain";
-import { coinJson, priceSol, statusOf } from "./model";
+import { coinJson, priceSol, statusOf, type CoinRecord } from "./model";
 import { Rpc } from "./rpc";
 
+const coinRecordFor = (mint: string): CoinRecord => ({
+  mint, curve: mint, creator: mint, ticket: null, name: "x", symbol: "X", uri: "", image: null, description: null, socials: {},
+  createdSlot: 0n, tradingOpenSlot: 0n, launchTimestamp: 0, complete: false, migrated: false, escrowReleased: false,
+  virtualToken: 1_000_000n, virtualSol: 2_000n, realToken: 1n, realSol: 1n, totalSupply: 1_000_000_000_000_000n,
+  initialRealToken: 1n, initialPriceSol: 123, escrowAccrued: 0n, raydiumPool: null, poolPriceSol: null, tweetLocked: false,
+  reservesSlot: 0, athMcapSol: 0, holderCount: null,
+});
 const ALICE = addressOf("alice");
 const BOB = addressOf("bob");
 const CAROL = addressOf("carol");
@@ -289,15 +296,40 @@ test("indexer: an event for an unknown coin while the RPC is down doesn't crash 
   }
 });
 
-test("store: trades past a coin's cap are forgotten with their dedupe keys (memory stays bounded)", async () => {
+const storeTrade = (i: number, timestamp: number, price = 1n) => ({ signature: `sig${i}`, index: 0, mint: "M", user: `u${i % 7}`, isBuy: true, tokenAmount: 1n, solAmount: 1n, fee: 0n, slot: i, timestamp, virtualToken: 1_000_000n, virtualSol: price * 1_000n, realToken: 1n, realSol: 1n });
+
+test("store: old trades past a coin's cap are forgotten with their dedupe keys (memory stays bounded)", async () => {
   const { Store, MAX_TRADES_PER_COIN } = await import("./store");
   const s = new Store();
+  s.fullHistory.add("M");
+  // One a minute: about 87 hours, so the oldest are well past the last day.
   const n = MAX_TRADES_PER_COIN + 250;
-  for (let i = 0; i < n; i++)
-    s.addTrade({ signature: `sig${i}`, index: 0, mint: "M", user: `u${i % 7}`, isBuy: true, tokenAmount: 1n, solAmount: 1n, fee: 0n, slot: i, timestamp: i, virtualToken: 1n, virtualSol: 1n, realToken: 1n, realSol: 1n });
+  for (let i = 0; i < n; i++) s.addTrade(storeTrade(i, i * 60));
   assert.equal(s.trades("M").length, MAX_TRADES_PER_COIN);
   assert.equal(s.tradeKeyCount, MAX_TRADES_PER_COIN, "keys for evicted trades are dropped");
   assert.equal(s.trades("M").at(-1)!.signature, "sig250", "the oldest go first");
+  assert.equal(s.fullHistory.has("M"), false, "after an eviction the history isn't complete");
+});
+
+test("store: the last day's trades stay past the soft cap (24h stats stay exact); the hard cap flags them partial", async () => {
+  const { Store } = await import("./store");
+  const s = new Store({ perCoin: 50, perCoinHard: 200, perUser: 10 });
+  s.fullHistory.add("M");
+  const T0 = 1_000_000; // trades every 10 s from T0; the coin launched days before
+  const coin = { ...coinRecordFor("M"), launchTimestamp: T0 - 500_000 };
+  for (let i = 0; i < 150; i++) s.addTrade(storeTrade(i, T0 + i * 10));
+  assert.equal(s.trades("M").length, 150, "nothing in the last day is dropped below the hard cap");
+  assert.equal(s.fullHistory.has("M"), true);
+  let st = coinJson(coin, s.trades("M"), T0 + 3_000, true, s.evictedThrough.get("M")).stats;
+  assert.deepEqual([st.trades24h, st.partial], [150, false]);
+
+  for (let i = 150; i < 260; i++) s.addTrade(storeTrade(i, T0 + i * 10, 2n));
+  assert.equal(s.trades("M").length, 200, "the hard cap holds: trades 0..59 (T0 .. T0+590) are gone");
+  const now = T0 + 3_900; // an hour ago is T0+300, inside the evicted span
+  st = coinJson(coin, s.trades("M"), now, s.fullHistory.has("M"), s.evictedThrough.get("M")).stats;
+  assert.equal(st.partial, true, "in-window trades were evicted: the totals are a floor");
+  assert.equal(st.trades24h, 200);
+  assert.equal(st.change1h, null, "the price an hour ago was evicted: unknown, not the launch price (123)");
 });
 
 test("indexer: replaying a ticket's LaunchRequested keeps its on-chain creation time", async () => {

@@ -119,6 +119,8 @@ export interface CoinStats {
   /** Price (SOL per token) at the end of each of the last 24 hours, oldest first. */
   spark: number[];
   lastTradeAt: number | null;
+  /** True when trades inside the last 24 h were evicted (a coin past 50,000 trades a day): the totals are a floor. */
+  partial: boolean;
 }
 
 /**
@@ -131,8 +133,11 @@ function priceAt(c: CoinRecord, newestFirst: TradeRecord[], t: number, historyCo
   return null;
 }
 
-/** 24h numbers from the coin's indexed trades (`newestFirst`). `historyComplete`: every trade since launch is indexed. */
-export function statsOf(c: CoinRecord, newestFirst: TradeRecord[], now: number, historyComplete: boolean): CoinStats {
+/**
+ * 24h numbers from the coin's indexed trades (`newestFirst`). `historyComplete`: every trade since launch is indexed.
+ * `evictedThrough`: the newest timestamp among trades the store dropped, if any.
+ */
+export function statsOf(c: CoinRecord, newestFirst: TradeRecord[], now: number, historyComplete: boolean, evictedThrough?: number): CoinStats {
   const since = now - 86_400;
   let buy = 0n;
   let sell = 0n;
@@ -175,6 +180,7 @@ export function statsOf(c: CoinRecord, newestFirst: TradeRecord[], now: number, 
     change24h: change(24),
     spark,
     lastTradeAt: newestFirst[0]?.timestamp ?? null,
+    partial: evictedThrough !== undefined && evictedThrough >= since,
   };
 }
 
@@ -210,7 +216,7 @@ export interface CoinJson {
   stats: CoinStats;
 }
 
-export function coinJson(c: CoinRecord, trades: TradeRecord[], now: number, historyComplete: boolean): CoinJson {
+export function coinJson(c: CoinRecord, trades: TradeRecord[], now: number, historyComplete: boolean, evictedThrough?: number): CoinJson {
   const price = currentPrice(c);
   const mcap = mcapOf(c, price);
   return {
@@ -241,7 +247,7 @@ export function coinJson(c: CoinRecord, trades: TradeRecord[], now: number, hist
     raydiumPool: c.raydiumPool,
     tweetLocked: c.tweetLocked,
     holders: c.holderCount,
-    stats: statsOf(c, trades, now, historyComplete),
+    stats: statsOf(c, trades, now, historyComplete, evictedThrough),
   };
 }
 
