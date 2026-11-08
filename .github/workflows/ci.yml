@@ -144,10 +144,10 @@ jobs:
           cache-dependency-path: services/parabull-edge/package-lock.json
       - name: npm ci
         run: npm ci
-      # Also checks the app module it shares the upload contract with (app/src/lib/metadata.ts).
+      # Also checks the app modules it shares contracts with (app/src/lib/metadata.ts, app/src/lib/chatMessage.ts).
       - name: Typecheck
         run: npm run typecheck
-      - name: Tests (image sniffing, field rules, R2 keys, the app's upload client, CORS, refusals)
+      - name: Tests (metadata upload, chat rooms: broadcast, hibernation, sign-in, limits, attachments)
         run: npm test
 
   canister:

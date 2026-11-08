@@ -6,8 +6,8 @@ compatibility_date = "2026-10-01"
 [vars]
 # The bucket's public custom domain (R2 > parabull-media > Settings > Custom Domains). https, no trailing slash.
 MEDIA_PUBLIC_URL = "https://media.example.com"
-# Origins allowed to upload: the frontend canister's URL and any custom domain, comma-separated. Anything else is
-# refused, so until this is set every upload fails closed.
+# Origins allowed to call the Worker (uploads, chat sign-in, chat sockets): the frontend canister's URL and any custom
+# domain, comma-separated. Anything else is refused, so until this is set everything fails closed.
 ALLOWED_ORIGINS = "https://frontend-canister-id.icp0.io"
 
 [[r2_buckets]]
@@ -19,3 +19,22 @@ bucket_name = "parabull-media"
 name = "UPLOAD_LIMITER"
 namespace_id = "1001"
 simple = { limit = 10, period = 60 }
+
+# Chat sign-ins and uploads, per IP (src/router.ts CHAT_LIMITER).
+[[ratelimits]]
+name = "CHAT_LIMITER"
+namespace_id = "1002"
+simple = { limit = 20, period = 60 }
+
+# One ChatRoom per coin mint (src/chatRoomDO.ts): WebSocket Hibernation, history in the object's SQLite storage.
+[[durable_objects.bindings]]
+name = "CHAT_ROOMS"
+class_name = "ChatRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChatRoom"]
+
+# CHAT_SECRET (HMAC key for chat session tokens, 32+ characters) is a secret, not a var:
+#   openssl rand -base64 48 | npx wrangler@4 secret put CHAT_SECRET
+# Without it, chat stays read-only: sign-in answers 503 and no token verifies.

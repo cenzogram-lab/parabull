@@ -131,7 +131,7 @@ export function publicBase(raw: string | undefined): string | null {
 }
 
 /** Writes `key` unless it already exists: content-addressed objects are never overwritten. */
-async function putOnce(bucket: MediaBucket, key: string, body: Uint8Array | string, contentType: string): Promise<void> {
+export async function putOnce(bucket: MediaBucket, key: string, body: Uint8Array | string, contentType: string): Promise<void> {
   if (await bucket.head(key)) return;
   await bucket.put(key, body, { httpMetadata: { contentType, cacheControl: IMMUTABLE } });
 }

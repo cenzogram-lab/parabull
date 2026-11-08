@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { checkUri, uploadMetadata } from "../../../app/src/lib/metadata";
-import { handle, type Env, type RateLimiter } from "./index";
+import { handle, type Env, type RateLimiter } from "./router";
 import { IMMUTABLE, MAX_IMAGE_BYTES, metadataJson, publicBase, sniffImage, validateFields, type MediaBucket } from "./metadata";
 
 const APP = "https://abcde-aaaaa-aaaaa-aaaaa-cai.icp0.io";
