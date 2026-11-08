@@ -7,6 +7,7 @@
  *   POST    /chat/upload   a chat image or GIF into R2 (Bearer session token), returns { url }
  *   GET     /chat/:mint    websocket into that coin's ChatRoom (src/chatRoom.ts)
  *   GET     /live          coins streaming now on Cloudflare Stream, with their HLS URLs (src/live.ts)
+ *   POST    /live/input    the coin creator's Stream live input: RTMPS / SRT stream keys (src/broadcast.ts)
  *   OPTIONS               CORS preflight for the POST routes
  *   GET     /health        "ok"
  *
@@ -16,7 +17,9 @@
 import { isAddress } from "../../../app/src/lib/chatMessage";
 import { allowedOrigins, cors, json, preflight, readJson } from "./http";
 import { MAX_IMAGE_BYTES, MAX_REQUEST_BYTES, publicBase, putOnce, sha256Hex, sniffImage, storeMetadata, type MediaBucket } from "./metadata";
-import { liveStreams, type LiveEnv } from "./live";
+import type { BroadcastEnv, BroadcastResult } from "./broadcast";
+import { LIVE_INPUT_PATH, LIVE_INPUT_ROOM } from "./chatRoom";
+import { liveStreams } from "./live";
 import { createSession, verifyToken } from "./session";
 
 /** Cloudflare's rate limiting binding ([[ratelimits]] in wrangler.toml). */
@@ -30,7 +33,7 @@ export interface ChatNamespace {
   get(id: unknown): { fetch(request: Request): Promise<Response> };
 }
 
-export interface Env extends LiveEnv {
+export interface Env extends BroadcastEnv {
   /** R2 bucket, public through a custom domain (MEDIA_PUBLIC_URL). */
   MEDIA: MediaBucket;
   /** https base the bucket is served from, e.g. https://media.parabull.xyz. */
@@ -119,7 +122,7 @@ async function uploadRoute(request: Request, env: Env, allow: Record<string, str
 export async function handle(request: Request, env: Env, now = Date.now(), fetchImpl: typeof fetch = fetch): Promise<Response> {
   const { pathname } = new URL(request.url);
   if (pathname === "/health" && request.method === "GET") return new Response("ok", { headers: { "cache-control": "no-store" } });
-  const route = pathname === "/live" ? "live" : pathname === "/metadata" ? "metadata" : pathname === "/chat/session" ? "session" : pathname === "/chat/upload" ? "upload" : /^\/chat\/[^/]+$/.test(pathname) ? "room" : null;
+  const route = pathname === "/live/input" ? "broadcast" : pathname === "/live" ? "live" : pathname === "/metadata" ? "metadata" : pathname === "/chat/session" ? "session" : pathname === "/chat/upload" ? "upload" : /^\/chat\/[^/]+$/.test(pathname) ? "room" : null;
   if (!route) return json(404, { error: "not found" });
 
   const origin = request.headers.get("origin") ?? "";
@@ -132,6 +135,26 @@ export async function handle(request: Request, env: Env, now = Date.now(), fetch
     const result = await liveStreams(env, now, fetchImpl);
     // Short shared caching: every viewer of /live polls this, and the Worker caches the upstream answer too.
     return result.ok ? json(200, { streams: result.streams }, { ...allow, "cache-control": "public, max-age=15" }) : json(result.status, { error: result.error, streams: [] }, allow);
+  }
+
+  if (route === "broadcast") {
+    if (request.method === "OPTIONS") return preflight(origin, "POST", "authorization, content-type");
+    if (request.method !== "POST") return json(405, { error: "method not allowed" }, { ...allow, allow: "POST, OPTIONS" });
+    const auth = request.headers.get("authorization") ?? "";
+    const session = auth.startsWith("Bearer ") ? await verifyToken(env.CHAT_SECRET, auth.slice(7), now) : null;
+    if (!session) return json(401, { error: "sign in with your wallet first" }, allow);
+    if (await limited(env.CHAT_LIMITER, request, "live-input")) return json(429, { error: "too many requests, try again in a minute" }, { ...allow, "retry-after": "60" });
+    const body = await readJson(request, 1_024);
+    if (body === null) return json(400, { error: "expected a small JSON body" }, allow);
+    const mint = (body as { mint?: unknown }).mint;
+    if (!isAddress(mint)) return json(400, { error: "mint must be a Solana address" }, allow);
+    // One object runs these one at a time: racing requests must not create two inputs for a coin, or pass the cap.
+    if (!env.CHAT_ROOMS) return json(503, { error: "going live is not configured" }, allow);
+    const room = env.CHAT_ROOMS.get(env.CHAT_ROOMS.idFromName(LIVE_INPUT_ROOM));
+    const forwarded = await room.fetch(new Request(`https://room${LIVE_INPUT_PATH}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ wallet: session.wallet, body }) }));
+    const result = (await forwarded.json()) as BroadcastResult;
+    // Carries the stream key: never cached anywhere.
+    return result.ok ? json(200, result.value, allow) : json(result.status, { error: result.error }, allow);
   }
 
   if (route === "room") {

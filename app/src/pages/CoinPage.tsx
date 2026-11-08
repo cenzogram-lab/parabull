@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { XLogo } from "../components/brand/Wordmark";
 import { CoinChat } from "../components/coin/CoinChat";
+import { GoLiveButton } from "../components/live/GoLive";
 import { CoinLivePanel } from "../components/live/LiveViews";
 import { useLiveStreams } from "../hooks/useLiveStreams";
 import { XAutomationButton } from "../components/coin/XAutomationModal";
@@ -151,6 +152,7 @@ export function CoinPage() {
             </div>
             {/* The creator's X automation sits before Watch; for everyone else this renders nothing, so the header is unchanged. */}
             <div className="flex shrink-0 items-center gap-2">
+              <GoLiveButton coin={coin} variant="desktop" />
               <XAutomationButton coin={coin} variant="desktop" />
               <button onClick={() => toggleWatch(coin.mint)} className={cx("btn-ghost h-9 px-3", watched && "border-gold/50 text-gold")} aria-pressed={watched}>
                 <Star className={cx("h-4 w-4", watched && "fill-gold")} /> {watched ? "Watching" : "Watch"}

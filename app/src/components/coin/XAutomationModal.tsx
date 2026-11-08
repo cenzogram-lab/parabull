@@ -28,7 +28,7 @@ import { disconnectSentinel, fetchSentinelStatus, saveSentinelSettings, sentinel
  * still demo data; a coin with no curve on-chain has no creator. Demo mode compares with the demo coin's creator. The
  * sentinel checks the on-chain creator again for every signed change; this only decides whether the button shows.
  */
-function useIsCreator(coin: Coin) {
+export function useIsCreator(coin: Coin) {
   const { publicKey } = useWallet();
   const { fetchCurve } = useParabullProgram();
   const wallet = publicKey?.toBase58() ?? null;

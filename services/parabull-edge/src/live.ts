@@ -14,7 +14,11 @@
 import { isAddress } from "../../../app/src/lib/chatMessage";
 
 export const LIVE_TTL_MS = 15_000;
-/** Inputs examined per refresh (the list isn't paginated beyond this; more inputs need a smarter index). */
+/**
+ * Coin inputs examined per refresh: one lifecycle check each, every LIVE_TTL_MS. POST /live/input won't create an
+ * input past this many (src/broadcast.ts), so every input the app made is checked. More coins need a live-status
+ * index (e.g. Stream's live webhooks) instead of polling.
+ */
 export const MAX_INPUTS = 100;
 
 export interface LiveEnv {
@@ -56,6 +60,17 @@ export const resetLiveCache = () => void ((cache = null), (inflight = null));
 
 const str = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
 
+/** The account's inputs that belong to a coin (enabled, with `meta.mint` a Solana address), in list order. */
+export function coinInputs(inputs: { uid?: unknown; meta?: unknown; enabled?: unknown }[]) {
+  return inputs
+    .filter((i) => typeof i.uid === "string" && INPUT_ID.test(i.uid) && i.enabled !== false)
+    .map((i) => {
+      const meta = (typeof i.meta === "object" && i.meta !== null ? i.meta : {}) as Record<string, unknown>;
+      return { input: i.uid as string, mint: meta.mint, title: str(meta.title ?? meta.name, 120), creator: isAddress(meta.creator) ? (meta.creator as string) : null };
+    })
+    .filter((c): c is typeof c & { mint: string } => isAddress(c.mint));
+}
+
 export async function liveStreams(env: LiveEnv, now: number, fetchImpl: Fetch = fetch): Promise<LiveResult> {
   const host = streamHost(env.STREAM_HOST);
   if (!env.CF_ACCOUNT_ID || !/^[0-9a-f]{32}$/.test(env.CF_ACCOUNT_ID) || !env.CF_STREAM_TOKEN || !host) return { ok: false, status: 503, error: "live streams are not configured" };
@@ -83,14 +98,7 @@ async function refresh(account: string, token: string, host: string, key: string
     return { ok: false, status: 502, error: "Stream API unreachable" };
   }
 
-  const candidates = inputs
-    .filter((i) => typeof i.uid === "string" && INPUT_ID.test(i.uid) && i.enabled !== false)
-    .map((i) => {
-      const meta = (typeof i.meta === "object" && i.meta !== null ? i.meta : {}) as Record<string, unknown>;
-      return { input: i.uid as string, mint: meta.mint, title: str(meta.title ?? meta.name, 120), creator: isAddress(meta.creator) ? (meta.creator as string) : null };
-    })
-    .filter((c): c is typeof c & { mint: string } => isAddress(c.mint))
-    .slice(0, MAX_INPUTS);
+  const candidates = coinInputs(inputs).slice(0, MAX_INPUTS);
 
   // One lifecycle check per input, in parallel; an input whose check fails counts as not live.
   const checks = await Promise.all(

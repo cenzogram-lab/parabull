@@ -147,7 +147,7 @@ jobs:
       # Also checks the app modules it shares contracts with (app/src/lib/metadata.ts, app/src/lib/chatMessage.ts).
       - name: Typecheck
         run: npm run typecheck
-      - name: "Tests (metadata upload; chat rooms: broadcast, hibernation, sign-in, limits, attachments; /live)"
+      - name: "Tests (metadata upload; chat rooms: broadcast, hibernation, sign-in, limits, attachments; /live; /live/input and the on-chain creator check)"
         run: npm test
 
   canister:

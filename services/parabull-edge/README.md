@@ -8,7 +8,9 @@ It implements:
 - the coin-metadata upload behind the app's `VITE_METADATA_UPLOAD_URL`;
 - the real-time coin chat behind `VITE_CHAT_URL`: one `ChatRoom` Durable Object per coin mint, with wallet sign-in
   and image or GIF uploads;
-- the list of coins live on Cloudflare Stream (`GET /live`), which the app's Stream player reads.
+- the list of coins live on Cloudflare Stream (`GET /live`), which the app's Stream player reads;
+- going live for a coin's creator (`POST /live/input`): their Stream live input, after checking on-chain that they
+  launched the coin.
 
 ## Routes
 
@@ -19,6 +21,7 @@ It implements:
 | `POST /chat/upload` | A chat image or GIF (`Authorization: Bearer <token>`), stored as `img/<sha256>.<ext>`; returns `{ url }`. |
 | `GET /chat/:mint` | WebSocket into that coin's `ChatRoom` (`src/chatRoom.ts`, `src/chatRoomDO.ts`). |
 | `GET /live` | Coins streaming now: `{ streams: [{ mint, input, title, creator, hls }] }` (`src/live.ts`). |
+| `POST /live/input` | `{ mint, title? }` with `Authorization: Bearer <session token>`. Returns the coin creator's live input: `{ input, rtmps {url, streamKey}, srt {url, streamId, passphrase}, hls }` (`src/broadcast.ts`). |
 | `OPTIONS /metadata`, `/chat/session`, `/chat/upload` | CORS preflight for the allowed origins. |
 | `GET /health` | `ok` |
 
@@ -98,8 +101,35 @@ Anything else gets `{type:"error", code}`: `sign_in_required`, `session_expired`
 curl -X POST "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/stream/live_inputs" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"meta":{"mint":"<coin mint>","title":"Dev AMA","creator":"<wallet>"},"recording":{"mode":"automatic"}}'
 ```
 
-The response holds the RTMPS URL and stream key, the SRT URL, and the WebRTC (WHIP) URL. Point OBS or any encoder at
-one of them. Creators going live from the app (a wallet-checked version of this call) is the next step.
+The response holds the RTMPS URL and stream key, and the SRT URL. Point OBS or any encoder at one of them. Creators
+normally don't need this: `POST /live/input` does it for them, from the app.
+
+**Not WebRTC:** the response also has a WHIP URL, but `POST /live/input` leaves it out. Stream can't play a WHIP
+broadcast over HLS or record it ([WebRTC limitations](https://developers.cloudflare.com/stream/webrtc/)), and HLS is
+what viewers here use. Going live from the browser would need WHEP playback, and it would have to be tested against a
+real Stream account.
+
+**Going live from the app (`POST /live/input`):**
+1. **The wallet:** the request carries the same session token as chat (`Authorization: Bearer`, from the wallet's
+   one-time sign-in).
+2. **The creator check:** the Worker reads the coin's bonding curve over `SOLANA_RPC_URL` (`src/solana.ts`):
+   - it derives the program address `["bonding-curve", mint]` the way `@solana/web3.js` does (tests compare
+     against web3.js vectors);
+   - it checks the account's owner, discriminator and `mint`;
+   - it requires `creator` to be that wallet.
+   Anyone else gets 403. A coin that isn't on chain (demo coins) gets 404, and nothing is asked of Stream.
+3. **One live input per coin:** the Worker finds the input by `meta.mint` and reuses it. The first time, it creates
+   one with `meta {mint, creator, title}` and automatic recording. A new title updates `meta.title`.
+   - **Capacity:** `GET /live` checks at most 100 coin inputs (`MAX_INPUTS` in `src/live.ts`, one lifecycle call each
+     per refresh). So no new input is created past 100; that request gets 503, and coins that already have an input
+     keep it. Delete inputs you no longer need to free room. Going past 100 needs a live-status index (for example,
+     from Stream's webhooks) instead of polling.
+   - **Races:** two first-time requests at once (a double click, two devices) would both find no input and both create
+     one, and two coins at once could both pass the capacity check. So the Worker forwards every request to one
+     `ChatRoom` Durable Object, named `live-inputs` (never a mint, so never a chat room), which runs them one at a
+     time (`ChatRoomCore.liveInput`). A waiting request sees what the ones before it created.
+4. **The answer** carries the stream key, so it is `Cache-Control: no-store`. `CHAT_LIMITER` limits these requests per
+   IP, and only allowed origins can call it.
 
 **How `GET /live` works:**
 1. It lists the account's live inputs. The list carries no live status.
@@ -113,7 +143,8 @@ one of them. Creators going live from the app (a wallet-checked version of this 
 So the Stream API sees one list call and one lifecycle check per input every 15 seconds, however many people watch.
 
 **Fails closed:**
-- Without `CF_ACCOUNT_ID`, `CF_STREAM_TOKEN` (Stream Read) and `STREAM_HOST`, `/live` answers 503.
+- Without `CF_ACCOUNT_ID`, `CF_STREAM_TOKEN` and `STREAM_HOST`, `/live` answers 503; `/live/input` also needs
+  `SOLANA_RPC_URL` and the `CHAT_ROOMS` binding.
 - A Stream API failure answers 502, not "nobody is live".
 - An input whose lifecycle check fails counts as not live.
 - Only allowed origins can call it.
@@ -161,14 +192,17 @@ So the Stream API sees one list call and one lifecycle check per input every 15 
 **Stream setup:**
 1. Set `CF_ACCOUNT_ID` and `STREAM_HOST` (`customer-<code>.cloudflarestream.com`, shown on the Stream dashboard) in
    `wrangler.toml`.
-2. Set the Stream Read token, a secret rather than a variable:
+2. Set the Stream token, a secret rather than a variable. Give it Stream Write, so creators can go live; that also
+   covers reading:
 
    ```bash
    npx wrangler@4 secret put CF_STREAM_TOKEN
    ```
 
-3. Build the app with `VITE_STREAM_HOST=customer-<code>.cloudflarestream.com` as well. The CSP's `connect-src` and
-   `media-src` pick up that host for the player.
+3. Set `SOLANA_RPC_URL` (and `PARABULL_PROGRAM_ID` if the program isn't at the IDL's address) so the Worker can check
+   coin creators.
+4. Build the app with `VITE_STREAM_HOST=customer-<code>.cloudflarestream.com` as well:
+   - The CSP's `connect-src` and `media-src` pick up that host for the player.
 
 ## Develop
 

@@ -139,6 +139,17 @@ Set these in `app/.env.local` (see `src/config.ts`):
   - each live coin's page: the stream above the chart;
   - on a phone: the Live chip counts real streams, and the board's Live now row lists them.
 
+**Going live** (`src/components/live/GoLive.tsx`): a coin's creator sees **Go live** beside X automation.
+- **Who sees it:** in chain mode, the creator is read from the coin's bonding curve on-chain, and the Worker checks
+  it again.
+- **Getting a stream:** the dialog signs in with the wallet (the same one-time signature as chat) and gets the coin's
+  Cloudflare Stream input from the edge Worker (`POST /live/input`).
+- **Broadcasting:** from OBS or any encoder, with the RTMPS server and stream key (hidden until shown, with copy
+  buttons), or SRT. There's no in-browser camera option: Cloudflare Stream can't play WebRTC (WHIP) broadcasts over
+  HLS, which is what viewers here use.
+- **Title:** set and changed in the same dialog.
+- **Viewers** see the stream on the coin page and `/live` once Stream reports the input live.
+
 **Coin chat** (`src/components/coin/CoinChat.tsx`, `src/hooks/useChatRoom.ts`) is on the coin page's Chat tab and on
 `/live`:
 - **Reading** needs no wallet. The socket replays the last 200 messages, shows how many are in the chat, and
