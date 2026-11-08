@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 import { base58Decode, CHAT_SESSION_MS } from "../../../app/src/lib/chatMessage";
-import { broadcastInput, type BroadcastEnv } from "./broadcast";
+import { broadcastInput, CREATE_KEY_WINDOW_MS, type BroadcastEnv } from "./broadcast";
 import { resetLiveCache } from "./live";
 import { handle, type Env } from "./router";
 import { issueToken } from "./session";
@@ -36,8 +36,10 @@ function curveAccount(mint: string, creator: string, disc = BONDING_CURVE_DISCRI
 
 /** RPC + Stream API stand-in. */
 function upstream(opts: { creator?: string; owner?: string; disc?: number[]; accountMint?: string; missing?: boolean; rpcDown?: boolean; inputs?: Record<string, unknown>[]; streamDown?: boolean; whipHost?: string } = {}) {
-  const calls: { method: string; url: string; body: unknown; auth: string | null }[] = [];
+  const calls: { method: string; url: string; body: unknown; auth: string | null; idem: string | null }[] = [];
   const inputs = opts.inputs ?? [];
+  // Cloudflare's Idempotency-Key: a repeated key gets the input the first create made; a new key, a new input.
+  const created = new Map<string, string>();
   const creds = (uid: string, meta: unknown) => ({
     uid,
     meta,
@@ -48,7 +50,8 @@ function upstream(opts: { creator?: string; owner?: string; disc?: number[]; acc
   const f = async (url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     const body = init?.body ? JSON.parse(String(init.body)) : null;
-    calls.push({ method, url, body, auth: new Headers(init?.headers).get("authorization") });
+    const headers = new Headers(init?.headers);
+    calls.push({ method, url, body, auth: headers.get("authorization"), idem: headers.get("idempotency-key") });
     if (url === RPC) {
       if (opts.rpcDown) return new Response("down", { status: 503 });
       if (opts.missing) return Response.json({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: null } });
@@ -57,7 +60,12 @@ function upstream(opts: { creator?: string; owner?: string; disc?: number[]; acc
     const api = `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/stream/live_inputs`;
     if (opts.streamDown) return Response.json({ success: false }, { status: 500 });
     if (url === api && method === "GET") return Response.json({ success: true, result: { liveInputs: inputs.map((i) => ({ uid: i.uid, meta: i.meta, enabled: true })) } });
-    if (url === api && method === "POST") return Response.json({ success: true, result: creds("c".repeat(32), body.meta) });
+    if (url === api && method === "POST") {
+      const key = headers.get("idempotency-key");
+      const uid = (key && created.get(key)) ?? "cdef"[created.size % 4].repeat(32);
+      if (key) created.set(key, uid);
+      return Response.json({ success: true, result: creds(uid, body.meta) });
+    }
     const one = url.startsWith(`${api}/`) ? url.slice(api.length + 1) : null;
     if (one && method === "GET") return Response.json({ success: true, result: creds(one, inputs.find((i) => i.uid === one)?.meta) });
     if (one && method === "PUT") return Response.json({ success: true, result: creds(one, body.meta) });
@@ -110,6 +118,30 @@ test("broadcast: the on-chain creator gets a new live input on first use", async
   const create = u.calls.find((c) => c.method === "POST" && c.url.startsWith("https://api.cloudflare.com"))!;
   assert.deepEqual(create.body, { meta: { mint: MINT, creator: CREATOR, title: "Dev AMA" }, recording: { mode: "automatic" }, enabled: true });
   assert.ok(u.calls.filter((c) => c.url.startsWith("https://api.cloudflare.com")).every((c) => c.auth === "Bearer write-token"));
+});
+
+test("broadcast: racing first-time requests for a coin make one input (Idempotency-Key per mint and window)", async () => {
+  const u = upstream();
+  const t = 5 * CREATE_KEY_WINDOW_MS + 1_000;
+  // Both see no input yet (the stand-in's list stays empty), so both create.
+  const [a, b] = await Promise.all([
+    broadcastInput(env, CREATOR, { mint: MINT }, u.fetchImpl, t),
+    broadcastInput(env, CREATOR, { mint: MINT, title: "AMA" }, u.fetchImpl, t + 30_000),
+  ]);
+  assert.ok(a.ok && b.ok);
+  assert.equal(a.value.input, b.value.input, "one input for the coin");
+  assert.equal(a.value.rtmps?.streamKey, b.value.rtmps?.streamKey);
+  const creates = u.calls.filter((c) => c.method === "POST" && c.url.startsWith("https://api.cloudflare.com"));
+  assert.equal(creates.length, 2);
+  assert.ok(creates.every((c) => c.idem === `parabull-live-input:${MINT}:5`), JSON.stringify(creates.map((c) => c.idem)));
+  // Another coin, or the same coin in a later window, is a different key.
+  const OTHER = "CWh5S2rBmLoHGSvGfSHQDkUhZzCxAGVDYbspyu2MN7R2";
+  const o = upstream({ accountMint: OTHER });
+  assert.ok((await broadcastInput(env, CREATOR, { mint: OTHER }, o.fetchImpl, t)).ok);
+  assert.equal(o.calls.find((c) => c.method === "POST" && c.url.startsWith("https://api.cloudflare.com"))?.idem, `parabull-live-input:${OTHER}:5`);
+  const later = upstream();
+  await broadcastInput(env, CREATOR, { mint: MINT }, later.fetchImpl, t + CREATE_KEY_WINDOW_MS);
+  assert.equal(later.calls.find((c) => c.method === "POST" && c.url.startsWith("https://api.cloudflare.com"))?.idem, `parabull-live-input:${MINT}:6`);
 });
 
 test("broadcast: the coin's existing input is reused; a new title updates it", async () => {

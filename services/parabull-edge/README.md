@@ -114,7 +114,9 @@ one of them. Creators normally don't need this: `POST /live/input` does it for t
    - it requires `creator` to be that wallet.
    Anyone else gets 403. A coin that isn't on chain (demo coins) gets 404, and nothing is asked of Stream.
 3. **One live input per coin:** the Worker finds the input by `meta.mint` and reuses it. The first time, it creates
-   one with `meta {mint, creator, title}` and automatic recording. A new title updates `meta.title`.
+   one with `meta {mint, creator, title}` and automatic recording. A new title updates `meta.title`. The create sends
+   an `Idempotency-Key` built from the mint and a 10-minute window, so two first-time requests at once (a double
+   click, two devices) still get one input.
 4. **The answer** carries the stream key, so it is `Cache-Control: no-store`. `CHAT_LIMITER` limits these requests per
    IP, and only allowed origins can call it.
 

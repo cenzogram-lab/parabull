@@ -145,7 +145,7 @@ export async function handle(request: Request, env: Env, now = Date.now(), fetch
     if (await limited(env.CHAT_LIMITER, request, "live-input")) return json(429, { error: "too many requests, try again in a minute" }, { ...allow, "retry-after": "60" });
     const body = await readJson(request, 1_024);
     if (body === null) return json(400, { error: "expected a small JSON body" }, allow);
-    const result = await broadcastInput(env, session.wallet, body, fetchImpl);
+    const result = await broadcastInput(env, session.wallet, body, fetchImpl, now);
     // Carries the stream key: never cached anywhere.
     return result.ok ? json(200, result.value, allow) : json(result.status, { error: result.error }, allow);
   }
