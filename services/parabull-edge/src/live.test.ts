@@ -115,3 +115,27 @@ test("live: GET /live through the router, allowed origins only, cacheable", asyn
   assert.equal(off.status, 503);
   assert.deepEqual(((await off.json()) as { streams: unknown[] }).streams, []);
 });
+
+test("live: concurrent requests on a cold cache share one refresh (no stampede)", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const s = stream(
+    Array.from({ length: 5 }, (_, i) => ({ uid: String.fromCharCode(97 + i).repeat(32), enabled: true, meta: { mint: MINT_A } })),
+    new Set(["a".repeat(32)]),
+  );
+  const slow = (async (url: string, init?: RequestInit) => (await gate, s.fetchImpl(url, init))) as unknown as typeof fetch;
+  const all = Array.from({ length: 20 }, () => liveStreams(env, 0, slow));
+  release();
+  const results = await Promise.all(all);
+  assert.ok(results.every((r) => r === results[0]), "every caller gets the same answer");
+  assert.equal(s.calls.filter((c) => c.url.endsWith("/live_inputs")).length, 1, "one list call for 20 requests");
+  assert.equal(s.calls.filter((c) => c.url.endsWith("/lifecycle")).length, 5, "one lifecycle check per input, not per request");
+  // A failed refresh isn't cached: the next request tries again.
+  resetLiveCache();
+  const down = stream([], new Set(), { listStatus: 500 });
+  const [a, b] = await Promise.all([liveStreams(env, 0, down.fetchImpl), liveStreams(env, 0, down.fetchImpl)]);
+  assert.equal(a, b, "concurrent callers share the failure too");
+  assert.equal(down.calls.length, 1);
+  await liveStreams(env, 1, down.fetchImpl);
+  assert.equal(down.calls.length, 2, "and the next request retries");
+});

@@ -50,7 +50,9 @@ export function streamHost(raw: string | undefined): string | null {
 export const hlsUrl = (host: string, input: string) => `https://${host}/${input}/manifest/video.m3u8`;
 
 let cache: { at: number; key: string; result: LiveResult } | null = null;
-export const resetLiveCache = () => void (cache = null);
+/** The refresh under way, shared by every request that arrives while it runs (no stampede on a cold cache). */
+let inflight: { key: string; promise: Promise<LiveResult> } | null = null;
+export const resetLiveCache = () => void ((cache = null), (inflight = null));
 
 const str = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
 
@@ -59,6 +61,17 @@ export async function liveStreams(env: LiveEnv, now: number, fetchImpl: Fetch = 
   if (!env.CF_ACCOUNT_ID || !/^[0-9a-f]{32}$/.test(env.CF_ACCOUNT_ID) || !env.CF_STREAM_TOKEN || !host) return { ok: false, status: 503, error: "live streams are not configured" };
   const key = `${env.CF_ACCOUNT_ID}:${host}`;
   if (cache && cache.key === key && now - cache.at < LIVE_TTL_MS) return cache.result;
+  // One refresh at a time per key: requests arriving meanwhile wait for it instead of starting their own.
+  if (inflight && inflight.key === key) return inflight.promise;
+  const promise = refresh(env.CF_ACCOUNT_ID, env.CF_STREAM_TOKEN, host, key, now, fetchImpl).finally(() => {
+    if (inflight?.promise === promise) inflight = null;
+  });
+  inflight = { key, promise };
+  return promise;
+}
+
+async function refresh(account: string, token: string, host: string, key: string, now: number, fetchImpl: Fetch): Promise<LiveResult> {
+  const env = { CF_ACCOUNT_ID: account, CF_STREAM_TOKEN: token };
 
   let inputs: { uid?: unknown; meta?: unknown; enabled?: unknown }[];
   try {
