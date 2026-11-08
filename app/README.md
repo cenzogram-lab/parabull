@@ -144,10 +144,9 @@ Set these in `app/.env.local` (see `src/config.ts`):
   it again.
 - **Getting a stream:** the dialog signs in with the wallet (the same one-time signature as chat) and gets the coin's
   Cloudflare Stream input from the edge Worker (`POST /live/input`).
-- **Two ways to broadcast:**
-  - **This browser:** camera and microphone, published over WebRTC (WHIP, `src/lib/whip.ts`). Closing the dialog
-    keeps the broadcast going; End broadcast or leaving the coin page stops it.
-  - **OBS / encoder:** the RTMPS server and stream key (hidden until shown, with copy buttons), or SRT.
+- **Broadcasting:** from OBS or any encoder, with the RTMPS server and stream key (hidden until shown, with copy
+  buttons), or SRT. There's no in-browser camera option: Cloudflare Stream can't play WebRTC (WHIP) broadcasts over
+  HLS, which is what viewers here use.
 - **Title:** set and changed in the same dialog.
 - **Viewers** see the stream on the coin page and `/live` once Stream reports the input live.
 

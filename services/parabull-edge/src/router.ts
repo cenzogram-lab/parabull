@@ -7,7 +7,7 @@
  *   POST    /chat/upload   a chat image or GIF into R2 (Bearer session token), returns { url }
  *   GET     /chat/:mint    websocket into that coin's ChatRoom (src/chatRoom.ts)
  *   GET     /live          coins streaming now on Cloudflare Stream, with their HLS URLs (src/live.ts)
- *   POST    /live/input    the coin creator's Stream live input: RTMPS/SRT key and WHIP URL (src/broadcast.ts)
+ *   POST    /live/input    the coin creator's Stream live input: RTMPS / SRT stream keys (src/broadcast.ts)
  *   OPTIONS               CORS preflight for the POST routes
  *   GET     /health        "ok"
  *

@@ -21,7 +21,7 @@ It implements:
 | `POST /chat/upload` | A chat image or GIF (`Authorization: Bearer <token>`), stored as `img/<sha256>.<ext>`; returns `{ url }`. |
 | `GET /chat/:mint` | WebSocket into that coin's `ChatRoom` (`src/chatRoom.ts`, `src/chatRoomDO.ts`). |
 | `GET /live` | Coins streaming now: `{ streams: [{ mint, input, title, creator, hls }] }` (`src/live.ts`). |
-| `POST /live/input` | `{ mint, title? }` with `Authorization: Bearer <session token>`. Returns the coin creator's live input: `{ input, rtmps {url, streamKey}, srt {url, streamId, passphrase}, webRTC {url}, hls }` (`src/broadcast.ts`). |
+| `POST /live/input` | `{ mint, title? }` with `Authorization: Bearer <session token>`. Returns the coin creator's live input: `{ input, rtmps {url, streamKey}, srt {url, streamId, passphrase}, hls }` (`src/broadcast.ts`). |
 | `OPTIONS /metadata`, `/chat/session`, `/chat/upload` | CORS preflight for the allowed origins. |
 | `GET /health` | `ok` |
 
@@ -101,8 +101,13 @@ Anything else gets `{type:"error", code}`: `sign_in_required`, `session_expired`
 curl -X POST "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/stream/live_inputs" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"meta":{"mint":"<coin mint>","title":"Dev AMA","creator":"<wallet>"},"recording":{"mode":"automatic"}}'
 ```
 
-The response holds the RTMPS URL and stream key, the SRT URL, and the WebRTC (WHIP) URL. Point OBS or any encoder at
-one of them. Creators normally don't need this: `POST /live/input` does it for them, from the app.
+The response holds the RTMPS URL and stream key, and the SRT URL. Point OBS or any encoder at one of them. Creators
+normally don't need this: `POST /live/input` does it for them, from the app.
+
+**Not WebRTC:** the response also has a WHIP URL, but `POST /live/input` leaves it out. Stream can't play a WHIP
+broadcast over HLS or record it ([WebRTC limitations](https://developers.cloudflare.com/stream/webrtc/)), and HLS is
+what viewers here use. Going live from the browser would need WHEP playback, and it would have to be tested against a
+real Stream account.
 
 **Going live from the app (`POST /live/input`):**
 1. **The wallet:** the request carries the same session token as chat (`Authorization: Bearer`, from the wallet's
@@ -191,8 +196,7 @@ So the Stream API sees one list call and one lifecycle check per input every 15 
 3. Set `SOLANA_RPC_URL` (and `PARABULL_PROGRAM_ID` if the program isn't at the IDL's address) so the Worker can check
    coin creators.
 4. Build the app with `VITE_STREAM_HOST=customer-<code>.cloudflarestream.com` as well:
-   - The CSP's `connect-src` and `media-src` pick up that host for the player and for WHIP publishing.
-   - `Permissions-Policy` lets this origin ask for the camera and microphone (it stays `camera=()` without it).
+   - The CSP's `connect-src` and `media-src` pick up that host for the player.
 
 ## Develop
 

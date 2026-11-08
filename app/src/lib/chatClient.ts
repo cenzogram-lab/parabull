@@ -11,7 +11,7 @@ export interface ChatEndpoints {
   upload: string;
   /** GET: coins streaming now (Cloudflare Stream), from the same Worker. */
   live: string;
-  /** POST: the coin creator's Stream live input (stream key, WHIP URL). */
+  /** POST: the coin creator's Stream live input (RTMPS / SRT stream keys). */
   liveInput: string;
 }
 

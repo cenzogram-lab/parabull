@@ -35,7 +35,7 @@ function curveAccount(mint: string, creator: string, disc = BONDING_CURVE_DISCRI
 }
 
 /** RPC + Stream API stand-in. */
-function upstream(opts: { creator?: string; owner?: string; disc?: number[]; accountMint?: string; missing?: boolean; rpcDown?: boolean; inputs?: Record<string, unknown>[]; streamDown?: boolean; whipHost?: string } = {}) {
+function upstream(opts: { creator?: string; owner?: string; disc?: number[]; accountMint?: string; missing?: boolean; rpcDown?: boolean; inputs?: Record<string, unknown>[]; streamDown?: boolean } = {}) {
   const calls: { method: string; url: string; body: unknown; auth: string | null; idem: string | null }[] = [];
   const inputs = opts.inputs ?? [];
   // Cloudflare's Idempotency-Key: a repeated key gets the input the first create made; a new key, a new input.
@@ -45,7 +45,7 @@ function upstream(opts: { creator?: string; owner?: string; disc?: number[]; acc
     meta,
     rtmps: { url: "rtmps://live.cloudflare.com:443/live/", streamKey: `key-${uid}` },
     srt: { url: "srt://live.cloudflare.com:778", streamId: uid, passphrase: `pass-${uid}` },
-    webRTC: { url: `https://${opts.whipHost ?? HOST}/whipkey${uid}/webRTC/publish` },
+    webRTC: { url: `https://${HOST}/whipkey${uid}/webRTC/publish` },
   });
   const f = async (url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
@@ -112,7 +112,6 @@ test("broadcast: the on-chain creator gets a new live input on first use", async
     title: "Dev AMA",
     rtmps: { url: "rtmps://live.cloudflare.com:443/live/", streamKey: `key-${"c".repeat(32)}` },
     srt: { url: "srt://live.cloudflare.com:778", streamId: "c".repeat(32), passphrase: `pass-${"c".repeat(32)}` },
-    webRTC: { url: `https://${HOST}/whipkey${"c".repeat(32)}/webRTC/publish` },
     hls: `https://${HOST}/${"c".repeat(32)}/manifest/video.m3u8`,
   });
   const create = u.calls.find((c) => c.method === "POST" && c.url.startsWith("https://api.cloudflare.com"))!;
@@ -173,11 +172,6 @@ test("broadcast: refused for anyone but the creator, bad input, missing config, 
     assert.equal((await status({}, CREATOR, { mint: MINT }, { ...env, [missing]: undefined })).status, 503, missing);
   assert.equal((await status({ rpcDown: true })).status, 502);
   assert.equal((await status({ streamDown: true })).status, 502);
-  // A WHIP URL on any host but ours is dropped (the CSP wouldn't allow it anyway).
-  const u = upstream({ whipHost: "evil.example.com" });
-  const r = await broadcastInput(env, CREATOR, { mint: MINT }, u.fetchImpl);
-  assert.ok(r.ok);
-  assert.equal(r.value.webRTC, null);
 });
 
 test("broadcast: POST /live/input needs a wallet session; the answer is never cached", async () => {

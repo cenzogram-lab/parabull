@@ -111,11 +111,3 @@ test("IC hosting: media CDN, chat socket and stream host open connect-src and me
   for (const bad of ["http://customer-abc.cloudflarestream.com", "customer abc", "localhost", "https://u:p@customer-abc.cloudflarestream.com", "*.cloudflarestream.com"])
     assert.equal(streamOrigin(bad), null, bad);
 });
-
-test("IC hosting: camera and microphone only for a streaming build, and only for this origin", async () => {
-  const { permissionsPolicy, headersFile } = await import("../src/lib/icHeaders");
-  assert.equal(permissionsPolicy({}), "camera=(), microphone=(), geolocation=(), payment=()");
-  assert.equal(permissionsPolicy({ VITE_STREAM_HOST: "customer-abc123.cloudflarestream.com" }), "camera=(self), microphone=(self), geolocation=(), payment=()");
-  assert.equal(permissionsPolicy({ VITE_STREAM_HOST: "not a host" }), "camera=(), microphone=(), geolocation=(), payment=()");
-  assert.match(headersFile({}), /Permissions-Policy: camera=\(\), microphone=\(\)/);
-});

@@ -1,6 +1,6 @@
 /**
- * POST /live/input: a coin's creator gets their Cloudflare Stream live input, to go live from OBS (RTMPS / SRT) or
- * straight from the browser (WebRTC WHIP).
+ * POST /live/input: a coin's creator gets their Cloudflare Stream live input, to go live from OBS or any encoder
+ * (RTMPS / SRT). Not WebRTC (WHIP): Stream can't play a WHIP broadcast over HLS, which is what viewers here use.
  *
  * - Who: `Authorization: Bearer <chat session token>` (src/session.ts) proves the wallet; the coin's on-chain
  *   bonding curve (src/solana.ts) must name that wallet as `creator`. Nothing else qualifies, so demo coins (not on
@@ -31,8 +31,6 @@ export interface BroadcastInput {
   title: string | null;
   rtmps: { url: string; streamKey: string } | null;
   srt: { url: string; streamId: string; passphrase: string } | null;
-  /** WHIP endpoint for publishing from a browser. */
-  webRTC: { url: string } | null;
   /** What viewers play (the same input id). */
   hls: string;
 }
@@ -51,7 +49,6 @@ interface CfInput {
   meta?: unknown;
   rtmps?: { url?: unknown; streamKey?: unknown };
   srt?: { url?: unknown; streamId?: unknown; passphrase?: unknown };
-  webRTC?: { url?: unknown };
 }
 
 const s = (v: unknown) => (typeof v === "string" && v ? v : null);
@@ -62,10 +59,7 @@ function shape(i: CfInput, mint: string, host: string): BroadcastInput | null {
   const meta = (typeof i.meta === "object" && i.meta !== null ? i.meta : {}) as Record<string, unknown>;
   const rtmps = s(i.rtmps?.url) && s(i.rtmps?.streamKey) ? { url: i.rtmps!.url as string, streamKey: i.rtmps!.streamKey as string } : null;
   const srt = s(i.srt?.url) && s(i.srt?.streamId) && s(i.srt?.passphrase) ? { url: i.srt!.url as string, streamId: i.srt!.streamId as string, passphrase: i.srt!.passphrase as string } : null;
-  // The WHIP URL lives on this account's Stream host (the CSP allows it); anything else is dropped.
-  const whip = s(i.webRTC?.url);
-  const webRTC = whip && whip.startsWith(`https://${host}/`) ? { url: whip } : null;
-  return { input: uid, mint, title: s(meta.title), rtmps, srt, webRTC, hls: hlsUrl(host, uid) };
+  return { input: uid, mint, title: s(meta.title), rtmps, srt, hls: hlsUrl(host, uid) };
 }
 
 export async function broadcastInput(env: BroadcastEnv, wallet: string, body: unknown, fetchImpl: Fetch = fetch, now = Date.now()): Promise<BroadcastResult> {
