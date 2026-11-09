@@ -76,9 +76,14 @@ pub fn mock_cpmm(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> 
     let pda = |seeds: &[&[u8]]| Pubkey::find_program_address(seeds, program_id);
     let (auth_key, auth_bump) = pda(&[b"vault_and_lp_mint_auth_seed"]);
     assert_eq!(*authority.key, auth_key, "cpmm: authority PDA");
-    let pool = pda(&[b"pool", amm_config.key.as_ref(), mint0.key.as_ref(), mint1.key.as_ref()]).0;
-    assert_eq!(*pool_state.key, pool, "cpmm: pool_state must be the canonical PDA");
-    assert!(!pool_state.is_signer, "cpmm: PDA pool, not a keypair");
+    // raydium-cp-swap `create_pool`: the account must be unused (system-owned); it is the canonical PDA, or any
+    // address whose keypair signs. Every other pool account is seeded from the pool's own address.
+    let (canonical, pool_bump) = pda(&[b"pool", amm_config.key.as_ref(), mint0.key.as_ref(), mint1.key.as_ref()]);
+    assert_eq!(*pool_state.owner, SYSTEM, "cpmm: pool_state already exists (NotApproved)");
+    if *pool_state.key != canonical {
+        assert!(pool_state.is_signer, "cpmm: a non-canonical pool_state must sign");
+    }
+    let pool = *pool_state.key;
     assert_eq!(*lp_mint.key, pda(&[b"pool_lp_mint", pool.as_ref()]).0, "cpmm: lp mint PDA");
     assert_eq!(*v0.key, pda(&[b"pool_vault", pool.as_ref(), mint0.key.as_ref()]).0, "cpmm: vault 0");
     assert_eq!(*v1.key, pda(&[b"pool_vault", pool.as_ref(), mint1.key.as_ref()]).0, "cpmm: vault 1");
@@ -113,6 +118,16 @@ pub fn mock_cpmm(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> 
 
     // Pool creation fee from the creator.
     invoke(&system_instruction::transfer(creator.key, fee.key, MOCK_CREATE_POOL_FEE), &[creator.clone(), fee.clone(), system.clone()])?;
+
+    // The pool account, created and paid for by the creator (PDA: CPMM signs with its seeds; keypair: it signed).
+    let space = 64;
+    let ix = system_instruction::create_account(creator.key, pool_state.key, Rent::get()?.minimum_balance(space), space as u64, program_id);
+    let seeds: &[&[u8]] = &[b"pool", amm_config.key.as_ref(), mint0.key.as_ref(), mint1.key.as_ref(), &[pool_bump]];
+    if *pool_state.key == canonical {
+        invoke_signed(&ix, &[creator.clone(), pool_state.clone(), system.clone()], &[seeds])?;
+    } else {
+        invoke(&ix, &[creator.clone(), pool_state.clone(), system.clone()])?;
+    }
 
     let mut d = pool_state.data.borrow_mut();
     d[..8].copy_from_slice(POOL_MARKER);

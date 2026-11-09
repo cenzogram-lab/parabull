@@ -32,12 +32,12 @@ async fn assert_curve_backed(env: &mut Env, curve: &Pubkey) {
 
 #[tokio::test]
 async fn trading_rejected_before_open_slot() {
-    let mut env = Env::with_global(|g| g.trading_open_delay_slots = 1_000).await;
+    let mut env = Env::with_global(|g| g.trading_open_delay_slots = MAX_TRADING_OPEN_DELAY_SLOTS).await;
     let creator = env.funded_user().await;
     let trader = env.funded_user().await;
     let mint = env.launch_token(&creator, 1, "Pepe Coin", "PEPE").await;
     let c: BondingCurve = env.anchor(&curve_pda(&mint)).await;
-    assert_eq!(c.trading_open_slot, c.created_slot + 1_000);
+    assert_eq!(c.trading_open_slot, c.created_slot + MAX_TRADING_OPEN_DELAY_SLOTS);
     assert!(env.clock().await.slot < c.trading_open_slot);
 
     // Neither the creator nor anyone else can buy or sell before the open slot.

@@ -1979,7 +1979,16 @@
         },
         {
           "name": "pool_state",
+          "docs": [
+            "keypair that signs this transaction (checked in the handler)."
+          ],
           "writable": true
+        },
+        {
+          "name": "canonical_pool_state",
+          "docs": [
+            "Read only to tell whether someone already created it."
+          ]
         },
         {
           "name": "lp_mint",
@@ -2766,6 +2775,13 @@
               }
             ]
           }
+        },
+        {
+          "name": "ticker_registry",
+          "docs": [
+            "may not exist yet (never launched), so it's derived and read in the",
+            "handler: a ticket can't be bought for a ticker still in its lock."
+          ]
         },
         {
           "name": "system_program",
@@ -3964,6 +3980,36 @@
       "code": 6050,
       "name": "TweetRegistryMismatch",
       "msg": "Tweet registry account must be passed exactly when the ticket has a tweet"
+    },
+    {
+      "code": 6051,
+      "name": "TradingDelayOutOfRange",
+      "msg": "Trading open delay must be between 1 and 150 slots"
+    },
+    {
+      "code": 6052,
+      "name": "DexTargetTooHigh",
+      "msg": "DexScreener escrow target exceeds the maximum"
+    },
+    {
+      "code": 6053,
+      "name": "MigrationReserveOutOfRange",
+      "msg": "Migration reserve must leave the pool priced within the allowed discount of the curve's final price"
+    },
+    {
+      "code": 6054,
+      "name": "CanonicalPoolTaken",
+      "msg": "The canonical CPMM pool already exists: migrate into a fresh-address pool"
+    },
+    {
+      "code": 6055,
+      "name": "FreshPoolNotAllowed",
+      "msg": "A fresh-address pool is only allowed when the canonical CPMM pool already exists"
+    },
+    {
+      "code": 6056,
+      "name": "TickerRegistryMismatch",
+      "msg": "Ticker registry account does not match the ticker"
     }
   ],
   "types": [

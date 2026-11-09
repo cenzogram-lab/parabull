@@ -1985,7 +1985,16 @@ export type Parabull = {
         },
         {
           "name": "poolState",
+          "docs": [
+            "keypair that signs this transaction (checked in the handler)."
+          ],
           "writable": true
+        },
+        {
+          "name": "canonicalPoolState",
+          "docs": [
+            "Read only to tell whether someone already created it."
+          ]
         },
         {
           "name": "lpMint",
@@ -2772,6 +2781,13 @@ export type Parabull = {
               }
             ]
           }
+        },
+        {
+          "name": "tickerRegistry",
+          "docs": [
+            "may not exist yet (never launched), so it's derived and read in the",
+            "handler: a ticket can't be bought for a ticker still in its lock."
+          ]
         },
         {
           "name": "systemProgram",
@@ -3970,6 +3986,36 @@ export type Parabull = {
       "code": 6050,
       "name": "tweetRegistryMismatch",
       "msg": "Tweet registry account must be passed exactly when the ticket has a tweet"
+    },
+    {
+      "code": 6051,
+      "name": "tradingDelayOutOfRange",
+      "msg": "Trading open delay must be between 1 and 150 slots"
+    },
+    {
+      "code": 6052,
+      "name": "dexTargetTooHigh",
+      "msg": "DexScreener escrow target exceeds the maximum"
+    },
+    {
+      "code": 6053,
+      "name": "migrationReserveOutOfRange",
+      "msg": "Migration reserve must leave the pool priced within the allowed discount of the curve's final price"
+    },
+    {
+      "code": 6054,
+      "name": "canonicalPoolTaken",
+      "msg": "The canonical CPMM pool already exists: migrate into a fresh-address pool"
+    },
+    {
+      "code": 6055,
+      "name": "freshPoolNotAllowed",
+      "msg": "A fresh-address pool is only allowed when the canonical CPMM pool already exists"
+    },
+    {
+      "code": 6056,
+      "name": "tickerRegistryMismatch",
+      "msg": "Ticker registry account does not match the ticker"
     }
   ],
   "types": [

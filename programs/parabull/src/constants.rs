@@ -38,6 +38,16 @@ pub const MIN_LAUNCH_RENT_BUFFER_LAMPORTS: u64 = 15_000_000;
 /// The Raydium pool may open at most this far below the curve's final price
 /// (guards against a migration reserve that eats into pool liquidity).
 pub const MAX_MIGRATION_PRICE_DISCOUNT_BPS: u64 = 500;
+/// Trading opens this many slots after `create`: at least 1 (nobody, the
+/// creator included, trades in the creation block) and at most 150 (about a
+/// minute; a larger delay only stalls new coins, and keeps `create`'s slot
+/// arithmetic far from overflow).
+pub const MIN_TRADING_OPEN_DELAY_SLOTS: u64 = 1;
+pub const MAX_TRADING_OPEN_DELAY_SLOTS: u64 = 150;
+/// Ceiling on the per-coin DexScreener escrow target (25 SOL, well above a
+/// listing order at any plausible SOL price). Without it a huge target would
+/// keep every coin's fees in escrow forever.
+pub const MAX_DEX_TARGET_LAMPORTS: u64 = 25_000_000_000;
 /// Max leaves per holder-reward epoch: the claimed-bitmap must fit in a
 /// 10 KiB account created by CPI. Larger snapshots span several epochs.
 pub const MAX_REWARD_LEAVES: u32 = 80_000;

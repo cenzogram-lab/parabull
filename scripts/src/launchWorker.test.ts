@@ -77,7 +77,7 @@ test("recovers name/symbol/URI/tweet from the user's request_launch transaction"
   const ticket = pdas.ticket(payer, 42n);
   const ix = await program.methods
     .requestLaunch(new BN(42), NAME, SYMBOL, URI, new BN(TWEET.toString()))
-    .accountsStrict({ payer, global: pdas.global(), ticket, systemProgram: SystemProgram.programId })
+    .accountsStrict({ payer, global: pdas.global(), ticket, tickerRegistry: pdas.tickerRegistry(SYMBOL), systemProgram: SystemProgram.programId })
     .instruction();
   const message = new TransactionMessage({ payerKey: payer, recentBlockhash: PublicKey.default.toBase58(), instructions: [ix] }).compileToV0Message();
   const tx = { transaction: { message, signatures: [] }, meta: null } as unknown as VersionedTransactionResponse;

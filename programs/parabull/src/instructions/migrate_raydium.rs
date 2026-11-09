@@ -3,7 +3,16 @@
 //! The migration-authority PDA is the CPMM `creator`: it pays the pool fee and
 //! rent out of the reserve, provides both sides of liquidity and receives the
 //! LP tokens (locked in step 3). Every Raydium account is re-derived here, so
-//! the crank cannot point the migration at a different pool or config.
+//! the crank cannot point the migration at a different config or another
+//! pool's accounts.
+//!
+//! Front-run defence: the canonical pool PDA depends only on the config and
+//! the two mints, so anyone holding the token can create it before the crank
+//! does (and set its price and open time). When it's already taken, the pool
+//! is created at a fresh keypair address the crank signs for instead
+//! (`raydium::check_pool_address`). Nobody else can create that one, so
+//! graduation can't be blocked; lock and fee collection follow the pool
+//! address stored on the curve.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
@@ -16,7 +25,7 @@ use anchor_spl::token_interface::{burn, close_account, Burn, CloseAccount, Mint,
 use crate::constants::*;
 use crate::error::ParabullError;
 use crate::events::MigratedToRaydium;
-use crate::raydium::{cpmm_accounts, sort_pool_mints, split_surplus, CpmmInitialize, WSOL_MINT};
+use crate::raydium::{check_pool_address, cpmm_accounts, cpmm_pool_accounts, sort_pool_mints, split_surplus, CpmmInitialize, WSOL_MINT};
 use crate::state::{BondingCurve, Global, MigrationStage};
 
 #[derive(Accounts)]
@@ -65,9 +74,13 @@ pub struct MigrateRaydium<'info> {
     pub amm_config: UncheckedAccount<'info>,
     /// CHECK: derived and compared in the handler.
     pub cpmm_authority: UncheckedAccount<'info>,
-    /// CHECK: derived and compared in the handler (canonical PDA, never a keypair).
+    /// CHECK: the canonical pool PDA while it's free; otherwise a fresh
+    /// keypair that signs this transaction (checked in the handler).
     #[account(mut)]
     pub pool_state: UncheckedAccount<'info>,
+    /// CHECK: the canonical pool PDA, derived and compared in the handler.
+    /// Read only to tell whether someone already created it.
+    pub canonical_pool_state: UncheckedAccount<'info>,
     /// CHECK: derived and compared in the handler.
     #[account(mut)]
     pub lp_mint: UncheckedAccount<'info>,
@@ -103,7 +116,12 @@ pub fn handler(mut ctx: Context<MigrateRaydium>) -> Result<()> {
     let mint_key = a.mint.key();
     let order = sort_pool_mints(&mint_key, &WSOL_MINT)?;
     let creator = a.migration_authority.key();
-    let derived = cpmm_accounts(&a.cpmm_program.key(), &a.amm_config.key(), &order, &creator);
+    let canonical = cpmm_accounts(&a.cpmm_program.key(), &a.amm_config.key(), &order, &creator);
+    require_keys_eq!(a.canonical_pool_state.key(), canonical.pool_state, ParabullError::InvalidMigrationAccount);
+    // Created by anyone already: CPMM owns it (an unused address is system-owned, even if someone sent it lamports).
+    let canonical_taken = *a.canonical_pool_state.owner != system_program::ID;
+    let fresh = check_pool_address(&a.pool_state.key(), a.pool_state.is_signer, &canonical.pool_state, canonical_taken)?;
+    let derived = if fresh { cpmm_pool_accounts(&a.cpmm_program.key(), &a.pool_state.key(), &order, &creator) } else { canonical };
     for (passed, expected) in [
         (a.cpmm_authority.key(), derived.authority),
         (a.pool_state.key(), derived.pool_state),
@@ -166,6 +184,7 @@ pub fn handler(mut ctx: Context<MigrateRaydium>) -> Result<()> {
         amm_config: a.amm_config.key(),
         order,
         accounts: derived,
+        pool_signs: fresh,
         creator_token_0,
         creator_token_1,
         create_pool_fee: a.create_pool_fee.key(),

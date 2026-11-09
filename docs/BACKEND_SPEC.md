@@ -125,6 +125,9 @@ const runAt = Date.now() + delayMs;
   lands; until then, leaking it would let someone front-run the address.
 - Set the compute limit to 400,000 and a priority fee from recent
   `getRecentPrioritizationFees`.
+- `request_launch` itself refuses a ticket for a ticker another coin holds
+  (`TickerLocked`), so the worker only meets that at `create` when two
+  tickets for one ticker were bought before either coin existed.
 - Pass `tweetRegistry` only if the ticket has a tweet (otherwise `null`).
   Passing it when it shouldn't be there, or omitting it when it should, fails
   with `TweetRegistryMismatch`.

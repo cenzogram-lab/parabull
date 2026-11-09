@@ -16,7 +16,12 @@ reading only.
   that isn't used before it expires can be refunded to the payer.
 - **Launch flow rules.** `request_launch` records the launch fee in effect at
   request time and a hash of the exact name, symbol and URI. `symbol` must
-  already be the canonical ticker. `create` must run before the ticket
+  already be the canonical ticker. `request_launch` also takes the ticker's
+  `["registry", ticker]` PDA (it may not exist yet) and refuses the ticket
+  (`TickerLocked`) while another coin holds the ticker, so nobody pays for a
+  launch that can only be refunded. `create` still checks the ticker, name and
+  tweet locks, since two tickets can be bought before either coin exists.
+  `create` must run before the ticket
   expires and must match that hash. From the ticket's lamports, `create`
   repays the launch authority exactly the rent it fronted (mint, curve, curve
   ATA, and only the registries it newly created), capped at the 0.03 SOL
@@ -151,7 +156,14 @@ reading only.
   `lp_lock_program`, `lp_lock_authority`, `parabull_mint`, `parabull_pool`.
   The merged result is validated
   with the same rules as `initialize` and either applies in full or not at
-  all. `dex_target_updated_at` changes only when the target does.
+  all. `dex_target_updated_at` changes only when the target does. Bounds:
+  - `trading_open_delay_slots` is 1..=150 (no trading in the creation block;
+    at most about a minute);
+  - `dex_target_lamports` is at most 25 SOL;
+  - `migration_reserve_lamports` must leave the pool, for a curve sold out
+    under the current curve parameters, priced within 5% of the curve's
+    final price (the check `prepare_migration` makes), so no update can make
+    graduation fail.
 - **Post-graduation LP fees.** `collect_lp_fees(fee_lp_amount)` (crank only)
   has the `["fee-key-vault"]` PDA sign Burn & Earn `collect_cp_fees`. The
   `fee_lp_amount` is supplied by the caller, from Raydium's API, but is never
@@ -180,6 +192,14 @@ reading only.
      rent. The pool must open within 5% of the curve's final price.
   2. `migrate_raydium` calls CPMM `initialize` with the PDA signing as
      creator. Every Raydium address is re-derived and checked.
+     **Front-run defence:** the canonical pool PDA depends only on the
+     AmmConfig and the two mints, so anyone holding the token can create it
+     first, at any price and open time. `migrate_raydium` takes the canonical
+     pool account too (`canonical_pool_state`): while it's unused it must be
+     the pool; once anyone has created it, the pool is a fresh keypair that
+     signs the transaction (CPMM accepts that; nobody else can create it).
+     The curve records the pool address, and step 3 and LP-fee collection
+     follow it.
 
   **Donations never change pool amounts.** Pricing and pool seeding use only
   the curve's *tracked* amounts:

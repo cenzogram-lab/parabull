@@ -65,6 +65,14 @@ async fn invalid_update_is_rejected_and_nothing_changes() {
     let cases = [
         (GlobalUpdate { holder_bps: Some(5_001), dex_target_lamports: Some(9), ..Default::default() }, ParabullError::FeeSplitOutOfRange),
         (GlobalUpdate { migration_reserve_lamports: Some(0), ..Default::default() }, ParabullError::InvalidMigrationParams),
+        // The default curve raises ~85 SOL: a 10 SOL reserve would open the pool far below the curve's final price.
+        (GlobalUpdate { migration_reserve_lamports: Some(10 * SOL), ..Default::default() }, ParabullError::MigrationReserveOutOfRange),
+        (GlobalUpdate { migration_reserve_lamports: Some(u64::MAX), ..Default::default() }, ParabullError::MigrationReserveOutOfRange),
+        (GlobalUpdate { trading_open_delay_slots: Some(0), ..Default::default() }, ParabullError::TradingDelayOutOfRange),
+        (GlobalUpdate { trading_open_delay_slots: Some(151), ..Default::default() }, ParabullError::TradingDelayOutOfRange),
+        (GlobalUpdate { trading_open_delay_slots: Some(u64::MAX), ..Default::default() }, ParabullError::TradingDelayOutOfRange),
+        (GlobalUpdate { dex_target_lamports: Some(MAX_DEX_TARGET_LAMPORTS + 1), ..Default::default() }, ParabullError::DexTargetTooHigh),
+        (GlobalUpdate { dex_target_lamports: Some(u64::MAX), ..Default::default() }, ParabullError::DexTargetTooHigh),
         (GlobalUpdate { cpmm_program: Some(Pubkey::default()), ..Default::default() }, ParabullError::InvalidAuthority),
     ];
     for (update, expected) in cases {
@@ -75,7 +83,18 @@ async fn invalid_update_is_rejected_and_nothing_changes() {
     assert_eq!(after.to_params().holder_bps, before.holder_bps);
     assert_eq!(after.dex_target_lamports, before.dex_target_lamports);
     assert_eq!(after.migration_reserve_lamports, before.migration_reserve_lamports);
+    assert_eq!(after.trading_open_delay_slots, before.trading_open_delay_slots);
     assert_eq!(after.cpmm_program, before.cpmm_program);
+
+    // The bounds themselves are accepted.
+    for update in [
+        GlobalUpdate { trading_open_delay_slots: Some(1), ..Default::default() },
+        GlobalUpdate { trading_open_delay_slots: Some(150), ..Default::default() },
+        GlobalUpdate { dex_target_lamports: Some(MAX_DEX_TARGET_LAMPORTS), ..Default::default() },
+    ] {
+        let ix = env.update_params_ix(&admin.pubkey(), update);
+        env.send(&[ix], &[&admin]).await.unwrap();
+    }
 }
 
 #[tokio::test]

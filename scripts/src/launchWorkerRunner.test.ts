@@ -49,7 +49,7 @@ async function harness(
   const uri = o.uri ?? URI;
   const requestIx = await real.methods
     .requestLaunch(new BN(nonce.toString()), NAME, SYMBOL, uri, null)
-    .accountsStrict({ payer, global: pdas.global(), ticket, systemProgram: SystemProgram.programId })
+    .accountsStrict({ payer, global: pdas.global(), ticket, tickerRegistry: pdas.tickerRegistry(SYMBOL), systemProgram: SystemProgram.programId })
     .instruction();
   const message = new TransactionMessage({ payerKey: payer, recentBlockhash: PublicKey.default.toBase58(), instructions: [requestIx] }).compileToV0Message();
   const requestTx = { transaction: { message, signatures: [] }, meta: null };

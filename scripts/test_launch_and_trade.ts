@@ -74,7 +74,7 @@ async function main() {
   const tweetId = process.env.TWEET ? parseTweetId(process.env.TWEET) : null;
   const requestSig = await program.methods
     .requestLaunch(bn(nonce), name, symbol, uri, tweetId === null ? null : bn(tweetId))
-    .accountsStrict({ payer: user.publicKey, global: pdas.global(), ticket, systemProgram: SystemProgram.programId })
+    .accountsStrict({ payer: user.publicKey, global: pdas.global(), ticket, tickerRegistry: pdas.tickerRegistry(symbol), systemProgram: SystemProgram.programId })
     .signers([user])
     .rpc();
   console.log(`ticket ${ticket.toBase58()} for $${symbol}`);

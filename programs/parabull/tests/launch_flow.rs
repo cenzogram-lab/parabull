@@ -120,11 +120,16 @@ async fn registry_blocks_duplicates_and_lookalikes_for_three_days() {
     let alice = env.funded_user().await;
     let bob = env.funded_user().await;
     env.request(&alice, 1, "Pepe Coin", "PEPE", URI).await.unwrap();
+    // Bob buys a ticket for the same ticker before Alice's coin exists: allowed (nothing holds it yet)...
+    env.request(&bob, 1, "Totally Different", "PEPE", URI).await.unwrap();
     let first = env.create(&alice.pubkey(), 1, "Pepe Coin", "PEPE", URI).await.unwrap();
 
-    // Same ticker, different name.
-    env.request(&bob, 1, "Totally Different", "PEPE", URI).await.unwrap();
+    // ...but `create` still enforces the lock, so the race's loser can't launch.
     assert_custom(env.create(&bob.pubkey(), 1, "Totally Different", "PEPE", URI).await, ParabullError::TickerLocked);
+    // Once the ticker is held, a ticket can't even be bought for it.
+    let carol = env.funded_user().await;
+    assert_custom(env.request(&carol, 1, "Another Name", "PEPE", URI).await, ParabullError::TickerLocked);
+    assert!(env.account(&ticket_pda(&carol.pubkey(), 1)).await.is_none(), "nothing was paid");
 
     // Different ticker, lookalike name (case + whitespace).
     env.request(&bob, 2, "PEPE   coin", "PEPE2", URI).await.unwrap();
@@ -139,13 +144,13 @@ async fn registry_blocks_duplicates_and_lookalikes_for_three_days() {
     env.send(&ixs, &[&launch]).await.unwrap();
     assert_eq!(env.lamports(&bob.pubkey()).await, bob_before + t1 + t2);
 
-    // Just before the lock lapses: still blocked.
+    // Just before the lock lapses: still blocked, at purchase.
     env.advance(3 * DAY - 120).await;
-    env.request(&bob, 3, "Pepe Coin", "PEPE", URI).await.unwrap();
-    assert_custom(env.create(&bob.pubkey(), 3, "Pepe Coin", "PEPE", URI).await, ParabullError::TickerLocked);
+    assert_custom(env.request(&bob, 3, "Pepe Coin", "PEPE", URI).await, ParabullError::TickerLocked);
 
     // After 3 days: the same ticker and name can be launched again; registries now point at the new mint.
     env.advance(180).await;
+    env.request(&bob, 3, "Pepe Coin", "PEPE", URI).await.unwrap();
     let second = env.create(&bob.pubkey(), 3, "Pepe Coin", "PEPE", URI).await.unwrap();
     assert_ne!(first, second);
     let tr: TickerRegistry = env.anchor(&pda(&[SEED_TICKER_REGISTRY, b"PEPE"])).await;
@@ -370,4 +375,24 @@ async fn prefunded_registry_donation_never_comes_out_of_the_treasury() {
     // only their minimum rent: the donor's lamports, never the treasury's.
     assert_eq!(env.lamports(&launch_key).await - launch_before, registry_rent);
     assert_eq!(env.lamports(&ticker_key).await, donation);
+}
+
+#[tokio::test]
+async fn request_launch_checks_the_ticker_registry_it_is_given() {
+    let mut env = Env::new().await;
+    let alice = env.funded_user().await;
+    env.launch_token(&alice, 1, "Pepe Coin", "PEPE").await;
+    let bob = env.funded_user().await;
+
+    // Passing another ticker's (free) registry to dodge the lock is refused.
+    let mut ix = env.request_ix(&bob.pubkey(), 1, "Other", "PEPE", URI, None);
+    for m in ix.accounts.iter_mut().filter(|m| m.pubkey == ticker_registry_for("PEPE")) {
+        m.pubkey = ticker_registry_for("FREE");
+    }
+    assert_custom(env.send(&[ix], &[&bob]).await, ParabullError::TickerRegistryMismatch);
+
+    // A registry address that only holds lamports someone sent it has no claim.
+    let unused = ticker_registry_for("NEWONE");
+    env.ctx.set_account(&unused, &Account { lamports: SOL, data: vec![], owner: system_program::ID, executable: false, rent_epoch: 0 }.into());
+    env.request(&bob, 2, "New One", "NEWONE", URI).await.unwrap();
 }

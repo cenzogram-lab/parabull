@@ -179,6 +179,7 @@ impl Env {
                 payer: *payer,
                 global: global_pda(),
                 ticket: ticket_pda(payer, nonce),
+                ticker_registry: ticker_registry_for(symbol),
                 system_program: system_program::ID,
             }
             .to_account_metas(None),
@@ -435,24 +436,45 @@ pub fn fee_key_vault() -> Pubkey {
 }
 
 pub fn pool_keys(mint: &Pubkey) -> PoolKeys {
+    pool_keys_at(mint, None)
+}
+
+/// `pool`: a fresh-address pool (the canonical one was taken); None for the canonical PDA.
+pub fn pool_keys_at(mint: &Pubkey, pool: Option<&Pubkey>) -> PoolKeys {
     let order = parabull::raydium::sort_pool_mints(mint, &WSOL_MINT).unwrap();
     let auth = migration_authority(mint);
-    let cpmm = parabull::raydium::cpmm_accounts(&raydium_mock::CPMM_ID, &AMM_CONFIG, &order, &auth);
+    let cpmm = match pool {
+        Some(p) => parabull::raydium::cpmm_pool_accounts(&raydium_mock::CPMM_ID, p, &order, &auth),
+        None => parabull::raydium::cpmm_accounts(&raydium_mock::CPMM_ID, &AMM_CONFIG, &order, &auth),
+    };
     PoolKeys { order, cpmm, migration_authority: auth }
+}
+
+/// A ticker's registry PDA, from the ticker as `request_launch` canonicalises it (a random key if it's invalid:
+/// the program rejects the ticker before it looks at the registry).
+pub fn ticker_registry_for(symbol: &str) -> Pubkey {
+    match parabull::launch::validate_launch_metadata("x", symbol, "") {
+        Ok(m) => pda(&[SEED_TICKER_REGISTRY, m.ticker.as_seed()]),
+        Err(_) => Pubkey::new_unique(),
+    }
 }
 
 impl Env {
     /// Accounts the real CPMM program would create inside `initialize`; the
-    /// mock expects them to exist (vaults, LP mint, pool + observation state).
+    /// mock expects them to exist (vaults, LP mint, observation state). The
+    /// mock creates the pool account itself, as CPMM does.
     pub fn seed_cpmm_pool_accounts(&mut self, mint: &Pubkey) {
-        let k = pool_keys(mint);
+        self.seed_cpmm_pool_accounts_at(mint, None);
+    }
+
+    pub fn seed_cpmm_pool_accounts_at(&mut self, mint: &Pubkey, pool: Option<&Pubkey>) {
+        let k = pool_keys_at(mint, pool);
         let (p0, p1) = k.order.programs();
         let set = |ctx: &mut ProgramTestContext, key: &Pubkey, acc: Account| ctx.set_account(key, &acc.into());
         set(&mut self.ctx, &k.cpmm.token_0_vault, packed_token_account(k.order.token_0, k.cpmm.authority, p0));
         set(&mut self.ctx, &k.cpmm.token_1_vault, packed_token_account(k.order.token_1, k.cpmm.authority, p1));
         set(&mut self.ctx, &k.cpmm.lp_mint, packed_mint(Some(k.cpmm.authority), 9, SPL_TOKEN));
         let owned = |len: usize| Account { lamports: SOL, data: vec![0; len], owner: raydium_mock::CPMM_ID, executable: false, rent_epoch: 0 };
-        set(&mut self.ctx, &k.cpmm.pool_state, owned(64));
         set(&mut self.ctx, &k.cpmm.observation_state, owned(8));
         // Burn & Earn's LP vault (owned by the lock authority).
         let lock_vault = anchor_spl::associated_token::get_associated_token_address_with_program_id(&raydium_mock::LOCK_AUTH, &k.cpmm.lp_mint, &SPL_TOKEN);
@@ -482,7 +504,13 @@ impl Env {
     }
 
     pub fn migrate_raydium_ix(&self, crank: &Pubkey, mint: &Pubkey) -> Instruction {
-        let k = pool_keys(mint);
+        self.migrate_raydium_ix_at(crank, mint, None)
+    }
+
+    /// `pool`: a fresh-address pool keypair's address (it must sign the transaction).
+    pub fn migrate_raydium_ix_at(&self, crank: &Pubkey, mint: &Pubkey, pool: Option<&Pubkey>) -> Instruction {
+        let canonical = pool_keys(mint).cpmm.pool_state;
+        let k = pool_keys_at(mint, pool);
         let wsol_ata = anchor_spl::associated_token::get_associated_token_address_with_program_id(&k.migration_authority, &WSOL_MINT, &SPL_TOKEN);
         Instruction {
             program_id: parabull::ID,
@@ -499,6 +527,7 @@ impl Env {
                 amm_config: AMM_CONFIG,
                 cpmm_authority: k.cpmm.authority,
                 pool_state: k.cpmm.pool_state,
+                canonical_pool_state: canonical,
                 lp_mint: k.cpmm.lp_mint,
                 creator_lp_token: k.cpmm.creator_lp_token,
                 token_0_vault: k.cpmm.token_0_vault,
@@ -511,13 +540,26 @@ impl Env {
                 system_program: system_program::ID,
                 rent: solana_sdk::sysvar::rent::ID,
             }
-            .to_account_metas(None),
+            .to_account_metas(None)
+            .into_iter()
+            // A fresh-address pool signs (Anchor's metas mark pool_state as a plain account; the client flags it).
+            .map(|mut m| {
+                if pool.is_some_and(|p| *p == m.pubkey) && m.is_writable {
+                    m.is_signer = true;
+                }
+                m
+            })
+            .collect(),
             data: parabull::instruction::MigrateRaydium {}.data(),
         }
     }
 
     pub fn lock_lp_ix(&self, crank: &Pubkey, mint: &Pubkey, fee_nft_mint: &Pubkey) -> Instruction {
-        let k = pool_keys(mint);
+        self.lock_lp_ix_at(crank, mint, fee_nft_mint, None)
+    }
+
+    pub fn lock_lp_ix_at(&self, crank: &Pubkey, mint: &Pubkey, fee_nft_mint: &Pubkey, pool: Option<&Pubkey>) -> Instruction {
+        let k = pool_keys_at(mint, pool);
         let lock = parabull::raydium::lock_accounts(&raydium_mock::LOCK_ID, &raydium_mock::LOCK_AUTH, fee_nft_mint, &fee_key_vault(), &k.cpmm.lp_mint);
         Instruction {
             program_id: parabull::ID,
