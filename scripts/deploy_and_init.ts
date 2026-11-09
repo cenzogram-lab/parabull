@@ -23,7 +23,7 @@
  */
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, createMint } from "@solana/spl-token";
-import { DEXSCREENER_LISTING_USD, LAMPORTS_PER_SOL, ammConfigPda, cluster, raydium, roles } from "./src/config";
+import { DEXSCREENER_LISTING_USD, LAMPORTS_PER_SOL, MAX_DEX_TARGET_LAMPORTS, ammConfigPda, cluster, raydium, roles } from "./src/config";
 import { bn, connect } from "./src/program";
 import { MIGRATION_RENT_ALLOWANCE_LAMPORTS, graduationPreview, resolveCurve } from "./src/curveParams";
 
@@ -39,8 +39,10 @@ const DEFAULTS = {
   rewardClaimWindowSeconds: 30 * 24 * 60 * 60,
 };
 
+/** The listing price in lamports at `solUsd`, capped at the program's maximum (below ~$12/SOL the cap applies). */
 export function dexTargetLamports(solUsd: number): bigint {
-  return BigInt(Math.ceil((DEXSCREENER_LISTING_USD / solUsd) * LAMPORTS_PER_SOL));
+  const t = BigInt(Math.ceil((DEXSCREENER_LISTING_USD / solUsd) * LAMPORTS_PER_SOL));
+  return t > MAX_DEX_TARGET_LAMPORTS ? MAX_DEX_TARGET_LAMPORTS : t;
 }
 
 async function main() {

@@ -137,11 +137,42 @@ impl GlobalParams {
         require!(self.migration_reserve_lamports > 0, ParabullError::InvalidMigrationParams);
         require!(self.reward_claim_window_seconds >= MIN_REWARD_CLAIM_WINDOW_SECONDS, ParabullError::InvalidDuration);
         require!(
+            (MIN_TRADING_OPEN_DELAY_SLOTS..=MAX_TRADING_OPEN_DELAY_SLOTS).contains(&self.trading_open_delay_slots),
+            ParabullError::TradingDelayOutOfRange
+        );
+        require!(self.dex_target_lamports <= MAX_DEX_TARGET_LAMPORTS, ParabullError::DexTargetTooHigh);
+        require!(
             self.initial_virtual_sol_reserves > 0
                 && self.initial_real_token_reserves > 0
                 && self.initial_real_token_reserves < self.initial_virtual_token_reserves
                 && self.initial_real_token_reserves <= self.token_total_supply,
             ParabullError::InvalidCurveParams
+        );
+        self.validate_migration_reserve()
+    }
+
+    /// The migration reserve must fit the curve these parameters launch: a
+    /// curve sold out raises `buy_cost(initial reserves, initial real tokens)`,
+    /// and `prepare_migration` seeds the pool with that minus the reserve. The
+    /// reserve must leave SOL for the pool and keep its opening price within
+    /// `MAX_MIGRATION_PRICE_DISCOUNT_BPS` of the curve's final price (the check
+    /// `prepare_migration` makes), so no parameter update can strand a coin.
+    pub fn validate_migration_reserve(&self) -> Result<()> {
+        let start = crate::math::Reserves {
+            virtual_token: self.initial_virtual_token_reserves,
+            virtual_sol: self.initial_virtual_sol_reserves,
+            real_token: self.initial_real_token_reserves,
+            real_sol: 0,
+        };
+        let raise = crate::math::buy_cost(&start, self.initial_real_token_reserves)?;
+        let sol_to_pool = raise.checked_sub(self.migration_reserve_lamports).filter(|s| *s > 0).ok_or(ParabullError::MigrationReserveOutOfRange)?;
+        let tokens_to_pool = self.token_total_supply.checked_sub(self.initial_real_token_reserves).ok_or(ParabullError::Overflow)?;
+        let final_sol = self.initial_virtual_sol_reserves.checked_add(raise).ok_or(ParabullError::Overflow)?;
+        let final_token = self.initial_virtual_token_reserves.checked_sub(self.initial_real_token_reserves).ok_or(ParabullError::Overflow)?;
+        require!(
+            tokens_to_pool > 0
+                && crate::raydium::pool_price_within(sol_to_pool, tokens_to_pool, final_sol, final_token, MAX_MIGRATION_PRICE_DISCOUNT_BPS),
+            ParabullError::MigrationReserveOutOfRange
         );
         Ok(())
     }
@@ -838,6 +869,45 @@ mod tests {
             parabull_pool: g.parabull_pool,
             reward_claim_window_seconds: g.reward_claim_window_seconds,
         }
+    }
+
+    #[test]
+    fn trading_delay_dex_target_and_reserve_bounds() {
+        let g = global();
+        let code = |p: &GlobalParams| match p.validate() {
+            Err(anchor_lang::error::Error::AnchorError(e)) => Some(e.error_code_number),
+            Ok(()) => None,
+            Err(e) => panic!("{e:?}"),
+        };
+        let ok = params(&g);
+        assert_eq!(code(&ok), None);
+        for (slots, valid) in [(0, false), (1, true), (2, true), (150, true), (151, false), (u64::MAX, false)] {
+            let p = GlobalParams { trading_open_delay_slots: slots, ..ok.clone() };
+            assert_eq!(code(&p), if valid { None } else { Some(u32::from(ParabullError::TradingDelayOutOfRange)) }, "delay {slots}");
+        }
+        for (target, valid) in [(0, true), (MAX_DEX_TARGET_LAMPORTS, true), (MAX_DEX_TARGET_LAMPORTS + 1, false), (u64::MAX, false)] {
+            let p = GlobalParams { dex_target_lamports: target, ..ok.clone() };
+            assert_eq!(code(&p), if valid { None } else { Some(u32::from(ParabullError::DexTargetTooHigh)) }, "target {target}");
+        }
+        // The default curve raises ~85 SOL. A reserve is fine while the pool opens within 5% of the final price;
+        // one that eats the raise (or more) is refused, as prepare_migration would refuse to migrate.
+        let raise = crate::math::buy_cost(
+            &Reserves { virtual_token: ok.initial_virtual_token_reserves, virtual_sol: ok.initial_virtual_sol_reserves, real_token: ok.initial_real_token_reserves, real_sol: 0 },
+            ok.initial_real_token_reserves,
+        )
+        .unwrap();
+        assert!((84_000_000_000..86_000_000_000).contains(&raise), "{raise}");
+        for (reserve, valid) in [(1, true), (DEFAULT_MIGRATION_RESERVE_LAMPORTS, true), (raise / 10, false), (raise - 1, false), (raise, false), (u64::MAX, false)] {
+            let p = GlobalParams { migration_reserve_lamports: reserve, ..ok.clone() };
+            assert_eq!(code(&p), if valid { None } else { Some(u32::from(ParabullError::MigrationReserveOutOfRange)) }, "reserve {reserve}");
+        }
+        // The exact boundary matches prepare_migration's own pool-price check at completion.
+        let tokens = ok.token_total_supply - ok.initial_real_token_reserves;
+        let (vs, vt) = (ok.initial_virtual_sol_reserves + raise, ok.initial_virtual_token_reserves - ok.initial_real_token_reserves);
+        let max_ok = (1..raise).rev().step_by(1_000_000).find(|r| crate::raydium::pool_price_within(raise - r, tokens, vs, vt, MAX_MIGRATION_PRICE_DISCOUNT_BPS)).unwrap();
+        assert_eq!(code(&GlobalParams { migration_reserve_lamports: max_ok, ..ok.clone() }), None);
+        assert!(!crate::raydium::pool_price_within(raise - (max_ok + 1_000_000), tokens, vs, vt, MAX_MIGRATION_PRICE_DISCOUNT_BPS));
+        assert_eq!(code(&GlobalParams { migration_reserve_lamports: max_ok + 1_000_000, ..ok.clone() }), Some(u32::from(ParabullError::MigrationReserveOutOfRange)));
     }
 
     #[test]

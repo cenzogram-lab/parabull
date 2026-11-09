@@ -4,13 +4,31 @@
  * curve's `migration_stage`, so a failed run can simply be repeated. Used by
  * the crank and by the smoke test's GRADUATE=1 path.
  */
-import { Keypair, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
+import { AccountInfo, Keypair, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY, TransactionInstruction } from "@solana/web3.js";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, NATIVE_MINT, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { METADATA_PROGRAM_ID, RaydiumAddresses } from "./config";
 import { ata2022, ataSpl, cpmmAccounts, cpmmPoolAccounts, lockAccounts } from "./pdas";
 import { connect, send } from "./program";
 
 export const STAGE = { None: 0, Prepared: 1, PoolCreated: 2, LpLocked: 3 } as const;
+
+/**
+ * Where migrate_raydium creates the pool. The canonical CPMM pool PDA while it's unused (system-owned, even if
+ * someone sent it lamports); once anyone has created it (a front-run), a fresh keypair that signs the transaction,
+ * which CPMM accepts and nobody else can pre-empt. The program enforces the same rule
+ * (programs/parabull/src/raydium.rs `check_pool_address`).
+ */
+export function chooseMigrationPool(canonical: PublicKey, canonicalInfo: Pick<AccountInfo<Buffer>, "owner"> | null, generate: () => Keypair = Keypair.generate): { pool: PublicKey; fresh: Keypair | null } {
+  if (!canonicalInfo || canonicalInfo.owner.equals(SystemProgram.programId)) return { pool: canonical, fresh: null };
+  const fresh = generate();
+  return { pool: fresh.publicKey, fresh };
+}
+
+/** Marks `key` as a signer of `ix` (Anchor's IDL lists the pool as a plain account; a fresh-address pool signs). */
+export function markSigner(ix: TransactionInstruction, key: PublicKey): TransactionInstruction {
+  for (const k of ix.keys) if (k.pubkey.equals(key)) k.isSigner = true;
+  return ix;
+}
 
 export type GraduationCtx = Pick<ReturnType<typeof connect>, "connection" | "program" | "pdas"> & {
   crank: Keypair;
@@ -43,7 +61,10 @@ export async function graduate(x: GraduationCtx, mint: PublicKey, curve: PublicK
   }
 
   if (stage === STAGE.Prepared) {
-    const k = cpmmAccounts(g.cpmmProgram, g.cpmmAmmConfig, mint, auth);
+    const canonical = cpmmAccounts(g.cpmmProgram, g.cpmmAmmConfig, mint, auth);
+    const { pool, fresh } = chooseMigrationPool(canonical.poolState, await connection.getAccountInfo(canonical.poolState, "confirmed"));
+    if (fresh) log(`canonical pool ${canonical.poolState.toBase58()} already exists (front-run): migrating into fresh-address pool ${pool.toBase58()}`);
+    const k = fresh ? cpmmPoolAccounts(g.cpmmProgram, pool, mint, auth) : canonical;
     const ix = await program.methods
       .migrateRaydium()
       .accountsStrict({
@@ -59,6 +80,7 @@ export async function graduate(x: GraduationCtx, mint: PublicKey, curve: PublicK
         ammConfig: g.cpmmAmmConfig,
         cpmmAuthority: k.authority,
         poolState: k.poolState,
+        canonicalPoolState: canonical.poolState,
         lpMint: k.lpMint,
         creatorLpToken: k.creatorLpToken,
         token0Vault: k.token0Vault,
@@ -72,7 +94,8 @@ export async function graduate(x: GraduationCtx, mint: PublicKey, curve: PublicK
         rent: SYSVAR_RENT_PUBKEY,
       })
       .instruction();
-    log(`migrate_raydium ${mint.toBase58()} -> pool ${k.poolState.toBase58()}: ${await send(connection, [ix], [crank], 600_000)}`);
+    if (fresh) markSigner(ix, fresh.publicKey);
+    log(`migrate_raydium ${mint.toBase58()} -> pool ${k.poolState.toBase58()}: ${await send(connection, [ix], fresh ? [crank, fresh] : [crank], 600_000)}`);
     stage = STAGE.PoolCreated;
   }
 

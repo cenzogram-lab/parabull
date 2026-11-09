@@ -107,7 +107,7 @@ export function useParabullProgram() {
       const ticket = pdas.ticket(w.publicKey, nonce);
       const ix = await program.methods
         .requestLaunch(bn(nonce), name, symbol, uri, tweetId === null ? null : bn(tweetId))
-        .accountsStrict({ payer: w.publicKey, global: pdas.global(), ticket, systemProgram: SystemProgram.programId })
+        .accountsStrict({ payer: w.publicKey, global: pdas.global(), ticket, tickerRegistry: pdas.tickerRegistry(symbol), systemProgram: SystemProgram.programId })
         .instruction();
       // Confirmed by polling until the blockhash expires: a ticket that is still landing is never reported as failed.
       const signature = await sendIxs([ix], [pdas.global()]);

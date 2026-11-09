@@ -96,7 +96,7 @@ export function decodeRequestLaunch(coder: BorshCoder, data: Buffer): RequestArg
   };
 }
 
-/** Find the top-level `request_launch` for `ticket` (accounts: payer, global, ticket, system) in a transaction. */
+/** Find the top-level `request_launch` for `ticket` (accounts: payer, global, ticket, ticker_registry, system; the ticket is index 2 in old and new transactions) in a transaction. */
 export function findRequestArgs(
   tx: Pick<VersionedTransactionResponse, "transaction" | "meta">,
   programId: PublicKey,

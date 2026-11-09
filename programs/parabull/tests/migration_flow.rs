@@ -111,8 +111,9 @@ async fn full_graduation_creates_pool_and_locks_lp() {
     assert!(env.account(&ata(&k.migration_authority, &mint)).await.is_none());
     assert_eq!(env.lamports(&env.crank.pubkey()).await, crank_before);
     let lp_ata_rent = env.lamports(&k.cpmm.creator_lp_token).await;
+    let pool_rent = env.lamports(&k.cpmm.pool_state).await;
     let auth_after_pool = env.lamports(&k.migration_authority).await;
-    assert_eq!(auth_after_pool, DEFAULT_MIGRATION_RESERVE_LAMPORTS - MOCK_CREATE_POOL_FEE - lp_ata_rent);
+    assert_eq!(auth_after_pool, DEFAULT_MIGRATION_RESERVE_LAMPORTS - MOCK_CREATE_POOL_FEE - lp_ata_rent - pool_rent);
 
     // ---- Step 3: Burn & Earn ----
     let nft = Keypair::new();
@@ -175,13 +176,17 @@ async fn migrate_rejects_substituted_raydium_accounts() {
     crank_send(&mut env, &[ix], &[]).await.unwrap();
     let k = pool_keys(&mint);
 
-    // A non-canonical pool account.
+    // A non-canonical pool account while the canonical pool is free.
     let mut ix = env.migrate_raydium_ix(&crank, &mint);
-    for m in ix.accounts.iter_mut() {
-        if m.pubkey == k.cpmm.pool_state {
-            m.pubkey = Pubkey::new_unique();
-        }
-    }
+    let first = ix.accounts.iter().position(|m| m.pubkey == k.cpmm.pool_state).unwrap();
+    ix.accounts[first].pubkey = Pubkey::new_unique();
+    assert_custom(crank_send(&mut env, &[ix], &[]).await, ParabullError::FreshPoolNotAllowed);
+
+    // A wrong canonical pool account (to hide that the real one is free or taken).
+    let mut ix = env.migrate_raydium_ix(&crank, &mint);
+    let second = ix.accounts.iter().rposition(|m| m.pubkey == k.cpmm.pool_state).unwrap();
+    assert_ne!(first, second);
+    ix.accounts[second].pubkey = Pubkey::new_unique();
     assert_custom(crank_send(&mut env, &[ix], &[]).await, ParabullError::InvalidMigrationAccount);
 
     // A different AmmConfig than the one configured in Global.
@@ -201,6 +206,86 @@ async fn migrate_rejects_substituted_raydium_accounts() {
     // The honest call still works afterwards.
     let ix = env.migrate_raydium_ix(&crank, &mint);
     crank_send(&mut env, &[ix], &[]).await.unwrap();
+}
+
+/// Someone creates the canonical CPMM pool for the coin before the crank does (anyone holding the token can: the
+/// address depends only on the config and the two mints).
+fn squat_canonical_pool(env: &mut Env, mint: &Pubkey) -> Pubkey {
+    let k = pool_keys(mint);
+    let mut data = vec![0u8; 64];
+    data[..8].copy_from_slice(b"SQUATTED");
+    env.ctx.set_account(&k.cpmm.pool_state, &Account { lamports: SOL, data, owner: common::raydium_mock::CPMM_ID, executable: false, rent_epoch: 0 }.into());
+    k.cpmm.pool_state
+}
+
+#[tokio::test]
+async fn front_run_canonical_pool_migrates_into_a_fresh_address_pool_and_locks() {
+    let mut env = Env::new().await;
+    let (mint, curve) = graduate(&mut env).await;
+    let crank = env.crank.pubkey();
+    let ix = env.prepare_migration_ix(&crank, &mint);
+    crank_send(&mut env, &[ix], &[]).await.unwrap();
+    let squatted = squat_canonical_pool(&mut env, &mint);
+
+    // The canonical pool can't be used any more, and says so.
+    env.seed_cpmm_pool_accounts(&mint);
+    let ix = env.migrate_raydium_ix(&crank, &mint);
+    assert_custom(crank_send(&mut env, &[ix], &[]).await, ParabullError::CanonicalPoolTaken);
+
+    // A fresh address must sign: an address nobody signed for is refused.
+    let fresh = Keypair::new();
+    env.seed_cpmm_pool_accounts_at(&mint, Some(&fresh.pubkey()));
+    let mut ix = env.migrate_raydium_ix_at(&crank, &mint, Some(&fresh.pubkey()));
+    for m in ix.accounts.iter_mut().filter(|m| m.pubkey == fresh.pubkey()) {
+        m.is_signer = false;
+    }
+    assert_custom(crank_send(&mut env, &[ix], &[]).await, ParabullError::InvalidMigrationAccount);
+
+    // The crank's fresh keypair: the pool is created there with all of the migration liquidity.
+    let c: BondingCurve = env.anchor(&curve).await;
+    let (sol, tokens) = (c.migration_sol, c.migration_tokens);
+    let ix = env.migrate_raydium_ix_at(&crank, &mint, Some(&fresh.pubkey()));
+    crank_send(&mut env, &[ix], &[&fresh]).await.unwrap();
+    let k = pool_keys_at(&mint, Some(&fresh.pubkey()));
+    let c: BondingCurve = env.anchor(&curve).await;
+    assert_eq!(c.stage(), MigrationStage::PoolCreated);
+    assert!(c.migrated);
+    assert_eq!(c.raydium_pool, fresh.pubkey(), "the curve records the fresh pool");
+    let (a0, a1) = k.order.amounts(tokens, sol);
+    assert_eq!(env.token_amount_at(&k.cpmm.token_0_vault).await, Some(a0));
+    assert_eq!(env.token_amount_at(&k.cpmm.token_1_vault).await, Some(a1));
+    assert!(env.account(&fresh.pubkey()).await.unwrap().data.starts_with(POOL_MARKER));
+    assert!(env.account(&squatted).await.unwrap().data.starts_with(b"SQUATTED"), "the squatter's pool is untouched");
+    let lp = env.token_amount_at(&k.cpmm.creator_lp_token).await.unwrap();
+    assert!(lp > 0);
+
+    // Step 3 locks the fresh pool's LP, found through the curve.
+    let nft = Keypair::new();
+    let ix = env.lock_lp_ix_at(&crank, &mint, &nft.pubkey(), Some(&fresh.pubkey()));
+    crank_send(&mut env, &[ix], &[&nft]).await.unwrap();
+    let c: BondingCurve = env.anchor(&curve).await;
+    assert_eq!(c.stage(), MigrationStage::LpLocked);
+    let lock = parabull::raydium::lock_accounts(&common::raydium_mock::LOCK_ID, &LOCK_AUTH, &nft.pubkey(), &fee_key_vault(), &k.cpmm.lp_mint);
+    assert_eq!(env.token_amount_at(&lock.lock_lp_vault).await, Some(lp), "all LP locked");
+    assert_curve_backed(&mut env, &curve).await;
+}
+
+#[tokio::test]
+async fn lock_follows_the_recorded_pool_not_the_canonical_one() {
+    let mut env = Env::new().await;
+    let (mint, _) = graduate(&mut env).await;
+    let crank = env.crank.pubkey();
+    let ix = env.prepare_migration_ix(&crank, &mint);
+    crank_send(&mut env, &[ix], &[]).await.unwrap();
+    squat_canonical_pool(&mut env, &mint);
+    let fresh = Keypair::new();
+    env.seed_cpmm_pool_accounts_at(&mint, Some(&fresh.pubkey()));
+    env.seed_cpmm_pool_accounts(&mint);
+    let ix = env.migrate_raydium_ix_at(&crank, &mint, Some(&fresh.pubkey()));
+    crank_send(&mut env, &[ix], &[&fresh]).await.unwrap();
+    let nft = Keypair::new();
+    let ix = env.lock_lp_ix(&crank, &mint, &nft.pubkey());
+    assert!(crank_send(&mut env, &[ix], &[&nft]).await.is_err(), "the canonical pool's accounts don't match the curve's pool");
 }
 
 /// Launch, buy out the curve, seed the mock pool accounts. Returns (mint, curve, whale).

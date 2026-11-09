@@ -103,7 +103,7 @@ async function main() {
     const ticket = pdas.ticket(user.publicKey, nonce);
     const requestSig = await ux.program.methods
       .requestLaunch(bn(nonce), name, symbol, uri, null)
-      .accountsStrict({ payer: user.publicKey, global: pdas.global(), ticket, systemProgram: SystemProgram.programId })
+      .accountsStrict({ payer: user.publicKey, global: pdas.global(), ticket, tickerRegistry: pdas.tickerRegistry(symbol), systemProgram: SystemProgram.programId })
       .rpc();
     const requestTx = await txOf(requestSig);
     console.log(`ticket ${ticket.toBase58()} for $${symbol} (${requestSig})`);

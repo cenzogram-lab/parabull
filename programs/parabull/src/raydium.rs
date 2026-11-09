@@ -161,9 +161,29 @@ pub fn cpmm_accounts(program: &Pubkey, amm_config: &Pubkey, order: &PoolOrder, c
     }
 }
 
+/// Which pool address `migrate_raydium` may create, given the canonical pool
+/// PDA's state. CPMM `initialize` accepts the canonical PDA or any address
+/// whose keypair signs (raydium-cp-swap `create_pool`: `if pool != pda {
+/// require is_signer }`). Anyone can create the canonical pool first (it only
+/// takes the two mints), so when it's taken the migration uses a fresh
+/// keypair the crank generates and signs with, which nobody can pre-empt. A
+/// fresh address is refused while the canonical pool is free, so the pool is
+/// the canonical one whenever it can be.
+pub fn check_pool_address(pool_state: &Pubkey, pool_is_signer: bool, canonical_pool: &Pubkey, canonical_taken: bool) -> Result<bool> {
+    if pool_state == canonical_pool {
+        require!(!canonical_taken, ParabullError::CanonicalPoolTaken);
+        return Ok(false);
+    }
+    require!(canonical_taken, ParabullError::FreshPoolNotAllowed);
+    require!(pool_is_signer, ParabullError::InvalidMigrationAccount);
+    Ok(true)
+}
+
 /// Accounts of an *existing* pool, derived from its address (not from the
 /// AmmConfig), so post-graduation instructions keep working if
-/// `Global.cpmm_amm_config` is changed later.
+/// `Global.cpmm_amm_config` is changed later. Also the accounts of a
+/// fresh-address pool at creation: CPMM seeds every account from the pool's
+/// address, whichever kind it is.
 pub fn cpmm_pool_accounts(program: &Pubkey, pool_state: &Pubkey, order: &PoolOrder, creator: &Pubkey) -> CpmmAccounts {
     let pda = |seeds: &[&[u8]]| Pubkey::find_program_address(seeds, program).0;
     let lp_mint = pda(&[CPMM_LP_MINT_SEED, pool_state.as_ref()]);
@@ -209,6 +229,8 @@ pub struct CpmmInitialize {
     pub amm_config: Pubkey,
     pub order: PoolOrder,
     pub accounts: CpmmAccounts,
+    /// The pool is a fresh keypair (it signs), not the canonical PDA.
+    pub pool_signs: bool,
     pub creator_token_0: Pubkey,
     pub creator_token_1: Pubkey,
     pub create_pool_fee: Pubkey,
@@ -231,7 +253,7 @@ impl CpmmInitialize {
                 AccountMeta::new(self.creator, true),
                 AccountMeta::new_readonly(self.amm_config, false),
                 AccountMeta::new_readonly(a.authority, false),
-                AccountMeta::new(a.pool_state, false),
+                AccountMeta::new(a.pool_state, self.pool_signs),
                 AccountMeta::new_readonly(self.order.token_0, false),
                 AccountMeta::new_readonly(self.order.token_1, false),
                 AccountMeta::new(a.lp_mint, false),
@@ -549,6 +571,55 @@ mod tests {
     }
 
     #[test]
+    fn pool_address_canonical_while_free_fresh_keypair_once_taken() {
+        let canonical = Pubkey::new_unique();
+        let fresh = Pubkey::new_unique();
+        let code = |r: Result<bool>| match r {
+            Err(anchor_lang::error::Error::AnchorError(e)) => e.error_code_number,
+            other => panic!("expected an error, got {other:?}"),
+        };
+        // Free canonical pool: it must be used; a fresh address is refused.
+        assert_eq!(check_pool_address(&canonical, false, &canonical, false).unwrap(), false);
+        assert_eq!(code(check_pool_address(&fresh, true, &canonical, false)), u32::from(ParabullError::FreshPoolNotAllowed));
+        // Taken (front-run): the canonical address is refused with a clear error; a fresh keypair that signs is used.
+        assert_eq!(code(check_pool_address(&canonical, false, &canonical, true)), u32::from(ParabullError::CanonicalPoolTaken));
+        assert_eq!(check_pool_address(&fresh, true, &canonical, true).unwrap(), true);
+        // A fresh address that doesn't sign could be anyone's account: refused.
+        assert_eq!(code(check_pool_address(&fresh, false, &canonical, true)), u32::from(ParabullError::InvalidMigrationAccount));
+    }
+
+    #[test]
+    fn fresh_pool_accounts_derive_from_its_address_and_it_signs_the_cpi() {
+        let order = sort_pool_mints(&Pubkey::new_unique(), &WSOL_MINT).unwrap();
+        let creator = Pubkey::new_unique();
+        let fresh = Pubkey::new_unique();
+        let a = cpmm_pool_accounts(&CPMM_PROGRAM_MAINNET, &fresh, &order, &creator);
+        let pda = |seeds: &[&[u8]]| Pubkey::find_program_address(seeds, &CPMM_PROGRAM_MAINNET).0;
+        assert_eq!(a.pool_state, fresh);
+        assert_eq!(a.lp_mint, pda(&[CPMM_LP_MINT_SEED, fresh.as_ref()]));
+        assert_eq!(a.token_0_vault, pda(&[CPMM_VAULT_SEED, fresh.as_ref(), order.token_0.as_ref()]));
+        assert_eq!(a.observation_state, pda(&[CPMM_OBSERVATION_SEED, fresh.as_ref()]));
+        let ix = CpmmInitialize {
+            program: CPMM_PROGRAM_MAINNET,
+            creator,
+            amm_config: Pubkey::new_unique(),
+            order,
+            accounts: a,
+            pool_signs: true,
+            creator_token_0: Pubkey::new_unique(),
+            creator_token_1: Pubkey::new_unique(),
+            create_pool_fee: CPMM_CREATE_POOL_FEE_RECEIVER_MAINNET,
+            init_amount_0: 1,
+            init_amount_1: 2,
+            open_time: 0,
+        }
+        .instruction();
+        let signers: Vec<_> = ix.accounts.iter().filter(|m| m.is_signer).map(|m| m.pubkey).collect();
+        assert_eq!(signers, vec![creator, fresh], "a fresh-address pool signs CPMM initialize");
+        assert!(ix.accounts[3].is_writable);
+    }
+
+    #[test]
     fn initialize_ix_layout() {
         let order = sort_pool_mints(&Pubkey::new_unique(), &WSOL_MINT).unwrap();
         let creator = Pubkey::new_unique();
@@ -560,6 +631,7 @@ mod tests {
             amm_config: config,
             order,
             accounts,
+            pool_signs: false,
             creator_token_0: Pubkey::new_unique(),
             creator_token_1: Pubkey::new_unique(),
             create_pool_fee: CPMM_CREATE_POOL_FEE_RECEIVER_MAINNET,

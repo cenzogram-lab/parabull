@@ -104,4 +104,16 @@ pub enum ParabullError {
     TweetLocked,
     #[msg("Tweet registry account must be passed exactly when the ticket has a tweet")]
     TweetRegistryMismatch,
+    #[msg("Trading open delay must be between 1 and 150 slots")]
+    TradingDelayOutOfRange,
+    #[msg("DexScreener escrow target exceeds the maximum")]
+    DexTargetTooHigh,
+    #[msg("Migration reserve must leave the pool priced within the allowed discount of the curve's final price")]
+    MigrationReserveOutOfRange,
+    #[msg("The canonical CPMM pool already exists: migrate into a fresh-address pool")]
+    CanonicalPoolTaken,
+    #[msg("A fresh-address pool is only allowed when the canonical CPMM pool already exists")]
+    FreshPoolNotAllowed,
+    #[msg("Ticker registry account does not match the ticker")]
+    TickerRegistryMismatch,
 }
