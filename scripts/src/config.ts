@@ -118,3 +118,5 @@ export function roles() {
 
 export const LAMPORTS_PER_SOL = 1_000_000_000;
 export const DEXSCREENER_LISTING_USD = 299;
+/** The program's ceiling on `dex_target_lamports` (programs/parabull/src/constants.rs `MAX_DEX_TARGET_LAMPORTS`). */
+export const MAX_DEX_TARGET_LAMPORTS = 25_000_000_000n;
